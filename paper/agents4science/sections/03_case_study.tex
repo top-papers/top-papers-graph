@@ -1,0 +1,50 @@
+\section{Domain Case Study: Extreme Fast-Charge Profiles with Plating-Risk Proxies}
+\label{sec:case-study}
+
+\subsection{Problem framing (domain context)}
+Fast charging of Li-ion cells is constrained by (i) lithium plating risk on graphite anodes at high rates and high state-of-charge (SOC), and (ii) thermal and polarization limits. Our domain case study focuses on a practical, literature-grounded question:
+\emph{Can an agentic literature-synthesis system help a domain team propose a fast-charge current profile that is (a) faster than a naive baseline while (b) improving conservative proxies for plating risk available in a physics-based simulator?}
+
+\subsection{Novelty (what is new in this case study)}
+This case study is not a new electrochemistry model; it is a new \emph{workflow for scientific reasoning under constraints}. The novelty is the combination of:
+\begin{enumerate}
+  \item \textbf{Graph-grounded retrieval}: papers are ingested, facts are extracted as triplets, and a domain knowledge graph is built to prevent ``context loss'' across long articles.
+  \item \textbf{Debate-driven hypothesis refinement}: a Generator--Critic debate loop iteratively improves a candidate profile and forces explicit citations for each claim.
+  \item \textbf{Expert reasoning supervision}: experts contribute (i) reasoning trajectories, (ii) graph verification, and (iii) red-team reviews, which are converted into structured artifacts and used both as prompts and as evaluation targets.
+  \item \textbf{Executable, domain-specific evaluation}: instead of text similarity, we evaluate grounding and domain constraints (simulation proxies; checklist-based critique; citation coverage).
+\end{enumerate}
+
+\subsection{Case study setup (data, tasks, and baselines)}
+\paragraph{Literature seed and ``strong'' baselines.}
+To anchor the case study in reality, we begin with multi-stage constant-current (MS-CC) fast-charge protocols reported for NCM/graphite pouch cells. In particular, An \emph{et al.} report that the SOC range 0--80\% can be divided into three SOC parts (0--30\%, 30--60\%, 60--80\%), and they screen stepwise C-rates to avoid visible lithium plating; among their tested combinations, groups G9 (2.0--1.5--0.9C) and G12 (1.8--1.5--0.9C) show the best cycling performance, especially at low temperature.\cite{an2019_mscc_ncm622}
+We encode three literature-derived MS-CC profiles in machine-readable YAML (see repository configs) and use them as baselines/targets for agentic synthesis.
+
+\paragraph{Agent task.}
+Given a user query (e.g., ``minimize plating risk while reaching 80\% SOC in $<36$ min under $25^{\circ}$C''), the system must:
+(i) retrieve and summarize relevant evidence with citations,
+(ii) propose a current profile (piecewise CC) and a mechanistic rationale,
+(iii) anticipate failure modes (plating, overheating, invalid extrapolation), and
+(iv) output a verification plan.
+
+\paragraph{Human-in-the-loop.}
+Experts do not ``label'' text; they supervise reasoning:
+they correct causal links in the graph, provide short reasoning exemplars, and write structured peer-review critiques of generated profiles.
+
+\subsection{Verification plan (how we will convince reviewers)}
+We treat verification as a layered argument, from weakest to strongest:
+\begin{enumerate}
+  \item \textbf{Grounding verification (citation coverage)}: every non-trivial claim in the profile rationale must cite a retrieved source; missing or mismatched citations are penalized.
+  \item \textbf{Checklist verification (scientific rigor)}: the Critic agent applies an expert-derived checklist (correlation vs.\ causation, extrapolation limits, contradictions, testability).
+  \item \textbf{Simulation verification (physics-based proxies)}: candidate profiles are executed in PyBaMM (DFN + standard parameters). We report charge-time and conservative proxies available in the model (e.g., voltage and overpotential trajectories). We explicitly avoid claiming true ``plating'' prediction unless the model includes an accepted plating sub-model; instead we report proxies and interpret cautiously.
+  \item \textbf{Ablations (mechanism of improvement)}: we compare: (a) no-graph retrieval, (b) no debate, (c) no expert checklist, to show which components matter.
+\end{enumerate}
+
+\subsection{Limitations (pre-registered)}
+We pre-register key limitations so the case study remains scientifically honest:
+(i) simulator/parameter mismatch to the exact cell in the literature,
+(ii) proxy metrics are not direct plating measurements,
+(iii) literature bias (available papers may over-represent certain chemistries),
+(iv) fast-charge profiles may not transfer across temperatures/aging states without re-tuning.
+
+\subsection{AI contribution disclosure (what the system does vs.\ what humans do)}
+We maintain an autonomy log (inputs, retrieved papers, model outputs, human edits) and include a structured disclosure in the final submission: which parts were generated by agents, which were reviewed/edited by humans, and which decisions required human approval (e.g., choosing evaluation metrics, interpreting simulation outputs).

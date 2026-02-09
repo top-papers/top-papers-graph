@@ -1,0 +1,18 @@
+# Autonomy log (fill during the project)
+# For each milestone, record what was done by AI vs human.
+project:
+  name: "Agentic Discovery for Fast-Charging Li-ion"
+  case_study: "IED MIPT (Electrochemical energy) — lithium plating risk"
+milestones:
+  - week: 1
+    human: ["Define research question", "Pick seed papers"]
+    ai: ["Generate initial pipeline scaffold", "Draft paper outline"]
+  - week: 4
+    human: ["Expert graph review"]
+    ai: ["Extract triples", "Build KG and retrieval indices"]
+  - week: 8
+    human: ["Red-team hypothesis and refine checklist"]
+    ai: ["Run debate iterations and propose charging profiles"]
+  - week: 10
+    human: ["Interpret simulation results"]
+    ai: ["Run PyBaMM simulations and generate figures"]

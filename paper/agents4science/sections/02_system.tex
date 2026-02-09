@@ -1,0 +1,12 @@
+\section{System}
+\subsection{Evidence retrieval and ingestion}
+We retrieve candidate papers via OpenAlex/arXiv/Semantic Scholar, optionally parse PDFs using GROBID, chunk text, and store embeddings in a vector database (Qdrant).
+
+\subsection{Triplet extraction and knowledge graph}
+We extract lightweight triples (subject--relation--object) to form a knowledge graph in Neo4j. Expert reviews can up/down-weight edges and add missing conditions.
+
+\subsection{Multi-agent debate}
+Given a query and retrieved context, an ``Enthusiast'' proposes a structured hypothesis, a ``Skeptic'' challenges it using an expert-derived checklist, and a ``Mediator'' decides whether to iterate or finalize.
+
+\subsection{Simulation-backed validation}
+The finalized hypothesis is converted into an executable charging profile and evaluated via PyBaMM simulations.

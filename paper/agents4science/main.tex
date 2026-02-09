@@ -1,0 +1,35 @@
+% Main paper entrypoint for Agents4Science.
+% IMPORTANT: replace documentclass/settings according to the official template after running fetch_template.sh.
+
+\documentclass{article} % placeholder; replace with template class if provided
+
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+
+\title{[AI-FIRST AUTHOR] Agentic Discovery for Fast-Charging Li-ion: Literature-Grounded Debate + PyBaMM Validation (Domain Case Study)}
+\author{Anonymous Submission}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present a reproducible agentic pipeline that performs literature-grounded hypothesis generation and self-critique for a narrow electrochemical energy question: designing Li-ion fast-charging profiles that reduce lithium plating risk. The system retrieves and structures evidence into a lightweight knowledge graph (GraphRAG), runs a multi-agent debate under an expert-derived checklist, and proposes charging protocols that are evaluated via open-source battery simulations (PyBaMM).
+\end{abstract}
+
+\input{sections/01_intro.tex}
+\input{sections/02_system.tex}
+\input{sections/03_case_study.tex}
+\input{sections/04_experiments.tex}
+\input{sections/05_results.tex}
+\input{sections/06_limitations.tex}
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\appendix
+\input{statements/ai_disclosure.tex}
+\input{statements/reproducibility.tex}
+\input{statements/responsible_ai.tex}
+
+\end{document}
