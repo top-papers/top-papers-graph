@@ -1,0 +1,54 @@
+artifact_version: 1
+
+topic: "Plating onset as a function of temperature and charge current"
+domain: "IED_fastcharge"
+cutoff_year: 2019
+
+papers:
+  - id: "doi:TBD"
+    year: 2010
+    title: "(TBD) Early evidence on Li plating during fast charge"
+  - id: "doi:TBD"
+    year: 2015
+    title: "(TBD) Temperature dependence of plating indicators"
+  - id: "doi:TBD"
+    year: 2018
+    title: "(TBD) Plating onset map vs current and temperature"
+
+# Эта траектория намеренно оставлена как пример.
+# Заполните её реальными DOI/arXiv ID и цитатами из статей.
+
+steps:
+  - step_id: 1
+    claim: "Высокий зарядный ток при низкой температуре повышает риск литиевого осаждения (plating)."
+    evidence:
+      type: "text"
+      source: "doi:TBD"
+      page: "unknown"
+      figure_or_table: "unknown"
+      snippet_or_summary: "(TBD) Автор(ы) обсуждают рост риска plating при низкой T и высоком токе."
+    conditions:
+      temperature: "unknown"
+      soc_window: "unknown"
+      chemistry: "unknown"
+      cell_format: "unknown"
+      aging_state: "unknown"
+    inference: "Это задаёт базовое ограничение: профили fast-charge должны учитывать T и ограничивать ток при низких T."
+    next_question: "Как именно меняется пороговый ток/перенапряжение при изменении температуры?"
+
+  - step_id: 2
+    claim: "Порог onset plating можно приблизительно описать зависимостью от температуры и SOC-окна."
+    evidence:
+      type: "figure"
+      source: "doi:TBD"
+      page: "unknown"
+      figure_or_table: "Figure (TBD)"
+      snippet_or_summary: "(TBD) На графике показана область onset plating в координатах I×T или SOC×T."
+    conditions:
+      temperature: "unknown"
+      soc_window: "unknown"
+      chemistry: "unknown"
+      cell_format: "unknown"
+      aging_state: "unknown"
+    inference: "В граф знаний нужно внести условную зависимость: при T ниже порога требуется снижение тока."
+    next_question: "Какая величина лучше как прокси plating (overpotential, dV/dQ, impedance)?"

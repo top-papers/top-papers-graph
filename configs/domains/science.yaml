@@ -1,0 +1,14 @@
+domain_id: science
+title: "General scientific literature"
+keywords: []
+seed_queries:
+  - "graph neural network"
+  - "CRISPR base editing"
+kg:
+  collection: "science"
+  graph_namespace: "science"
+evaluation:
+  primary_goal: "build a verifiable evidence-backed synthesis"
+artifact_validation:
+  # Leave empty for generic domains. Override per domain if you need strict boundary conditions.
+  trajectory_required_conditions: []

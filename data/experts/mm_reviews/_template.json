@@ -1,0 +1,20 @@
+{
+  "artifact_version": 1,
+  "domain": "example_domain",
+  "paper_id": "arxiv:2401.01234",
+  "reviewer_id": "anon",
+  "items": [
+    {
+      "page": 5,
+      "image_path": "data/processed/papers/arxiv:2401.01234/mm/images/page_005.png",
+      "vlm_caption": "(auto) ...",
+      "tables_md": "(auto) ...",
+      "equations_md": "(auto) ...",
+      "verdict": "needs_fix",
+      "corrected_caption": "(fix) ...",
+      "corrected_tables_md": null,
+      "corrected_equations_md": null,
+      "rationale": "Почему авто-извлечение неверно и что исправлено"
+    }
+  ]
+}

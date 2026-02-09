@@ -1,0 +1,13 @@
+{
+  "domain": "example_domain",
+  "hypothesis_id": "H-000045",
+  "reviewer_id": "expert_007",
+  "timestamp": "2026-02-01T12:00:00Z",
+  "scores": {"novelty": 1, "soundness": 2, "testability": 2},
+  "time_scope": "система/условия/окно времени (если применимо)",
+  "major_issues": ["..."],
+  "minor_issues": ["..."],
+  "required_experiments": "Domain validation experiment / replication / simulation ...",
+  "accept": false,
+  "suggested_revision": "..."
+}

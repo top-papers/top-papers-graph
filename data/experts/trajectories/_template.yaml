@@ -1,0 +1,25 @@
+topic: "Effect of method X on outcome Y"
+domain: "example_domain"
+cutoff_year: 2020
+
+papers:
+  - id: "doi:10.xxxx/xxxx"
+    year: 2020
+    title: "..."
+
+steps:
+  - step_id: 1
+    claim: "..."
+    evidence:
+      type: "text|figure|table"
+      source: "doi:..."
+      page: 5
+      figure_or_table: "Figure 3"
+      snippet_or_summary: "Коротко: что показано/сказано"
+    conditions:
+      system: "что именно изучается (организм/материал/датасет/модель)"
+      environment: "температура/настройки/версия датасета/оборудование"
+      protocol: "ключевые детали методики"
+      notes: "прочие важные допущения"
+    inference: "Почему это важно"
+    next_question: "Что проверить дальше"

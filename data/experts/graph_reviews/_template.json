@@ -1,0 +1,22 @@
+{
+  "domain": "example_domain",
+  "paper_id": "doi:...",
+  "reviewer_id": "expert_001",
+  "timestamp": "2026-02-01T12:00:00Z",
+  "assertions": [
+    {
+      "assertion_id": "A-000123",
+      "subject": "Method X",
+      "predicate": "improves",
+      "object": "Outcome Y",
+      "time_interval": "If applicable: year range / before-after / condition window",
+      "evidence": {
+        "page": 6,
+        "figure_or_table": "Figure 5",
+        "snippet_or_summary": "Коротко: что именно утверждается источником"
+      },
+      "verdict": "accepted|rejected|needs_time_fix",
+      "rationale": "Почему так (границы применимости, альтернативы, риски)"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+name: An2019 boundary MS-CC 2.2–1.9–0.9C, 0–80% SOC
+source: An et al., RSC Advances 2019 (max plating-free stage rates, derived from boundary
+  test)
+chemistry: NCM(6xx)/graphite pouch cell (commercial full cell)
+temperature_C: 25
+soc_window:
+  from: 0.0
+  to: 0.8
+stages:
+- mode: CC
+  c_rate: 2.2
+  soc_from: 0.0
+  soc_to: 0.3
+  duration_min_ideal: 8.181818181818182
+- mode: CC
+  c_rate: 1.9
+  soc_from: 0.3
+  soc_to: 0.6
+  duration_min_ideal: 9.473684210526315
+- mode: CC
+  c_rate: 0.9
+  soc_from: 0.6
+  soc_to: 0.8
+  duration_min_ideal: 13.333333333333337
+rests:
+- after: charge
+  duration_min: 7
+  rationale: cool-down to room temperature (lab protocol)
+notes: Upper-bound screening rates reported as plating-free after 5 cycles in their
+  boundary determination procedure; useful as a stress-test fast protocol.
+citations:
+- bib_key: an2019_mscc_ncm622
+  comment: RSC Adv. 2019, 9, 21498–21506 (An et al.)

@@ -1,0 +1,15 @@
+{
+  "artifact_version": 1,
+  "domain": "example_domain",
+  "paper_id": "arxiv:2401.01234",
+  "reviewer_id": "anon",
+  "corrections": [
+    {
+      "assertion_id": "arxiv:2401.01234|Li plating|is triggered by|high overpotential|supports|year:2018:2018",
+      "original_time": {"start": "2018", "end": "2018", "granularity": "year"},
+      "corrected_time": {"start": "2016", "end": "2019", "granularity": "year"},
+      "evidence_quote": "...",
+      "rationale": "Откуда следует правильный период (ссылка на фрагмент/страницу)"
+    }
+  ]
+}

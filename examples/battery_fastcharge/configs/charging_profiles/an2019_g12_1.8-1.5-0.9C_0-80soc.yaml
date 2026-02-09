@@ -1,0 +1,32 @@
+name: An2019 MS-CC (G12) 1.8–1.5–0.9C, 0–80% SOC
+source: An et al., RSC Advances 2019 (Group G12)
+chemistry: NCM(6xx)/graphite pouch cell (commercial full cell)
+temperature_C: 25
+soc_window:
+  from: 0.0
+  to: 0.8
+stages:
+- mode: CC
+  c_rate: 1.8
+  soc_from: 0.0
+  soc_to: 0.3
+  duration_min_ideal: 10.0
+- mode: CC
+  c_rate: 1.5
+  soc_from: 0.3
+  soc_to: 0.6
+  duration_min_ideal: 11.999999999999998
+- mode: CC
+  c_rate: 0.9
+  soc_from: 0.6
+  soc_to: 0.8
+  duration_min_ideal: 13.333333333333337
+rests:
+- after: charge
+  duration_min: 7
+  rationale: cool-down to room temperature (lab protocol)
+notes: Another top-performing group; similar plating suppression with slightly reduced
+  early-stage C-rate vs G9.
+citations:
+- bib_key: an2019_mscc_ncm622
+  comment: RSC Adv. 2019, 9, 21498–21506 (An et al.)

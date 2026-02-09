@@ -1,0 +1,23 @@
+domain_id: ied_fastcharge
+title: "Fast-charge Li-ion and lithium plating risk"
+owner_institute: "MIPT Institute of Electric Drive (IED)"
+keywords:
+  - "fast charging"
+  - "lithium plating"
+  - "charging protocol"
+  - "overpotential"
+  - "SEI"
+seed_queries:
+  - '("lithium plating" AND "fast charging")'
+  - '("charging protocol" AND "lithium-ion" AND overpotential)'
+  - '("pulse charging" AND "lithium-ion")'
+kg:
+  collection: "ied_fastcharge"
+  graph_namespace: "ied_fastcharge"
+evaluation:
+  primary_goal: "reduce plating-risk proxy without increasing charge time"
+
+# Rules that help scale expert contributions across 200-300 contributors.
+artifact_validation:
+  # For fast-charge Li-ion we require these boundary conditions on every reasoning step.
+  trajectory_required_conditions: ["temperature", "soc_window", "chemistry"]
