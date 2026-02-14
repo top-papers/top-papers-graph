@@ -1,0 +1,19 @@
+name: Proposed two-stage CC (2.0C then 1.0C, 0-80% SOC)
+source: Top-Papers-Graph example
+chemistry: Li-ion (generic)
+temperature_C: 25
+soc_window:
+  from: 0.0
+  to: 0.8
+stages:
+  - mode: CC
+    soc_from: 0.0
+    soc_to: 0.5
+    c_rate: 2.0
+  - mode: CC
+    soc_from: 0.5
+    soc_to: 0.8
+    c_rate: 1.0
+rests:
+  - after: charge
+    duration_min: 10

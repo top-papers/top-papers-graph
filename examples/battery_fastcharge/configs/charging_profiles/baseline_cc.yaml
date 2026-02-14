@@ -1,0 +1,15 @@
+name: Baseline CC (1.5C, 0-80% SOC)
+source: Top-Papers-Graph example
+chemistry: Li-ion (generic)
+temperature_C: 25
+soc_window:
+  from: 0.0
+  to: 0.8
+stages:
+  - mode: CC
+    soc_from: 0.0
+    soc_to: 0.8
+    c_rate: 1.5
+rests:
+  - after: charge
+    duration_min: 10

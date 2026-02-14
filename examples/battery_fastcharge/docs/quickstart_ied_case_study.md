@@ -31,7 +31,7 @@ top-papers-graph pybamm-fastcharge --profile baseline_cc --out-dir results/pybam
 top-papers-graph fetch "lithium plating fast charging protocol" --source openalex --limit 30 --out data/papers/search_ied_fastcharge.json
 ```
 
-## 5) (Опционально) Парсинг PDF и KG
+## 5) Парсинг PDF и KG (нужно для debate с ретривером)
 - скачайте PDF в `data/raw/papers/`
 - для каждого PDF подготовьте meta JSON в `data/raw/metadata/` (пример: `configs/meta_example.json`)
 - затем:
@@ -46,6 +46,8 @@ top-papers-graph debate "Design a two-stage charging profile to reduce lithium p
   --collection ied_fastcharge --domain "Electrochemical Energy" --max-rounds 3 \
   > results/hypotheses/debate_run.json
 ```
+
+Если хотите запустить дебаты без ретривера (например, только на общем знании модели), добавьте флаг `--allow-empty-context`.
 
 ## 7) Запустить proposed профиль в PyBaMM
 ```bash
