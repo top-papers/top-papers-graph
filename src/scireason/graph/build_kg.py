@@ -30,7 +30,7 @@ def build_from_paper_dir(paper_dir: Path, collection: str, domain: str = "Scienc
 
     qd = QdrantStore()
     qd.ensure_collection(collection, vector_size=vector_size)
-    payloads = [{"paper_id": paper_id, "text": t} for t in chunks]
+    payloads = [{"paper_id": paper_id, "chunk_id": cid, "text": t} for cid, t in zip(chunk_ids, chunks)]
     qd.upsert(collection, ids=chunk_ids, vectors=vectors, payloads=payloads)
 
     neo = Neo4jStore()

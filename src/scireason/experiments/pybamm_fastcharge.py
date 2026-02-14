@@ -81,7 +81,9 @@ def load_literature_profiles(config_dir: Optional[Path] = None) -> Dict[str, dic
 
     if chosen is None:
         return profiles
-    for p in sorted(config_dir.glob("*.yaml")):
+    # NOTE: we must iterate `chosen` (the first existing candidate directory).
+    # Previously we accidentally iterated `config_dir`, which broke $CHARGING_PROFILES_DIR.
+    for p in sorted(chosen.glob("*.yaml")):
         data = yaml.safe_load(p.read_text(encoding="utf-8"))
         key = p.stem
         data["_file"] = str(p)
@@ -96,6 +98,12 @@ def default_profiles() -> Dict[str, List[str]]:
     MS-CC profiles are time-based (derived from SOC window lengths); see configs/charging_profiles/*.yaml.
     """
     return {
+        # Friendly alias used in docs/quickstart.
+        # (Matches `baseline_cc_1p5C_32min`.)
+        "baseline_cc": [
+            "Charge at 1.5C for 32 minutes",
+            "Rest for 10 minutes",
+        ],
         # Standard CCCV baseline (typical Li-ion cell procedure).
         # PyBaMM supports 'until <V>' and 'until C/<n>' termination in Experiment strings.
         "baseline_cccv_1C_4p2V": [
@@ -169,6 +177,13 @@ def run_simulation(profile_name: str, out_dir: Path, config_dir: Path = Path("co
     # DFN + a standard parameter set is a reasonable default for a computational fast-charge proxy study.
     model = pybamm.lithium_ion.DFN()
     param = pybamm.ParameterValues("Chen2020")
+
+    # Make the initial SOC explicit so that the first CC step isn't skipped as infeasible.
+    # (Some parameter sets default to a high SOC.)
+    try:
+        param.update({"Initial State of Charge": 0.0})
+    except Exception:
+        pass
     sim = pybamm.Simulation(model, parameter_values=param, experiment=experiment)
 
     t0 = time.time()

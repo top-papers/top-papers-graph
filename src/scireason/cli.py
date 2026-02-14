@@ -372,9 +372,34 @@ def debate(
     domain: str = typer.Option("Science", help="Domain hint for agents"),
     k: int = typer.Option(8, help="Сколько документов достать в контекст"),
     max_rounds: int = typer.Option(3, help="Сколько раундов дебатов"),
+    allow_empty_context: bool = typer.Option(
+        False,
+        help=(
+            "Разрешить запуск дебатов без найденного контекста (например, если коллекция ещё не создана). "
+            "По умолчанию команда подскажет, как собрать коллекцию, и завершится с ошибкой."
+        ),
+    ),
 ) -> None:
     """GraphRAG: достать контекст + дебаты агентов -> гипотеза."""
-    ctx = retrieve_context(collection=collection, query=query, limit=k)
+    try:
+        ctx = retrieve_context(collection=collection, query=query, limit=k)
+    except Exception as e:
+        console.print(
+            "[red]Failed to retrieve context from Qdrant.[/red] "
+            "Make sure Qdrant is running and the collection is built (parse + build-kg)."
+        )
+        console.print(f"[dim]{e}[/dim]")
+        if not allow_empty_context:
+            raise typer.Exit(code=1)
+        ctx = []
+
+    if not ctx and not allow_empty_context:
+        console.print(
+            "[yellow]No context chunks were found.[/yellow] "
+            "Run `top-papers-graph parse ...` and `top-papers-graph build-kg ...` first, "
+            "or pass --allow-empty-context to proceed without retrieval."
+        )
+        raise typer.Exit(code=1)
     context_text = "\n\n".join(
         [f"[{c['payload'].get('paper_id')}] {c['payload'].get('text')}" for c in ctx]
     )
