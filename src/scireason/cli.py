@@ -557,12 +557,18 @@ def apply_temporal_corrections(
 @app.command("pybamm-fastcharge")
 def pybamm_fastcharge(
     profile: str = typer.Option("baseline_cc", help="baseline_cc|proposed_two_stage|..."),
+    profiles_dir: Path | None = typer.Option(
+        None,
+        "--profiles-dir",
+        envvar="CHARGING_PROFILES_DIR",
+        help="Папка с YAML профилями зарядки (можно задать через CHARGING_PROFILES_DIR)",
+    ),
     out_dir: Path = typer.Option(Path("results/pybamm/run"), help="Куда сохранить результаты"),
 ) -> None:
     """Запуск симуляции PyBaMM для профиля зарядки (пример: battery_fastcharge)."""
     from .experiments.pybamm_fastcharge import run_simulation
 
-    out = run_simulation(profile_name=profile, out_dir=out_dir)
+    out = run_simulation(profile_name=profile, out_dir=out_dir, config_dir=profiles_dir)
     console.print(f"[green]Saved metrics:[/green] {out}")
 
 

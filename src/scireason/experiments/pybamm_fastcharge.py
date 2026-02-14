@@ -45,17 +45,15 @@ def _soc_delta_to_seconds(delta_soc: float, c_rate: float) -> float:
     return float(delta_soc / c_rate * 3600.0)
 
 
-def load_literature_profiles(config_dir: Optional[Path] = None) -> Dict[str, dict]:
-    """Load YAML profile definitions (time-staged CC profiles).
+def resolve_profiles_dir(config_dir: Optional[Path] = None) -> Optional[Path]:
+    """Resolve a directory that contains charging profile YAML files.
 
-    By default we look in:
-    1) $CHARGING_PROFILES_DIR (if set)
-    2) configs/charging_profiles (legacy)
-    3) examples/battery_fastcharge/configs/charging_profiles (repo example)
-
-    This keeps the core repository topic-agnostic while still shipping a battery fast-charge example.
+    Precedence:
+    1) explicit ``config_dir`` argument (if it exists)
+    2) ``$CHARGING_PROFILES_DIR`` env var (if it exists)
+    3) ``configs/charging_profiles`` (legacy, relative to CWD)
+    4) ``examples/battery_fastcharge/configs/charging_profiles`` (repo example)
     """
-    profiles: Dict[str, dict] = {}
 
     candidates: List[Path] = []
     if config_dir is not None:
@@ -73,12 +71,25 @@ def load_literature_profiles(config_dir: Optional[Path] = None) -> Dict[str, dic
     except Exception:
         pass
 
-    chosen: Optional[Path] = None
     for c in candidates:
         if c.exists() and c.is_dir():
-            chosen = c
-            break
+            return c
+    return None
 
+
+def load_literature_profiles(config_dir: Optional[Path] = None) -> Dict[str, dict]:
+    """Load YAML profile definitions (time-staged CC profiles).
+
+    By default we look in:
+    1) $CHARGING_PROFILES_DIR (if set)
+    2) configs/charging_profiles (legacy)
+    3) examples/battery_fastcharge/configs/charging_profiles (repo example)
+
+    This keeps the core repository topic-agnostic while still shipping a battery fast-charge example.
+    """
+    profiles: Dict[str, dict] = {}
+
+    chosen = resolve_profiles_dir(config_dir)
     if chosen is None:
         return profiles
     # NOTE: we must iterate `chosen` (the first existing candidate directory).
@@ -138,7 +149,7 @@ def build_steps_from_lit_yaml(yaml_profile: dict) -> List[str]:
     return steps
 
 
-def list_available_profiles(config_dir: Path = Path("configs/charging_profiles")) -> Dict[str, str]:
+def list_available_profiles(config_dir: Optional[Path] = None) -> Dict[str, str]:
     """Return mapping profile_key -> human name."""
     out: Dict[str, str] = {}
     out.update({k: k for k in default_profiles().keys()})
@@ -147,7 +158,7 @@ def list_available_profiles(config_dir: Path = Path("configs/charging_profiles")
     return out
 
 
-def run_simulation(profile_name: str, out_dir: Path, config_dir: Path = Path("configs/charging_profiles")) -> Path:
+def run_simulation(profile_name: str, out_dir: Path, config_dir: Optional[Path] = None) -> Path:
     """Run one simulation and save a compact metrics JSON."""
     _require_pybamm()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -170,7 +181,9 @@ def run_simulation(profile_name: str, out_dir: Path, config_dir: Path = Path("co
         )
     else:
         avail = list(list_available_profiles(config_dir).keys())
-        raise ValueError(f"Unknown profile '{profile_name}'. Available: {avail}")
+        resolved_dir = resolve_profiles_dir(config_dir)
+        hint = f" Profiles dir: {resolved_dir}" if resolved_dir is not None else " Profiles dir: (not found)"
+        raise ValueError(f"Unknown profile '{profile_name}'. Available: {avail}.{hint}")
 
     experiment = pybamm.Experiment(steps)
 
