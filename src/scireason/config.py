@@ -11,8 +11,17 @@ class Settings(BaseSettings):
     # You can always switch back to LiteLLM providers via env:
     #   LLM_PROVIDER=ollama  LLM_MODEL=llama3.2
     llm_provider: str = "g4f"  # g4f|ollama|openai|anthropic|...
-    llm_model: str = "deepseek-r1"
+    # Default: let g4f auto-route to a working model/provider.
+    # You can still pin a specific model via env/CLI (e.g. LLM_MODEL=deepseek-r1).
+    llm_model: str = "auto"
     ollama_base_url: str = "http://localhost:11434"
+
+    # g4f fine-tuning (optional)
+    # Comma-separated provider class names to try in order (RetryProvider).
+    # Example: "Phind,FreeChatgpt,Liaobots".
+    g4f_providers: str | None = None
+    # Optional api_key for providers that require it.
+    g4f_api_key: str | None = None
 
     # ===== Embeddings =====
     # Default: hash embeddings (no heavyweight deps, no API keys). If you want higher quality

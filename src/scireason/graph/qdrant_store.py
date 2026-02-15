@@ -59,22 +59,23 @@ class QdrantStore:
             return
 
     def upsert(self, collection: str, ids: List[str], vectors: List[List[float]], payloads: List[Dict[str, Any]]) -> None:
-        def _normalize_point_id(pid: str):
-            """Qdrant PointId is either an int or a UUID.
+        def _normalize_point_id(pid: str | int | uuid.UUID):
+            """Normalize a point id for Qdrant.
 
-            The pipeline naturally generates human-readable chunk ids (e.g. "paper:12").
-            Qdrant doesn't accept arbitrary strings as PointId, so we deterministically map
-            any non-UUID string to a UUIDv5.
+            In qdrant-client, PointId is typically `int | str`.
+            Our pipeline sometimes uses human-readable string ids (e.g. "paper:12").
+            For non-UUID strings we deterministically map them to a UUIDv5 and store it
+            as a string.
             """
 
             if isinstance(pid, int):
                 return pid
             if isinstance(pid, uuid.UUID):
-                return pid
+                return str(pid)
             try:
-                return uuid.UUID(str(pid))
+                return str(uuid.UUID(str(pid)))
             except Exception:
-                return uuid.uuid5(uuid.NAMESPACE_URL, str(pid))
+                return str(uuid.uuid5(uuid.NAMESPACE_URL, str(pid)))
 
         points = [
             qm.PointStruct(id=_normalize_point_id(pid), vector=vec, payload=pl)

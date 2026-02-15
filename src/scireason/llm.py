@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 from rich.console import Console
 
@@ -22,6 +23,86 @@ try:
     from g4f.client import Client as G4FClient  # type: ignore
 except Exception:  # pragma: no cover
     G4FClient = None
+
+
+def _strip_code_fences(text: str) -> str:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        # Drop opening fence line (``` or ```json)
+        t = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", t)
+        # Drop trailing fence
+        t = re.sub(r"\s*```\s*$", "", t)
+    return t.strip()
+
+
+def _extract_first_json_block(text: str) -> str | None:
+    """Return the first well-balanced JSON object/array substring, if any.
+
+    Works even when the model returns extra prose around JSON.
+    """
+
+    s = _strip_code_fences(text)
+    # Find the first opening brace/bracket.
+    start = None
+    for i, ch in enumerate(s):
+        if ch in "[{":
+            start = i
+            break
+    if start is None:
+        return None
+
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    for j in range(start, len(s)):
+        ch = s[j]
+
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+
+        if ch == '"':
+            in_str = True
+            continue
+
+        if ch in "[{":
+            stack.append(ch)
+            continue
+
+        if ch in "]}":
+            if not stack:
+                return None
+            open_ch = stack.pop()
+            if (open_ch == "[" and ch != "]") or (open_ch == "{" and ch != "}"):
+                return None
+            if not stack:
+                return s[start : j + 1]
+
+    return None
+
+
+def _json_loads_best_effort(text: str) -> Any:
+    """Parse JSON from an LLM response, tolerating common wrappers."""
+
+    raw = _strip_code_fences(text)
+
+    # 1) direct
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    # 2) first balanced object/array
+    block = _extract_first_json_block(raw)
+    if block is not None:
+        return json.loads(block)
+
+    raise json.JSONDecodeError("No JSON object/array found", raw, 0)
 
 
 @lru_cache(maxsize=1)
@@ -50,7 +131,33 @@ def _litellm_kwargs(provider: str | None = None) -> dict:
 def _g4f_client() -> Any:
     if G4FClient is None:  # pragma: no cover
         raise RuntimeError("g4f не установлен. Установите: pip install g4f")
-    return G4FClient()
+
+    # Prefer a RetryProvider with a curated provider list to avoid hard failures
+    # (e.g. providers that require api_key). g4f explicitly supports RetryProvider.
+    # Docs: https://g4f.dev/docs/client.html
+    try:
+        from g4f import Provider as P  # type: ignore
+        from g4f.Provider import RetryProvider  # type: ignore
+
+        # User override via env/config
+        raw = (settings.g4f_providers or os.getenv("G4F_PROVIDERS") or "").strip()
+        if raw:
+            names = [x.strip() for x in raw.split(",") if x.strip()]
+        else:
+            # Reasonable defaults from g4f docs/examples
+            names = ["Phind", "FreeChatgpt", "Liaobots", "PollinationsAI", "Blackbox"]
+
+        providers = [getattr(P, n) for n in names if hasattr(P, n)]
+        if providers:
+            return G4FClient(
+                provider=RetryProvider(providers, shuffle=True),
+                api_key=(settings.g4f_api_key or os.getenv("G4F_API_KEY")),
+            )
+    except Exception:
+        # Fall back to plain client (g4f will auto-select providers).
+        pass
+
+    return G4FClient(api_key=(settings.g4f_api_key or os.getenv("G4F_API_KEY")))
 
 
 @lru_cache(maxsize=16)
@@ -89,7 +196,7 @@ def _hash_embed_one(text: str, dim: int) -> List[float]:
     wait=wait_exponential(multiplier=1, min=1, max=8),
     reraise=True,
 )
-def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2) -> dict:
+def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2) -> Any:
     """Запрос к LLM с требованием вернуть JSON.
     schema_hint — строка-подсказка (например, pydantic model JSON schema или краткое описание).
     """
@@ -107,11 +214,32 @@ def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2
     # ---- 1) g4f (default) ----
     if provider == "g4f":
         client = _g4f_client()
-        resp = client.chat.completions.create(
-            model=settings.llm_model or "auto",
-            messages=messages,
-        )
-        text = resp.choices[0].message.content
+
+        # Auto model routing is supported by g4f; we also keep a small fallback list
+        # to recover from intermittent provider/model outages.
+        model = (settings.llm_model or "auto").strip() or "auto"
+        model_candidates = [model]
+        if model.lower() in {"auto", ""}:
+            model_candidates += ["gpt-4o-mini", "gpt-4o", "gpt-4", "deepseek-r1"]
+
+        last_err: Exception | None = None
+        text = ""
+        for m in model_candidates:
+            try:
+                resp = client.chat.completions.create(
+                    model=m,
+                    messages=messages,
+                    temperature=temperature,
+                )
+                text = (resp.choices[0].message.content or "").strip()
+                if text:
+                    break
+            except Exception as e:
+                last_err = e
+                continue
+
+        if not text:
+            raise RuntimeError(f"g4f returned empty response ({last_err})")
     else:
         # ---- 2) LiteLLM ----
         if litellm is None:
@@ -126,15 +254,7 @@ def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2
             **_litellm_kwargs(settings.llm_provider),
         )
         text = resp["choices"][0]["message"]["content"]
-    try:
-        return json.loads(text)
-    except Exception:
-        # иногда модель добавляет лишний текст — попробуем вытащить первый JSON-блок
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(text[start : end + 1])
-        raise
+    return _json_loads_best_effort(text)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))

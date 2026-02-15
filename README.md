@@ -29,10 +29,14 @@ pip install -e ".[dev]"
 top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
 ```
 
-По умолчанию LLM = **g4f / deepseek-r1**. Вы можете явно переопределить модель в команде:
+По умолчанию LLM = **g4f / auto** (автороутинг на рабочую связку модель/провайдер). Вы можете явно переопределить модель в команде:
 ```bash
 # g4f (любая поддерживаемая модель)
 top-papers-graph run --query "..." --g4f-model deepseek-r1
+
+Также можно управлять списком провайдеров g4f (для RetryProvider) через переменную окружения:
+
+G4F_PROVIDERS="Phind,FreeChatgpt,Liaobots" top-papers-graph run --query "..."
 
 # локальная модель через Ollama
 top-papers-graph run --query "..." --local-model llama3.2
