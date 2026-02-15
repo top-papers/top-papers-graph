@@ -29,13 +29,28 @@ pip install -e ".[dev]"
 top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
 ```
 
+По умолчанию LLM = **g4f / deepseek-r1**. Вы можете явно переопределить модель в команде:
+```bash
+# g4f (любая поддерживаемая модель)
+top-papers-graph run --query "..." --g4f-model deepseek-r1
+
+# локальная модель через Ollama
+top-papers-graph run --query "..." --local-model llama3.2
+
+# универсальный формат (provider:model)
+top-papers-graph run --query "..." --llm g4f:gpt-4o-mini
+top-papers-graph run --query "..." --llm ollama:llama3.2
+```
+
 Артефакты появятся в `runs/<timestamp>_<slug>/`:
 - `temporal_kg.json` — темпоральный граф знаний (термы/связи/временные счётчики)
 - `hypotheses.json` + `hypotheses.md` — ранжированный набор проверяемых гипотез
 - `review_queue/` — шаблоны для экспертной разметки (hypothesis_reviews)
 
 > Пайплайн старается скачать PDF (если доступен OA) и распарсить его через GROBID.
-> Если PDF недоступен, он продолжит работу по абстрактам.
+> Если GROBID не запущен, будет fallback‑парсинг PDF через `pypdf` (по умолчанию).
+> Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` (PyMuPDF).
+> Если PDF недоступен, пайплайн продолжит работу по абстрактам.
 
 ### 4) Поиск статей по вашей теме (отдельный шаг)
 ```bash

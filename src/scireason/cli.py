@@ -604,8 +604,92 @@ def run_cmd(
     out_dir: Path = typer.Option(Path("runs"), help="Куда сохранить артефакты запуска."),
     multimodal: bool = typer.Option(False, help="Извлекать страницы/картинки (MM) при наличии зависимостей."),
     no_llm_hypotheses: bool = typer.Option(False, help="Не использовать LLM для переформулировки гипотез."),
+
+    # --- LLM overrides (CLI > env/config defaults) ---
+    llm: Optional[str] = typer.Option(
+        None,
+        "--llm",
+        help=(
+            "Переопределить LLM одним флагом. Форматы: 'g4f:deepseek-r1', 'g4f:gpt-4o-mini', "
+            "'local:llama3.2' (Ollama), 'ollama:llama3.2', или 'openai/gpt-4o-mini' (LiteLLM)."
+        ),
+    ),
+    g4f_model: Optional[str] = typer.Option(
+        None,
+        "--g4f-model",
+        help="Явно использовать g4f с указанной моделью (например deepseek-r1).",
+    ),
+    local_model: Optional[str] = typer.Option(
+        None,
+        "--local-model",
+        help="Явно использовать локальную Ollama модель (например llama3.2).",
+    ),
+    llm_provider: Optional[str] = typer.Option(
+        None,
+        "--llm-provider",
+        help="Явно задать провайдера (g4f|ollama|openai|anthropic|...).",
+    ),
+    llm_model: Optional[str] = typer.Option(
+        None,
+        "--llm-model",
+        help="Явно задать имя модели провайдера.",
+    ),
 ) -> None:
     """Полностью автоматический пайплайн: query → papers → temporal KG → hypotheses."""
+    # ---- Apply LLM overrides ----
+    def _apply_llm_overrides() -> None:
+        # 1) single-flag format
+        if llm:
+            raw = llm.strip()
+
+            # Accept provider/model as "provider:model" or "provider/model"
+            if ":" in raw:
+                prov, model = raw.split(":", 1)
+            elif "/" in raw:
+                prov, model = raw.split("/", 1)
+            else:
+                # No separator -> assume g4f model
+                prov, model = "g4f", raw
+
+            prov = prov.strip().lower()
+            model = model.strip()
+
+            if prov in {"local", "ollama"}:
+                settings.llm_provider = "ollama"
+                settings.llm_model = model
+            elif prov == "g4f":
+                settings.llm_provider = "g4f"
+                settings.llm_model = model
+            else:
+                # LiteLLM-style provider/model
+                settings.llm_provider = prov
+                settings.llm_model = model
+            return
+
+        # 2) convenience flags
+        if local_model:
+            settings.llm_provider = "ollama"
+            settings.llm_model = local_model.strip()
+            return
+
+        if g4f_model:
+            settings.llm_provider = "g4f"
+            settings.llm_model = g4f_model.strip()
+            return
+
+        # 3) explicit provider/model flags
+        if llm_provider:
+            settings.llm_provider = llm_provider.strip()
+        if llm_model:
+            settings.llm_model = llm_model.strip()
+
+    _apply_llm_overrides()
+
+    console.print(
+        f"[bold]LLM:[/bold] {settings.llm_provider}/{settings.llm_model}  |  "
+        f"[bold]Embeddings:[/bold] {getattr(settings, 'embed_provider', 'hash')}"
+    )
+
     did = domain_id or settings.domain_id or "science"
     src_list = None
     if sources.strip().lower() != "all":
