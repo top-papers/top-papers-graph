@@ -114,6 +114,31 @@ def doctor() -> None:
     console.print(t)
     console.print("[green]Если сервисы подняты через docker compose — вы готовы.[/green]")
 
+    # g4f sanity: list working models from g4f/models.py (no network call)
+    try:
+        import g4f  # type: ignore
+        from g4f import models as gm  # type: ignore
+
+        models_list = []
+        try:
+            Model = getattr(gm, "Model", None)
+            if Model is not None and hasattr(Model, "__all__"):
+                cand = Model.__all__()  # type: ignore
+                if isinstance(cand, (list, tuple)):
+                    models_list = list(cand)
+        except Exception:
+            models_list = []
+
+        if not models_list:
+            models_list = list(getattr(gm, "_all_models", []) or [])
+
+        console.print(f"g4f: {getattr(g4f, '__version__', 'unknown')} | models (working): {len(models_list)}")
+        if models_list:
+            console.print("g4f sample models: " + ", ".join(models_list[:10]))
+    except Exception as e:
+        console.print(f"g4f: not available ({e})")
+
+
 
 @app.command()
 def fetch(

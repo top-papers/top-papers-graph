@@ -129,35 +129,140 @@ def _litellm_kwargs(provider: str | None = None) -> dict:
 
 @lru_cache(maxsize=1)
 def _g4f_client() -> Any:
+    """Create a g4f client.
+
+    By default we let g4f route per-model to its `best_provider` mapping.
+    Users can still force a provider shortlist via `G4F_PROVIDERS` / settings.
+    """
+
     if G4FClient is None:  # pragma: no cover
         raise RuntimeError("g4f не установлен. Установите: pip install g4f")
 
-    # Prefer a RetryProvider with a curated provider list to avoid hard failures
-    # (e.g. providers that require api_key). g4f explicitly supports RetryProvider.
-    # Docs: https://g4f.dev/docs/client.html
-    try:
-        from g4f import Provider as P  # type: ignore
-        from g4f.Provider import RetryProvider  # type: ignore
+    api_key = (settings.g4f_api_key or os.getenv("G4F_API_KEY"))
 
-        # User override via env/config
-        raw = (settings.g4f_providers or os.getenv("G4F_PROVIDERS") or "").strip()
-        if raw:
+    raw = (settings.g4f_providers or os.getenv("G4F_PROVIDERS") or "").strip()
+    if raw:
+        try:
+            from g4f import Provider as P  # type: ignore
+            from g4f.Provider import RetryProvider  # type: ignore
+
             names = [x.strip() for x in raw.split(",") if x.strip()]
-        else:
-            # Reasonable defaults from g4f docs/examples
-            names = ["Phind", "FreeChatgpt", "Liaobots", "PollinationsAI", "Blackbox"]
+            providers = [getattr(P, n) for n in names if hasattr(P, n)]
+            if providers:
+                return G4FClient(provider=RetryProvider(providers, shuffle=True), api_key=api_key)
+        except Exception:
+            # If RetryProvider path fails, fall back to plain client.
+            pass
 
-        providers = [getattr(P, n) for n in names if hasattr(P, n)]
-        if providers:
-            return G4FClient(
-                provider=RetryProvider(providers, shuffle=True),
-                api_key=(settings.g4f_api_key or os.getenv("G4F_API_KEY")),
-            )
+    # Default: no provider override; g4f will use the model registry routing.
+    return G4FClient(api_key=api_key)
+
+
+def _dedup_keep_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in items:
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+@lru_cache(maxsize=1)
+def _g4f_model_candidates() -> list[str]:
+    """Return a prioritized list of *text-capable* g4f model names.
+
+    The source of truth is g4f's own model registry (g4f/models.py).
+    We prefer the working model name list exposed there (Model.__all__ / _all_models).
+    """
+
+    try:
+        from g4f import models as gm  # type: ignore
     except Exception:
-        # Fall back to plain client (g4f will auto-select providers).
+        return []
+
+    names: list[str] = []
+
+    # 1) Preferred: Model.__all__() returns the working model name list (g4f/models.py).
+    try:
+        Model = getattr(gm, "Model", None)
+        if Model is not None and hasattr(Model, "__all__"):
+            cand = Model.__all__()  # type: ignore
+            if isinstance(cand, (list, tuple)):
+                names = list(cand)
+    except Exception:
         pass
 
-    return G4FClient(api_key=(settings.g4f_api_key or os.getenv("G4F_API_KEY")))
+    # 2) Fallbacks used by g4f itself
+    if not names:
+        try:
+            names = list(getattr(gm, "_all_models", []) or [])
+        except Exception:
+            names = []
+
+    if not names:
+        try:
+            names = list(getattr(gm, "__models__", {}).keys())
+        except Exception:
+            names = []
+
+    names = _dedup_keep_order([str(x) for x in names if str(x).strip()])
+
+    # Filter out non-chat models when registry provides mixed capabilities.
+    try:
+        from g4f.models import ModelRegistry  # type: ignore
+        ImageModel = getattr(gm, "ImageModel", None)
+        AudioModel = getattr(gm, "AudioModel", None)
+        VideoModel = getattr(gm, "VideoModel", None)
+
+        filtered: list[str] = []
+        for n in names:
+            try:
+                model_obj = ModelRegistry.get(n)
+            except Exception:
+                model_obj = None
+
+            if model_obj is None:
+                continue
+            if ImageModel is not None and isinstance(model_obj, ImageModel):
+                continue
+            if AudioModel is not None and isinstance(model_obj, AudioModel):
+                continue
+            if VideoModel is not None and isinstance(model_obj, VideoModel):
+                continue
+            filtered.append(n)
+        names = filtered
+    except Exception:
+        # If filtering isn't possible (older g4f), keep the raw list.
+        pass
+
+    # User preference: a comma-separated list that will be tried first.
+    prefer_raw = (os.getenv("G4F_MODEL_PREFER") or os.getenv("G4F_MODEL_PREFERENCES") or "").strip()
+    prefer = [x.strip() for x in prefer_raw.split(",") if x.strip()]
+    preferred = [m for m in prefer if m in names]
+
+    # Reasonable defaults (only if present in the registry list).
+    if not preferred:
+        default_pref = [
+            "gpt-4o-mini",
+            "gpt-4o",
+            "gpt-4",
+            "deepseek-v3",
+            "deepseek-r1",
+            "qwen-2.5-72b",
+            "llama-3.3-70b",
+        ]
+        preferred = [m for m in default_pref if m in names]
+
+    rest = [m for m in names if m not in preferred]
+
+    # Cap the candidate list to avoid spending too long on dead providers.
+    try:
+        cap = int(os.getenv("G4F_AUTO_MAX_MODELS") or 25)
+    except Exception:
+        cap = 25
+
+    return (preferred + rest)[: max(1, cap)]
 
 
 @lru_cache(maxsize=16)
@@ -211,35 +316,54 @@ def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2
 """},
     ]
 
+
     # ---- 1) g4f (default) ----
     if provider == "g4f":
         client = _g4f_client()
 
-        # Auto model routing is supported by g4f; we also keep a small fallback list
-        # to recover from intermittent provider/model outages.
-        model = (settings.llm_model or "auto").strip() or "auto"
-        model_candidates = [model]
-        if model.lower() in {"auto", ""}:
-            model_candidates += ["gpt-4o-mini", "gpt-4o", "gpt-4", "deepseek-r1"]
+        model_req = (settings.llm_model or "auto").strip() or "auto"
+
+        if model_req.lower() in {"auto", ""}:
+            # Important: we source candidate models from g4f's own registry (g4f/models.py).
+            model_candidates = _g4f_model_candidates()
+            if not model_candidates:
+                # Fallback when g4f registry isn't accessible
+                model_candidates = ["gpt-4o-mini", "gpt-4o", "deepseek-r1"]
+        else:
+            model_candidates = [model_req]
 
         last_err: Exception | None = None
-        text = ""
-        for m in model_candidates:
+        last_text = ""
+
+        for mname in model_candidates:
             try:
                 resp = client.chat.completions.create(
-                    model=m,
+                    model=mname,
                     messages=messages,
                     temperature=temperature,
                 )
-                text = (resp.choices[0].message.content or "").strip()
-                if text:
-                    break
+                text_out = (resp.choices[0].message.content or "").strip()
+                if not text_out:
+                    last_err = RuntimeError(f"g4f returned empty response for model={mname}")
+                    continue
+
+                # Validate JSON early: if model returns non-JSON, try the next one.
+                try:
+                    return _json_loads_best_effort(text_out)
+                except Exception as je:
+                    last_err = je
+                    last_text = text_out
+                    continue
+
             except Exception as e:
                 last_err = e
                 continue
 
-        if not text:
-            raise RuntimeError(f"g4f returned empty response ({last_err})")
+        tail = (last_text[:200] + "…") if last_text and len(last_text) > 200 else last_text
+        raise RuntimeError(
+            f"g4f failed to produce valid JSON (last_err={last_err}; last_text={tail!r})"
+        )
+
     else:
         # ---- 2) LiteLLM ----
         if litellm is None:

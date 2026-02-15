@@ -29,13 +29,46 @@ pip install -e ".[dev]"
 top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
 ```
 
-По умолчанию LLM = **g4f / auto** (автороутинг на рабочую связку модель/провайдер). Вы можете явно переопределить модель в команде:
+#### Запуск в Docker (из коробки)
+
+В репозитории есть Dockerfile для CLI/API и `docker-compose.yml`, который поднимает **всю инфраструктуру**, используемую проектом:
+**Neo4j** (графовая БД), **Qdrant** (векторное хранилище для demo‑few‑shot) и **GROBID** (парсинг PDF).
+
+```bash
+# 1) Собрать образ и поднять стек
+docker compose up -d --build
+
+# 2) Запустить пайплайн внутри контейнера
+docker compose exec app top-papers-graph run \
+  --query "graph neural network survey" \
+  --sources all \
+  --top-papers 20
+
+# 3) Остановить и удалить тома (опционально)
+docker compose down -v
+```
+
+Подсказки:
+- GROBID доступен на `http://localhost:8070` (проверка: `/api/isalive`). Если он недоступен, пайплайн автоматически
+  переключится на локальный PDF‑парсер.
+- Neo4j Browser: `http://localhost:7474`.
+- Qdrant: `http://localhost:6333`.
+- Для локального Ollama на хосте используйте `OLLAMA_BASE_URL` (по умолчанию `http://host.docker.internal:11434`).
+
+По умолчанию LLM = **g4f / auto**. В этом режиме проект **сам перебирает модели из списка g4f (g4f/models.py)** и выбирает первую, которая вернёт валидный JSON.
+
+Вы можете явно переопределить модель в команде:
 ```bash
 # g4f (любая поддерживаемая модель)
 top-papers-graph run --query "..." --g4f-model deepseek-r1
 
-Также можно управлять списком провайдеров g4f (для RetryProvider) через переменную окружения:
+# (опционально) попробовать в первую очередь конкретные модели (если они есть в g4f/models.py)
+G4F_MODEL_PREFER="gpt-4o-mini,deepseek-r1" top-papers-graph run --query "..."
 
+# (опционально) ограничить число попыток автоподбора (по умолчанию 25)
+G4F_AUTO_MAX_MODELS=10 top-papers-graph run --query "..."
+
+# (опционально) форсировать список провайдеров g4f (RetryProvider)
 G4F_PROVIDERS="Phind,FreeChatgpt,Liaobots" top-papers-graph run --query "..."
 
 # локальная модель через Ollama
