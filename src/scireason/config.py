@@ -6,14 +6,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # ===== LLM (via LiteLLM) =====
-    llm_provider: str = "ollama"
-    llm_model: str = "llama3.2"
+    # ===== LLM =====
+    # Default: g4f (routes requests to available providers; see g4f docs).
+    # You can always switch back to LiteLLM providers via env:
+    #   LLM_PROVIDER=ollama  LLM_MODEL=llama3.2
+    llm_provider: str = "g4f"  # g4f|ollama|openai|anthropic|...
+    llm_model: str = "deepseek-r1"
     ollama_base_url: str = "http://localhost:11434"
 
     # ===== Embeddings =====
-    embed_provider: str = "sentence-transformers"  # sentence-transformers|openai|ollama|...
+    # Default: hash embeddings (no heavyweight deps, no API keys). If you want higher quality
+    # local embeddings: `pip install -e '.[embeddings]'` and set EMBED_PROVIDER=sentence-transformers.
+    embed_provider: str = "hash"  # hash|sentence-transformers|openai|ollama|...
     embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    hash_embed_dim: int = 384
 
     # ===== Infra =====
     neo4j_uri: str = "bolt://localhost:7687"
