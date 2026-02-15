@@ -163,7 +163,9 @@ def fetch(
                     continue
 
         papers = _search(query, limit=limit, sources=srcs, with_abstracts=with_abstract)
-        data = [p.model_dump() for p in papers]
+        # PaperMetadata contains `published_date: date` → use Pydantic JSON mode
+        # so standard `json.dumps(...)` does not fail.
+        data = [p.model_dump(mode="json") for p in papers]
 
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -112,7 +112,11 @@ def run_pipeline(
     selected = papers[:top_papers]
 
     (out / "papers_selected.json").write_text(
-        json.dumps([p.model_dump() for p in selected], ensure_ascii=False, indent=2), encoding="utf-8"
+        # NOTE: PaperMetadata includes `published_date: date`, which is not JSON serializable
+        # in standard `json.dumps(...)`. Pydantic's JSON mode converts dates/datetimes/UUIDs/etc.
+        # into JSON-friendly types (e.g., ISO strings) before dumping.
+        json.dumps([p.model_dump(mode="json") for p in selected], ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     console.print(f"[green]Selected papers:[/green] {len(selected)}")
 
@@ -132,7 +136,7 @@ def run_pipeline(
     for a, paper in zip(acq, selected):
         if not a.pdf_path:
             continue
-        meta = paper.model_dump()
+        meta = paper.model_dump(mode="json")
         try:
             if include_multimodal:
                 ingest_pdf_multimodal_auto(a.pdf_path, meta, processed_dir)
@@ -185,7 +189,8 @@ def run_pipeline(
     )
 
     (out / "hypotheses.json").write_text(
-        json.dumps([h.model_dump() for h in hyps], ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps([h.model_dump(mode="json") for h in hyps], ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
 
     # Markdown report
@@ -228,7 +233,7 @@ def run_pipeline(
             "required_experiments": h.proposed_experiment,
             "accept": False,
             "suggested_revision": "",
-            "hypothesis": h.model_dump(),
+            "hypothesis": h.model_dump(mode="json"),
         }
         (review_dir / f"{hid}.json").write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
 

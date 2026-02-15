@@ -38,20 +38,20 @@ def search_papers_tool(
             except Exception:
                 continue
     papers = search_papers(query, limit=limit, sources=srcs)
-    return [p.model_dump() for p in papers]
+    return [p.model_dump(mode="json") for p in papers]
 
 
 @mcp.tool()
 def resolve_ids_tool(identifier: str) -> Dict[str, Any]:
     """Resolve between DOI ⇄ PMID ⇄ arXivID ⇄ OpenAlexID (best-effort)."""
-    return resolve_ids(identifier).model_dump()
+    return resolve_ids(identifier).model_dump(mode="json")
 
 
 @mcp.tool()
 def get_paper_by_doi_tool(doi: str) -> Dict[str, Any]:
     """Fetch a paper by DOI (best-effort), returning normalized metadata."""
     p = get_paper_by_doi(doi)
-    return p.model_dump() if p else {}
+    return p.model_dump(mode="json") if p else {}
 
 
 def main() -> None:

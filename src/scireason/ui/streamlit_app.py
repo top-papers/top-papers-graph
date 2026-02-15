@@ -35,6 +35,6 @@ if run:
 
     with col2:
         st.subheader("Гипотеза (после дебатов)")
-        st.json(result.model_dump())
+        st.json(result.model_dump(mode="json"))
 
 st.caption("MVP. Для продакшена используйте langgraph_debate.py и добавьте строгие схемы/валидаторы.")
