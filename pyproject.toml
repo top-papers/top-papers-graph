@@ -138,3 +138,8 @@ disallow_untyped_defs = false
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+  "integration: end-to-end / smoke integration tests (may be skipped when optional deps are missing)",
+]

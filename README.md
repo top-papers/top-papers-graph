@@ -12,6 +12,25 @@
 - **CLI**, **FastAPI** (наружный API) и **MCP‑сервер** (интеграции с AI‑сервисами).
 
 ## Быстрый старт
+
+### Student quickstart (3 команды)
+
+**Linux/macOS:**
+```bash
+./scripts/bootstrap.sh
+top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+```
+
+**Windows (PowerShell):**
+```powershell
+.\scripts\bootstrap.ps1
+top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+```
+
+> Здесь используется **smolagents CodeAgent** (агент пишет и исполняет Python‑код) — это основной режим курса.
+
 ### 1) Установка
 ```bash
 # Вариант 1 (рекомендуется для курса): одна команда

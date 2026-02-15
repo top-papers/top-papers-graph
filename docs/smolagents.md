@@ -71,3 +71,31 @@ smolagents включается **только** в части генераци�
   - backend `smolagents`: `smolagents.CodeAgent` + инструменты из `src/scireason/smolagents_integration/tools.py`
 
 Дальше эти кандидаты подаются в общий ранкер/писатель гипотез.
+
+## Запуск без `.env`: CLI-флаги
+
+Чтобы студентам **не нужно было** настраивать `.env`, добавлены CLI‑переопределения:
+
+- `--smol-model-backend scireason|transformers|g4f`
+- `--smol-model-id <hf_model_id_or_local_path>` (для `transformers`)
+
+Пример (smolagents + оффлайн mock‑LLM):
+
+```bash
+top-papers-graph demo-run \
+  --agent-backend smolagents \
+  --llm-provider mock \
+  --smol-model-backend scireason
+```
+
+Пример (smolagents + локальная HF модель через Transformers):
+
+```bash
+pip install -e ".[agents_hf]"
+
+top-papers-graph demo-run \
+  --agent-backend smolagents \
+  --llm-provider mock \
+  --smol-model-backend transformers \
+  --smol-model-id HuggingFaceTB/SmolLM2-1.7B-Instruct
+```

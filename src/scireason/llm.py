@@ -176,11 +176,72 @@ def chat_text(system: str, user: str, *, temperature: float = 0.2) -> str:
         {"role": "system", "content": system.strip()},
         {"role": "user", "content": user.strip()},
     ]
-
     if provider == "mock":
-        # For code agents we return a small, safe, deterministic snippet that exercises tools.
-        # This keeps `--llm-provider mock` usable in smoke tests / offline runs.
-        seed = int(hashlib.blake2b((system + user).encode("utf-8"), digest_size=4).hexdigest(), 16)
+        # For code agents we return deterministic, tool-using python.
+        # If the prompt requests hypothesis *candidates* (a list of edges), return a list-like answer.
+        full_prompt = (system + "\n" + user).lower()
+
+        wants_candidates = (
+            "candidate hypotheses" in full_prompt
+            or "return a list of dicts" in full_prompt
+            or "final_answer(<the_list>)" in full_prompt
+            or "kind is one of" in full_prompt
+        )
+
+        if wants_candidates:
+            return (
+                "# mock provider: deterministic candidate generation\n"
+                "G = build_graph()\n"
+                "comms = []\n"
+                "try:\n"
+                "    comms = communities(G, method='greedy', max_communities=8)\n"
+                "except Exception:\n"
+                "    try:\n"
+                "        comms = communities(G)\n"
+                "    except Exception:\n"
+                "        comms = []\n"
+                "bridges = []\n"
+                "try:\n"
+                "    bridges = cross_bridges(G, comms, top_k=12)\n"
+                "except Exception:\n"
+                "    bridges = []\n"
+                "cands = []\n"
+                "for item in (bridges or [])[:10]:\n"
+                "    try:\n"
+                "        u, v, s = item\n"
+                "    except Exception:\n"
+                "        continue\n"
+                "    cands.append({\n"
+                "        'kind': 'cross_bridge',\n"
+                "        'source': str(u),\n"
+                "        'target': str(v),\n"
+                "        'predicate': 'may_relate_to',\n"
+                "        'score': float(s),\n"
+                "        'graph_signals': {'bridge_score': float(s)}\n"
+                "    })\n"
+                "if not cands:\n"
+                "    lp = []\n"
+                "    try:\n"
+                "        lp = link_prediction(G, method='adamic_adar', k=12)\n"
+                "    except Exception:\n"
+                "        lp = []\n"
+                "    for item in (lp or [])[:10]:\n"
+                "        try:\n"
+                "            u, v, s = item\n"
+                "        except Exception:\n"
+                "            continue\n"
+                "        cands.append({\n"
+                "            'kind': 'link_prediction',\n"
+                "            'source': str(u),\n"
+                "            'target': str(v),\n"
+                "            'predicate': 'may_relate_to',\n"
+                "            'score': float(s),\n"
+                "            'graph_signals': {'adamic_adar': float(s)}\n"
+                "        })\n"
+                "final_answer(cands)\n"
+            )
+
+        seed = int(hashlib.blake2b((system + user).encode('utf-8'), digest_size=4).hexdigest(), 16)
         random.seed(seed)
         return (
             "# mock provider: deterministic tool-using code\n"
@@ -308,12 +369,74 @@ def chat_messages(messages: List[Dict[str, Any]], *, temperature: float = 0.2) -
         role = str(m.get("role") or "user")
         content = _normalize_message_content(m.get("content"))
         norm_messages.append({"role": role, "content": content})
-
     if provider == "mock":
-        # A deterministic snippet that is compatible with code agents.
+        # Deterministic, tool-using code for agent runs in offline mode.
         blob = json.dumps(norm_messages, ensure_ascii=False, sort_keys=True)
-        seed = int(hashlib.blake2b(blob.encode("utf-8"), digest_size=4).hexdigest(), 16)
+        seed = int(hashlib.blake2b(blob.encode('utf-8'), digest_size=4).hexdigest(), 16)
         random.seed(seed)
+
+        full_prompt = "\n".join([m.get('content', '') for m in norm_messages]).lower()
+        wants_candidates = (
+            "candidate hypotheses" in full_prompt
+            or "return a list of dicts" in full_prompt
+            or "final_answer(<the_list>)" in full_prompt
+            or "kind is one of" in full_prompt
+        )
+
+        if wants_candidates:
+            return (
+                "# mock provider: deterministic candidate generation (chat_messages)\n"
+                f"# seed={seed}\n"
+                "G = build_graph()\n"
+                "comms = []\n"
+                "try:\n"
+                "    comms = communities(G, method='greedy', max_communities=8)\n"
+                "except Exception:\n"
+                "    try:\n"
+                "        comms = communities(G)\n"
+                "    except Exception:\n"
+                "        comms = []\n"
+                "bridges = []\n"
+                "try:\n"
+                "    bridges = cross_bridges(G, comms, top_k=12)\n"
+                "except Exception:\n"
+                "    bridges = []\n"
+                "cands = []\n"
+                "for item in (bridges or [])[:10]:\n"
+                "    try:\n"
+                "        u, v, s = item\n"
+                "    except Exception:\n"
+                "        continue\n"
+                "    cands.append({\n"
+                "        'kind': 'cross_bridge',\n"
+                "        'source': str(u),\n"
+                "        'target': str(v),\n"
+                "        'predicate': 'may_relate_to',\n"
+                "        'score': float(s),\n"
+                "        'graph_signals': {'bridge_score': float(s)}\n"
+                "    })\n"
+                "if not cands:\n"
+                "    lp = []\n"
+                "    try:\n"
+                "        lp = link_prediction(G, method='adamic_adar', k=12)\n"
+                "    except Exception:\n"
+                "        lp = []\n"
+                "    for item in (lp or [])[:10]:\n"
+                "        try:\n"
+                "            u, v, s = item\n"
+                "        except Exception:\n"
+                "            continue\n"
+                "        cands.append({\n"
+                "            'kind': 'link_prediction',\n"
+                "            'source': str(u),\n"
+                "            'target': str(v),\n"
+                "            'predicate': 'may_relate_to',\n"
+                "            'score': float(s),\n"
+                "            'graph_signals': {'adamic_adar': float(s)}\n"
+                "        })\n"
+                "final_answer(cands)\n"
+            )
+
         return (
             "# mock provider: deterministic tool-using code (chat_messages)\n"
             f"# seed={seed}\n"

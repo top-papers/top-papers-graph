@@ -660,6 +660,16 @@ def run_cmd(
         "--llm-model",
         help="Явно задать имя модели провайдера.",
     ),
+smol_model_backend: Optional[str] = typer.Option(
+    None,
+    "--smol-model-backend",
+    help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
+),
+smol_model_id: Optional[str] = typer.Option(
+    None,
+    "--smol-model-id",
+    help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
+),
 ) -> None:
     """Полностью автоматический пайплайн: query → papers → temporal KG → hypotheses."""
     # ---- Apply LLM overrides ----
@@ -709,7 +719,19 @@ def run_cmd(
         if llm_model:
             settings.llm_model = llm_model.strip()
 
+# smolagents model overrides (CLI > env)
+if smol_model_backend:
+    settings.smol_model_backend = smol_model_backend.strip()
+if smol_model_id:
+    settings.smol_model_id = smol_model_id.strip()
+
     _apply_llm_overrides()
+
+# smolagents model overrides (CLI > env)
+if smol_model_backend:
+    settings.smol_model_backend = smol_model_backend.strip()
+if smol_model_id:
+    settings.smol_model_id = smol_model_id.strip()
 
     console.print(
         f"[bold]LLM:[/bold] {settings.llm_provider}/{settings.llm_model}  |  "
@@ -748,6 +770,16 @@ def demo_run_cmd(
     ),
     llm_provider: Optional[str] = typer.Option(None, help="Override LLM_PROVIDER for this run (e.g. mock)."),
     llm_model: Optional[str] = typer.Option(None, help="Override LLM_MODEL for this run."),
+smol_model_backend: Optional[str] = typer.Option(
+    None,
+    "--smol-model-backend",
+    help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
+),
+smol_model_id: Optional[str] = typer.Option(
+    None,
+    "--smol-model-id",
+    help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
+),
 ) -> None:
     """Offline demo pipeline: build temporal KG + hypotheses from a tiny built-in corpus.
 
@@ -783,6 +815,16 @@ def smoke_all(
         False,
         help="Also run smoke with LLM_PROVIDER=g4f (requires '.[g4f]' and internet; can be unstable).",
     ),
+smol_model_backend: Optional[str] = typer.Option(
+    None,
+    "--smol-model-backend",
+    help="smolagents model backend for smolagents runs (scireason|transformers|g4f).",
+),
+smol_model_id: Optional[str] = typer.Option(
+    None,
+    "--smol-model-id",
+    help="HF model id/path for smolagents TransformersModel.",
+),
 ) -> None:
     """Run an offline smoke matrix for key pipeline branches."""
 
@@ -797,6 +839,12 @@ def smoke_all(
     agent_backends = ["internal"]
     if importlib.util.find_spec("smolagents") is not None:
         agent_backends.append("smolagents")
+
+# smolagents model overrides (CLI > env)
+if smol_model_backend:
+    settings.smol_model_backend = smol_model_backend.strip()
+if smol_model_id:
+    settings.smol_model_id = smol_model_id.strip()
 
     combos = [
         ("cooccurrence", True, False),

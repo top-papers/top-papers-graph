@@ -1,26 +1,125 @@
 from __future__ import annotations
 
-"""smolagents Tool wrappers for graph algorithms.
+"""smolagents tool set.
 
-We intentionally reuse the *exact same* pure-python implementations used by the built-in
-agent (NetworkX + NumPy + optional PyG), but expose them through the `smolagents.tool`
-decorator so they show up correctly in CodeAgent prompts.
+This module provides **safe, course-friendly** tools for the smolagents CodeAgent.
+
+Goals
+-----
+- Keep the base project runnable without heavy infra.
+- Still expose the core project capabilities as tools:
+  - graph algorithms (NetworkX)
+  - optional research via open APIs (paper search)
+  - lightweight vector store (local in-memory; optional Qdrant)
+  - lightweight graph store (local in-memory)
+
+Notes
+-----
+* Tools are deliberately *small* and *composable* so students can read/extend them.
+* If optional deps are missing, tools degrade gracefully.
 """
 
-import importlib.util
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import networkx as nx
+import math
 
-from ..agentic import graph_tools
+try:  # pragma: no cover
+    import networkx as nx
+except Exception as e:  # pragma: no cover
+    raise RuntimeError("networkx is required for smolagents graph tools") from e
+
+try:  # pragma: no cover
+    from smolagents import tool
+except Exception as e:  # pragma: no cover
+    raise RuntimeError(
+        "smolagents is not installed. Install optional dependency: pip install -e '.[agents]'"
+    ) from e
+
+from ..agentic.graph_tools import (
+    communities_greedy_modularity,
+    cross_community_bridges,
+    graph_summary as _graph_summary,
+    link_prediction as _link_prediction,
+    spectral_link_prediction as _spectral_link_prediction,
+    top_central_nodes,
+)
 from ..config import settings
+from ..llm import embed
+from ..papers.service import search_papers
+
+# Optional: qdrant for a real vector DB (still free/open-source).
+try:  # pragma: no cover
+    from ..graph.qdrant_store import QdrantStore
+
+    _HAS_QDRANT = True
+except Exception:  # pragma: no cover
+    QdrantStore = None  # type: ignore
+    _HAS_QDRANT = False
 
 
-def _require_smolagents():
-    if importlib.util.find_spec("smolagents") is None:
-        raise RuntimeError(
-            "smolagents не установлен. Установите зависимости: pip install -e '.[agents]'"
-        )
+# ---------------------------------------------------------------------------
+# Simple local stores (for CI/offline/classroom)
+# ---------------------------------------------------------------------------
+
+_LOCAL_VECTOR_STORES: Dict[str, Dict[str, Any]] = {}
+_LOCAL_GRAPH_STORES: Dict[str, nx.Graph] = {}
+
+
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    num = 0.0
+    da = 0.0
+    db = 0.0
+    for x, y in zip(a, b):
+        num += float(x) * float(y)
+        da += float(x) * float(x)
+        db += float(y) * float(y)
+    if da <= 0.0 or db <= 0.0:
+        return 0.0
+    return num / (math.sqrt(da) * math.sqrt(db))
+
+
+def _local_vs_upsert(collection: str, ids: List[str], vectors: List[List[float]], payloads: List[Dict[str, Any]]) -> None:
+    store = _LOCAL_VECTOR_STORES.setdefault(collection, {"ids": [], "vecs": [], "payloads": []})
+    store["ids"].extend(list(ids))
+    store["vecs"].extend(list(vectors))
+    store["payloads"].extend(list(payloads))
+
+
+def _local_vs_search(collection: str, query_vector: List[float], limit: int = 8) -> List[Dict[str, Any]]:
+    store = _LOCAL_VECTOR_STORES.get(collection)
+    if not store:
+        return []
+    ids = store.get("ids") or []
+    vecs = store.get("vecs") or []
+    payloads = store.get("payloads") or []
+
+    scored: List[Tuple[float, int]] = []
+    for i, v in enumerate(vecs):
+        try:
+            s = _cosine(query_vector, v)
+        except Exception:
+            s = 0.0
+        scored.append((s, i))
+    scored.sort(key=lambda t: t[0], reverse=True)
+
+    out: List[Dict[str, Any]] = []
+    for s, i in scored[: int(limit)]:
+        out.append({"id": ids[i], "score": float(s), "payload": payloads[i]})
+    return out
+
+
+def _graph_store_put(name: str, G: nx.Graph) -> None:
+    _LOCAL_GRAPH_STORES[name] = G
+
+
+def _graph_store_get(name: str) -> Optional[nx.Graph]:
+    return _LOCAL_GRAPH_STORES.get(name)
+
+
+# ---------------------------------------------------------------------------
+# Tool factory
+# ---------------------------------------------------------------------------
 
 
 def make_graph_tools(
@@ -29,145 +128,244 @@ def make_graph_tools(
     weights: Optional[List[float]] = None,
     directed: bool = False,
 ) -> List[Any]:
-    """Create a list of smolagents tools with closures over the current graph data."""
+    """Create a standard tool set for the graph reasoning agent.
 
-    _require_smolagents()
+    Parameters
+    ----------
+    edges:
+        Edge list (u, v).
+    weights:
+        Optional per-edge weights.
+    directed:
+        Whether to build a DiGraph.
+    """
 
-    from smolagents import tool  # type: ignore
-
-    # Build a graph once and reuse it.
-    _G_cache: Dict[str, nx.Graph] = {}
+    w = weights or [1.0 for _ in edges]
 
     @tool
     def build_graph() -> Any:
-        """Build a NetworkX graph from the current temporal knowledge graph edges.
-
-        Returns:
-            A NetworkX Graph (or DiGraph) with edge weights.
-        """
-
-        if "G" in _G_cache:
-            return _G_cache["G"]
-        G: nx.Graph = nx.DiGraph() if directed else nx.Graph()
-        ws = weights or [1.0] * len(edges)
-        for (u, v), w in zip(edges, ws):
-            if not u or not v or u == v:
+        """Build an in-memory NetworkX graph from the KG edge list."""
+        G = nx.DiGraph() if directed else nx.Graph()
+        for (u, v), ww in zip(edges, w, strict=True):
+            uu = str(u).strip().lower()
+            vv = str(v).strip().lower()
+            if not uu or not vv or uu == vv:
                 continue
-            G.add_edge(str(u), str(v), weight=float(w))
-        _G_cache["G"] = G
+            if G.has_edge(uu, vv):
+                G[uu][vv]["weight"] = float(G[uu][vv].get("weight", 1.0)) + float(ww)
+            else:
+                G.add_edge(uu, vv, weight=float(ww))
         return G
 
     @tool
     def graph_summary(G: Any) -> Dict[str, Any]:
-        """Return basic statistics for a graph.
-
-        Args:
-            G: networkx Graph.
-        """
-
-        return graph_tools.graph_summary(G)
+        """Return basic graph stats: #nodes, #edges, density."""
+        try:
+            return _graph_summary(G)
+        except Exception:
+            try:
+                return {"nodes": int(getattr(G, "number_of_nodes")()), "edges": int(getattr(G, "number_of_edges")())}
+            except Exception:
+                return {}
 
     @tool
     def communities(G: Any, method: str = "greedy", max_communities: int = 12) -> List[List[str]]:
-        """Detect communities.
+        """Community detection.
 
-        Args:
-            G: networkx Graph.
-            method: greedy|lpa.
-            max_communities: maximum number of communities to return.
+        method: only 'greedy' is supported in this lightweight mode.
         """
-
-        method = (method or "greedy").lower()
-        if method in {"lpa", "label", "label_propagation"}:
-            return graph_tools.communities_label_propagation(G, max_communities=max_communities)
-        return graph_tools.communities_greedy_modularity(G, max_communities=max_communities)
+        try:
+            comms = communities_greedy_modularity(G)
+            return [list(c)[:500] for c in comms[: int(max_communities)]]
+        except Exception:
+            return []
 
     @tool
-    def centrality(G: Any, k: int = 10) -> Dict[str, List[Tuple[str, float]]]:
-        """Compute centrality rankings (pagerank, degree, betweenness).
-
-        Args:
-            G: networkx Graph.
-            k: top-k per ranking.
-        """
-
-        return graph_tools.top_central_nodes(G, k=k)
+    def centrality(G: Any, k: int = 10) -> Dict[str, Any]:
+        """Centrality ranking (pagerank/degree/betweenness)."""
+        try:
+            return top_central_nodes(G, k=int(k))
+        except Exception:
+            return {}
 
     @tool
-    def shortest_path_terms(G: Any, source: str, target: str) -> List[str]:
-        """Shortest path between two terms.
-
-        Args:
-            G: networkx Graph.
-            source: source term.
-            target: target term.
-        """
-
-        return graph_tools.shortest_path_terms(G, source, target)
+    def link_prediction(G: Any, method: str = "adamic_adar", k: int = 30) -> List[List[Any]]:
+        """Classic link prediction (adamic_adar|jaccard|preferential_attachment|common_neighbor_centrality)."""
+        try:
+            return [list(x) for x in _link_prediction(G, method=method, k=int(k))]
+        except Exception:
+            return []
 
     @tool
-    def link_prediction(G: Any, method: str = "adamic_adar", k: int = 30) -> List[Tuple[str, str, float]]:
-        """Predict missing edges using classic heuristics.
-
-        Args:
-            G: networkx Graph.
-            method: adamic_adar|jaccard|preferential_attachment|common_neighbor_centrality.
-            k: top-k candidates.
-        """
-
-        return graph_tools.link_prediction(G, method=method, k=k)
+    def spectral_link_prediction(G: Any, dim: int = 8, k: int = 30) -> List[List[Any]]:
+        """Vector baseline: spectral embedding + cosine similarity."""
+        try:
+            return [list(x) for x in _spectral_link_prediction(G, dim=int(dim), k=int(k))]
+        except Exception:
+            return []
 
     @tool
-    def spectral_link_prediction(G: Any, dim: int = 8, k: int = 30) -> List[Tuple[str, str, float]]:
-        """Predict missing edges using a simple spectral embedding + cosine similarity.
+    def cross_bridges(G: Any, comms: List[List[str]], top_k: int = 20) -> List[List[Any]]:
+        """Cross-community candidate edges."""
+        try:
+            return [list(x) for x in cross_community_bridges(G, comms, top_k=int(top_k))]
+        except Exception:
+            return []
 
-        Args:
-            G: networkx Graph.
-            dim: embedding dimension.
-            k: top-k candidates.
-        """
-
-        return graph_tools.spectral_link_prediction(G, dim=dim, k=k)
+    # ----------------------
+    # Research / storage tools
+    # ----------------------
 
     @tool
-    def cross_bridges(G: Any, comms: Sequence[Sequence[str]], top_k: int = 20) -> List[Tuple[str, str, float]]:
-        """Suggest cross-community candidate edges.
+    def api_search_papers(
+        query: str,
+        limit: int = 10,
+        sources: str = "semantic_scholar,openalex",
+        with_abstracts: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Search papers using free/open APIs (best-effort).
 
-        Args:
-            G: networkx Graph.
-            comms: communities (list of lists of node ids).
-            top_k: number of candidates.
+        Returns a list of normalized metadata dicts.
+
+        sources: comma-separated list. Supported: semantic_scholar, openalex, crossref, pubmed, europe_pmc, arxiv.
         """
+        q = (query or "").strip()
+        if not q:
+            return []
+        # map to enum values used in service
+        from ..papers.schema import PaperSource
 
-        return graph_tools.cross_community_bridges(G, comms, top_k=top_k)
+        srcs: List[PaperSource] = []
+        for s in (sources or "").split(","):
+            name = s.strip().lower()
+            if not name:
+                continue
+            try:
+                srcs.append(PaperSource(name))
+            except Exception:
+                continue
+        try:
+            papers = search_papers(q, limit=int(limit), sources=srcs or None, with_abstracts=bool(with_abstracts))
+            return [p.model_dump(mode="json") for p in papers]
+        except Exception:
+            return []
 
-    # Optional PyG tool
-    extra_tools: List[Any] = []
-    if getattr(settings, "hyp_gnn_enabled", False):
+    @tool
+    def vector_index(
+        collection: str,
+        texts: List[str],
+        ids: Optional[List[str]] = None,
+        backend: str = "auto",
+    ) -> Dict[str, Any]:
+        """Index texts into a vector store.
 
-        @tool
-        def gnn_link_prediction(G: Any, k: int = 30) -> List[Tuple[str, str, float]]:
-            """(optional) GNN link prediction using PyTorch Geometric (GraphSAGE baseline).
+        backend:
+          - auto (prefer Qdrant if available)
+          - local (always available, in-memory)
+          - qdrant (requires qdrant-client)
 
-            Args:
-                G: networkx Graph.
-                k: top-k candidates.
-            """
+        Returns {collection, backend, count}.
+        """
+        col = (collection or "agent_tmp").strip() or "agent_tmp"
+        if not texts:
+            return {"collection": col, "backend": "none", "count": 0}
+        ids = ids or [f"item:{i}" for i in range(len(texts))]
+        try:
+            vecs = embed(list(texts))
+        except Exception:
+            vecs = []
+        payloads = [{"text": t} for t in texts]
 
-            from ..hypotheses.gnn_link_prediction import gnn_link_prediction as _gnn
+        use_qdrant = (backend or "auto").lower() in {"auto", "qdrant"} and _HAS_QDRANT
+        if use_qdrant:
+            try:
+                store = QdrantStore(url=getattr(settings, "qdrant_url", ":memory:"))  # type: ignore
+                store.ensure_collection(col, vector_size=len(vecs[0]) if vecs else int(getattr(settings, "hash_embed_dim", 384)))
+                store.upsert(col, ids=list(ids), vectors=list(vecs), payloads=payloads)
+                return {"collection": col, "backend": "qdrant", "count": len(texts)}
+            except Exception:
+                # fall back to local
+                pass
 
-            return _gnn(G, k=k)
+        _local_vs_upsert(col, ids=list(ids), vectors=list(vecs), payloads=payloads)
+        return {"collection": col, "backend": "local", "count": len(texts)}
 
-        extra_tools.append(gnn_link_prediction)
+    @tool
+    def vector_search(collection: str, query: str, limit: int = 8, backend: str = "auto") -> List[Dict[str, Any]]:
+        """Vector search over indexed texts."""
+        col = (collection or "agent_tmp").strip() or "agent_tmp"
+        q = (query or "").strip()
+        if not q:
+            return []
+        try:
+            qv = embed([q])[0]
+        except Exception:
+            qv = []
+
+        use_qdrant = (backend or "auto").lower() in {"auto", "qdrant"} and _HAS_QDRANT
+        if use_qdrant:
+            try:
+                store = QdrantStore(url=getattr(settings, "qdrant_url", ":memory:"))  # type: ignore
+                return store.search(col, query_vector=list(qv), limit=int(limit))
+            except Exception:
+                pass
+
+        return _local_vs_search(col, query_vector=list(qv), limit=int(limit))
+
+    @tool
+    def graph_store_put(name: str, G: Any) -> Dict[str, Any]:
+        """Persist the current graph in a lightweight in-memory graph store."""
+        n = (name or "agent_graph").strip() or "agent_graph"
+        try:
+            _graph_store_put(n, G)
+            return {"ok": True, "name": n, "nodes": int(G.number_of_nodes()), "edges": int(G.number_of_edges())}
+        except Exception as e:
+            return {"ok": False, "name": n, "error": f"{type(e).__name__}: {e}"}
+
+    @tool
+    def graph_store_neighbors(name: str, node: str, limit: int = 20) -> List[str]:
+        """Get neighbors for a node from a stored graph."""
+        n = (name or "agent_graph").strip() or "agent_graph"
+        G = _graph_store_get(n)
+        if G is None:
+            return []
+        nd = (node or "").strip().lower()
+        if not nd or nd not in G:
+            return []
+        nbrs = list(G.neighbors(nd))
+        return [str(x) for x in nbrs[: int(limit)]]
+
+    @tool
+    def graph_store_shortest_path(name: str, source: str, target: str, cutoff: int = 6) -> List[str]:
+        """Shortest path in stored graph (unweighted)."""
+        n = (name or "agent_graph").strip() or "agent_graph"
+        G = _graph_store_get(n)
+        if G is None:
+            return []
+        s = (source or "").strip().lower()
+        t = (target or "").strip().lower()
+        if not s or not t or s not in G or t not in G:
+            return []
+        try:
+            p = nx.shortest_path(G, s, t)
+            if len(p) - 1 > int(cutoff):
+                return []
+            return [str(x) for x in p]
+        except Exception:
+            return []
 
     return [
         build_graph,
         graph_summary,
         communities,
         centrality,
-        shortest_path_terms,
         link_prediction,
         spectral_link_prediction,
         cross_bridges,
-        *extra_tools,
+        api_search_papers,
+        vector_index,
+        vector_search,
+        graph_store_put,
+        graph_store_neighbors,
+        graph_store_shortest_path,
     ]

@@ -160,12 +160,15 @@ def agent_generate_candidates(
             return []
 
     system_prompt = (
-        "You are a graph reasoning agent. Use the provided tools to analyze the graph and propose "
-        "candidate scientific hypotheses as missing links or emerging bridges. "
-        "Prefer candidates that connect different communities and involve central nodes."
-    )
+    "You are a graph reasoning agent. Use the provided tools to analyze the graph and propose "
+    "candidate scientific hypotheses as missing links or emerging bridges. "
+    "Prefer candidates that connect different communities and involve central nodes. "
+    "If you need more evidence, you may (best-effort) search open APIs for papers and store/retrieve "
+    "snippets via the lightweight vector store tools."
+)
 
-    # Select agent backend.
+# Select agent backend.
+
     raw: Any
     if backend == "smolagents":
         try:
@@ -190,14 +193,47 @@ def agent_generate_candidates(
             smol_tools = make_graph_tools(edges=edges, weights=weights, directed=False)
 
             task = (
-                "Using the temporal knowledge graph, propose up to {k} candidate hypotheses as edges (source, predicate, target).\n"
-                "Return a LIST of dicts with keys: kind, source, target, predicate, score, graph_signals.\n"
-                "Where:\n"
-                "- kind is one of: cross_bridge, link_prediction, central_emergence\n"
-                "- predicate is a short snake_case relation like may_relate_to, influences, correlates_with\n"
-                "- score is a float where higher is better\n"
-                "- graph_signals is a dict of floats (e.g. adamic_adar, pagerank_u, pagerank_v, comm_u, comm_v)\n"
-                "You may call: build_graph(), communities(G), centrality(G), link_prediction(G, method=..., k=...), spectral_link_prediction(G, dim=..., k=...), cross_bridges(G, comms, top_k=...).\n"
+                "Using the temporal knowledge graph, propose up to {k} candidate hypotheses as edges (source, predicate, target).
+"
+                "Return a LIST of dicts with keys: kind, source, target, predicate, score, graph_signals.
+"
+                "Where:
+"
+                "- kind is one of: cross_bridge, link_prediction, central_emergence
+"
+                "- predicate is a short snake_case relation like may_relate_to, influences, correlates_with
+"
+                "- score is a float where higher is better
+"
+                "- graph_signals is a dict of floats (e.g. adamic_adar, pagerank_u, pagerank_v, comm_u, comm_v)
+
+"
+                "Core graph tools you may call:
+"
+                "- build_graph()
+"
+                "- communities(G, method='greedy', max_communities=...)
+"
+                "- centrality(G, k=...)
+"
+                "- cross_bridges(G, comms, top_k=...)
+"
+                "- link_prediction(G, method=..., k=...)
+"
+                "- spectral_link_prediction(G, dim=..., k=...)
+
+"
+                "Optional research + storage tools (best-effort, may be empty offline):
+"
+                "- api_search_papers(query, limit=..., sources='semantic_scholar,openalex', with_abstracts=True)
+"
+                "- vector_index(collection, texts, ids=None, backend='auto')
+"
+                "- vector_search(collection, query, limit=..., backend='auto')
+"
+                "- graph_store_put(name, G), graph_store_neighbors(name, node), graph_store_shortest_path(name, src, dst)
+
+"
                 "IMPORTANT: end by calling final_answer(<the_list>)."
             ).format(k=int(top_k))
 
