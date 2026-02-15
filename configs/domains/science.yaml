@@ -9,6 +9,14 @@ kg:
   graph_namespace: "science"
 evaluation:
   primary_goal: "build a verifiable evidence-backed synthesis"
+
+# Optional knobs for the lightweight temporal term graph builder.
+term_graph:
+  # auto | llm_triplets | cooccurrence
+  edge_mode: auto
+  max_terms_per_paper: 25
+  recent_window_years: 3
+  language: en
 artifact_validation:
   # Leave empty for generic domains. Override per domain if you need strict boundary conditions.
   trajectory_required_conditions: []

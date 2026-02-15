@@ -17,6 +17,14 @@ docker compose up -d
 Дефолтный домен — `science` (configs/domains/science.yaml).
 
 ## 4) Найти статьи по вашей теме
+### Вариант A: полностью автоматический пайплайн (рекомендуется)
+```bash
+top-papers-graph run --query "graph neural networks survey" --sources all --top-papers 20
+```
+
+Результаты появятся в `runs/<timestamp>_<slug>/`.
+
+### Вариант B: только поиск (ручная дальнейшая обработка)
 ```bash
 top-papers-graph fetch "graph neural networks survey" --source arxiv --limit 10 --out data/papers/arxiv.json
 top-papers-graph fetch "graph neural networks survey" --source pubmed --limit 10 --out data/papers/pubmed.json

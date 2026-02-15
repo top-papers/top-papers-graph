@@ -34,6 +34,9 @@ class DomainConfig:
     evaluation: Dict[str, Any] = field(default_factory=dict)
     artifact_validation: Dict[str, Any] = field(default_factory=dict)
 
+    # Term graph / temporal KG knobs (optional)
+    term_graph: Dict[str, Any] = field(default_factory=dict)
+
 
 def _candidate_paths(domain_id: str) -> List[Path]:
     """Resolve config candidate paths.
@@ -86,6 +89,7 @@ def load_domain_config(domain_id: Optional[str] = None) -> DomainConfig:
             kg=dict(data.get("kg") or {}),
             evaluation=dict(data.get("evaluation") or {}),
             artifact_validation=dict(data.get("artifact_validation") or {}),
+            term_graph=dict(data.get("term_graph") or {}),
         )
 
     # Fallback

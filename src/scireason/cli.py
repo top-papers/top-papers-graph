@@ -39,6 +39,8 @@ from .temporal.schemas import TemporalTriplet, TimeInterval
 from .agents.debate_graph import run_debate
 from .agents.hypothesis_tester import load_hypothesis_from_json, test_hypothesis
 
+from .pipeline.e2e import run_pipeline
+
 
 app = typer.Typer(help="top-papers-graph CLI (ex SciReason)", add_completion=False)
 console = Console()
@@ -582,6 +584,42 @@ def import_top_papers(
 
     files = export_meta_files(inp, out_dir)
     console.print(f"[green]Generated meta files:[/green] {len(files)} → {out_dir}")
+
+
+@app.command("run")
+def run_cmd(
+    query: str = typer.Option(..., help="Пользовательский запрос (topic/query)."),
+    domain_id: str = typer.Option(
+        None,  # type: ignore[arg-type]
+        help="ID домена (configs/domains/<id>.yaml). По умолчанию берётся из .env (DOMAIN_ID) или science.",
+    ),
+    sources: str = typer.Option(
+        "all",
+        help="Источники через запятую: all|openalex,semantic_scholar,crossref,arxiv,pubmed,europe_pmc,biorxiv.",
+    ),
+    search_limit: int = typer.Option(50, help="Сколько результатов запросить у источников."),
+    top_papers: int = typer.Option(20, help="Сколько лучших статей взять в пайплайн."),
+    out_dir: Path = typer.Option(Path("runs"), help="Куда сохранить артефакты запуска."),
+    multimodal: bool = typer.Option(False, help="Извлекать страницы/картинки (MM) при наличии зависимостей."),
+    no_llm_hypotheses: bool = typer.Option(False, help="Не использовать LLM для переформулировки гипотез."),
+) -> None:
+    """Полностью автоматический пайплайн: query → papers → temporal KG → hypotheses."""
+    did = domain_id or settings.domain_id or "science"
+    src_list = None
+    if sources.strip().lower() != "all":
+        src_list = [s.strip() for s in sources.split(",") if s.strip()]
+
+    run_path = run_pipeline(
+        query=query,
+        domain_id=did,
+        sources=src_list,
+        search_limit=search_limit,
+        top_papers=top_papers,
+        run_dir=out_dir,
+        include_multimodal=multimodal,
+        use_llm_for_hypotheses=not no_llm_hypotheses,
+    )
+    console.print(f"[bold green]Artifacts saved:[/bold green] {run_path}")
 
 
 if __name__ == "__main__":

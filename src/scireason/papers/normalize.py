@@ -163,13 +163,29 @@ def normalize_openalex(work: Dict[str, Any]) -> PaperMetadata:
         source = host_venue.get("source") if isinstance(host_venue.get("source"), dict) else {}
         venue_name = (source.get("display_name") or None)
 
-    # pick a best url / pdf
+    # Pick a best URL/PDF.
+    # OpenAlex may provide multiple "locations" (version of record, preprint, repositories, ...).
+    # For *automatic* ingestion we prefer an OA fulltext copy when available.
     url = None
     pdf_url = None
+
+    best_oa_location = work.get("best_oa_location") if isinstance(work.get("best_oa_location"), dict) else {}
     primary_location = work.get("primary_location") if isinstance(work.get("primary_location"), dict) else {}
-    if isinstance(primary_location, dict):
-        url = primary_location.get("landing_page_url") or work.get("id")
-        pdf_url = (primary_location.get("pdf_url") or None)
+    locations = work.get("locations") if isinstance(work.get("locations"), list) else []
+
+    # URL preference: best OA landing page -> primary landing page -> work id.
+    for loc in (best_oa_location, primary_location, *locations):
+        if isinstance(loc, dict) and loc.get("landing_page_url"):
+            url = str(loc.get("landing_page_url"))
+            break
+    if not url:
+        url = work.get("id")
+
+    # PDF preference: best OA pdf -> primary pdf -> any pdf in locations.
+    for loc in (best_oa_location, primary_location, *locations):
+        if isinstance(loc, dict) and loc.get("pdf_url"):
+            pdf_url = str(loc.get("pdf_url"))
+            break
 
     ids = ExternalIds(doi=doi, openalex=openalex_id, pmid=pmid, arxiv=arxiv)
     rid = PaperMetadata.build_canonical_id(ids, fallback=f"openalex:{openalex_id or ''}")
@@ -208,6 +224,11 @@ def normalize_semantic_scholar(paper: Dict[str, Any]) -> PaperMetadata:
     ids = ExternalIds(doi=doi, pmid=pmid, arxiv=arxiv, semantic_scholar=s2id)
     rid = PaperMetadata.build_canonical_id(ids, fallback=f"s2:{s2id or ''}")
 
+    pdf_url = None
+    oa = paper.get("openAccessPdf")
+    if isinstance(oa, dict):
+        pdf_url = (oa.get("url") or None)
+
     return PaperMetadata(
         id=rid,
         source=PaperSource.semantic_scholar,
@@ -216,6 +237,7 @@ def normalize_semantic_scholar(paper: Dict[str, Any]) -> PaperMetadata:
         authors=authors,
         year=paper.get("year") if isinstance(paper.get("year"), int) else None,
         url=paper.get("url") or None,
+        pdf_url=pdf_url,
         citation_count=paper.get("citationCount") if isinstance(paper.get("citationCount"), int) else None,
         ids=ids,
         raw=paper,

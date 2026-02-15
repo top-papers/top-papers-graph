@@ -5,7 +5,6 @@ from pydantic import TypeAdapter
 
 from ..config import settings
 from ..llm import chat_json
-from ..demos.retriever import retrieve_demos
 from ..demos.render import render_demos_block
 from .schemas import TemporalTriplet
 from .time_parse import default_time_from_paper_year
@@ -51,12 +50,18 @@ def extract_temporal_triplets(
     demo_block = ""
     if enabled:
         k = int(getattr(settings, "demo_top_k_triplets", 3))
-        demos = retrieve_demos(task="temporal_triplets", domain=domain, query=chunk_text, k=k)
-        demo_block = render_demos_block(
-            demos,
-            max_total_chars=int(getattr(settings, "demo_max_chars_total", 3500)),
-            title="Эталонные примеры извлечения триплетов",
-        )
+        try:
+            # Lazy import: demos require Qdrant client/service, but the extractor itself shouldn't.
+            from ..demos.retriever import retrieve_demos  # type: ignore
+
+            demos = retrieve_demos(task="temporal_triplets", domain=domain, query=chunk_text, k=k)
+            demo_block = render_demos_block(
+                demos,
+                max_total_chars=int(getattr(settings, "demo_max_chars_total", 3500)),
+                title="Эталонные примеры извлечения триплетов",
+            )
+        except Exception:
+            demo_block = ""
 
     user = f"""{demo_block}Фрагмент:
 {chunk_text}

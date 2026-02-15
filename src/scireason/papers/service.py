@@ -22,7 +22,92 @@ from .normalize import (
     normalize_pubmed,
     normalize_semantic_scholar,
 )
-from .schema import PaperMetadata, PaperSource
+from .schema import ExternalIds, PaperMetadata, PaperSource
+
+
+def _merge_ids(a, b):
+    """Merge ExternalIds objects (best-effort)."""
+    try:
+        ad = a.model_dump() if a is not None else {}
+    except Exception:
+        ad = {}
+    try:
+        bd = b.model_dump() if b is not None else {}
+    except Exception:
+        bd = {}
+    merged = dict(ad)
+    for k, v in bd.items():
+        if merged.get(k) in (None, "") and v not in (None, ""):
+            merged[k] = v
+    return ExternalIds(**merged)
+
+
+def _merge_paper(a: PaperMetadata, b: PaperMetadata) -> PaperMetadata:
+    """Merge two normalized records for the same canonical id.
+
+    Goal: keep the record usable for downstream automatic ingestion:
+    - prefer a record that has `pdf_url`
+    - keep the longest abstract
+    - keep max(citation_count)
+    - merge external ids
+    - keep `raw` as a per-source bundle for debugging
+    """
+
+    if a.id != b.id:
+        return a
+
+    # Prefer record that has a PDF URL
+    preferred = b if (not a.pdf_url and b.pdf_url) else a
+    other = a if preferred is b else b
+
+    data = preferred.model_dump()
+
+    # Fill blanks from the other record
+    for field in ("title", "url", "pdf_url"):
+        if not data.get(field) and getattr(other, field, None):
+            data[field] = getattr(other, field)
+
+    # Abstract: prefer longer
+    abs_a = (preferred.abstract or "").strip()
+    abs_b = (other.abstract or "").strip()
+    if len(abs_b) > len(abs_a):
+        data["abstract"] = other.abstract
+
+    # Authors
+    if (not preferred.authors) and other.authors:
+        data["authors"] = other.authors
+
+    # Venue
+    if (preferred.venue is None) and (other.venue is not None):
+        data["venue"] = other.venue
+
+    # Year / published_date
+    if data.get("year") is None and other.year is not None:
+        data["year"] = other.year
+    if data.get("published_date") is None and other.published_date is not None:
+        data["published_date"] = other.published_date
+
+    # Citation count: max
+    ca = preferred.citation_count
+    cb = other.citation_count
+    if isinstance(cb, int) and (not isinstance(ca, int) or cb > ca):
+        data["citation_count"] = cb
+
+    # IDs
+    data["ids"] = _merge_ids(preferred.ids, other.ids)
+
+    # raw bundle
+    raw_bundle = {}
+    if isinstance(preferred.raw, dict):
+        raw_bundle[getattr(preferred.source, "value", str(preferred.source))] = preferred.raw
+    if isinstance(other.raw, dict):
+        raw_bundle[getattr(other.source, "value", str(other.source))] = other.raw
+    if raw_bundle:
+        data["raw"] = raw_bundle
+
+    # Keep canonical id stable; pick a best source label
+    data["source"] = preferred.source
+    return PaperMetadata(**data)
 
 
 DEFAULT_SOURCES: List[PaperSource] = [
@@ -92,16 +177,23 @@ def search_papers(
             # Keep best-effort across sources; individual connector failures should not fail the whole call.
             continue
 
-    # De-duplicate by canonical id, prefer earlier sources order.
-    seen = set()
-    uniq: List[PaperMetadata] = []
+    # De-duplicate by canonical id **with field-level merging**.
+    # This is important for a fully automatic ingestion pipeline because different APIs
+    # have complementary strengths (e.g., OpenAlex often provides OA pdf_url, Semantic Scholar
+    # provides strong abstracts/citations).
+    order: List[str] = []
+    by_id: dict[str, PaperMetadata] = {}
     for p in out:
-        if p.id in seen:
+        if not p.id:
             continue
-        seen.add(p.id)
-        uniq.append(p)
+        if p.id not in by_id:
+            by_id[p.id] = p
+            order.append(p.id)
+        else:
+            by_id[p.id] = _merge_paper(by_id[p.id], p)
 
-    return uniq[:limit]
+    merged = [by_id[i] for i in order]
+    return merged[:limit]
 
 
 def get_paper_by_doi(doi: str) -> Optional[PaperMetadata]:

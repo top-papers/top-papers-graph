@@ -23,19 +23,33 @@ pip install -e ".[dev]"
 Скопируйте `.env.example` → `.env`.  
 По умолчанию используется домен `science` (`configs/domains/science.yaml`).
 
-### 3) Поиск статей по вашей теме
+### 3) Полностью автоматический пайплайн (рекомендуется)
+Одна команда:
+```bash
+top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
+```
+
+Артефакты появятся в `runs/<timestamp>_<slug>/`:
+- `temporal_kg.json` — темпоральный граф знаний (термы/связи/временные счётчики)
+- `hypotheses.json` + `hypotheses.md` — ранжированный набор проверяемых гипотез
+- `review_queue/` — шаблоны для экспертной разметки (hypothesis_reviews)
+
+> Пайплайн старается скачать PDF (если доступен OA) и распарсить его через GROBID.
+> Если PDF недоступен, он продолжит работу по абстрактам.
+
+### 4) Поиск статей по вашей теме (отдельный шаг)
 ```bash
 top-papers-graph fetch "graph neural network survey" --source arxiv --limit 10 --out data/papers/arxiv.json
 top-papers-graph fetch "graph neural network survey" --source pubmed --limit 10 --out data/papers/pubmed.json
 ```
 
-### 4) Наружный API (FastAPI)
+### 5) Наружный API (FastAPI)
 ```bash
 pip install -e ".[api]"
 top-papers-graph-api
 ```
 
-### 5) MCP‑сервер
+### 6) MCP‑сервер
 ```bash
 pip install -e ".[mcp]"
 top-papers-graph-mcp
