@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export expert artifacts into training datasets (JSONL).
 
-This is a **lightweight** dataset compiler meant for the 200-300-expert workflow:
+This is a **lightweight** dataset compiler meant for the ≈80-participant workflow:
 
 Inputs (version controlled, small files)
 --------------------------------------

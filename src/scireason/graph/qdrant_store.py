@@ -4,8 +4,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import uuid
 
-from qdrant_client import QdrantClient
-from qdrant_client.http import models as qm
+try:  # pragma: no cover
+    from qdrant_client import QdrantClient
+    from qdrant_client.http import models as qm
+except Exception:  # pragma: no cover
+    QdrantClient = None  # type: ignore[assignment]
+    qm = None  # type: ignore[assignment]
 
 from ..config import settings
 
@@ -24,6 +28,11 @@ class QdrantStore:
 
         Local mode is handy for CI/unit tests and quick smoke checks.
         """
+
+        if QdrantClient is None or qm is None:
+            raise RuntimeError(
+                "qdrant-client is not installed. Install optional dependencies: pip install -e '.[rag]'"
+            )
 
         u = (self.url or "").strip()
         if u == ":memory:":

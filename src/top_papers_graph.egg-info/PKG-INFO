@@ -1,3 +1,66 @@
+Metadata-Version: 2.4
+Name: top-papers-graph
+Version: 0.4.0
+Summary: top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)
+Author: top-papers-graph contributors
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pydantic>=2.6
+Requires-Dist: pydantic-settings>=2.2
+Requires-Dist: typer>=0.12
+Requires-Dist: rich>=13.7
+Requires-Dist: httpx>=0.27
+Requires-Dist: tenacity>=8.2
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: networkx>=3.3
+Requires-Dist: numpy>=1.26
+Requires-Dist: pypdf>=4.0
+Requires-Dist: neo4j>=5.20
+Requires-Dist: qdrant-client>=1.9
+Requires-Dist: litellm>=1.0
+Requires-Dist: langchain-core>=0.2
+Requires-Dist: langgraph>=0.1
+Provides-Extra: embeddings
+Requires-Dist: sentence-transformers>=2.7; extra == "embeddings"
+Provides-Extra: mm
+Requires-Dist: pymupdf>=1.24; extra == "mm"
+Requires-Dist: pillow>=10.0; extra == "mm"
+Requires-Dist: open_clip_torch>=2.24; extra == "mm"
+Requires-Dist: torch>=2.2; extra == "mm"
+Requires-Dist: transformers>=4.44; extra == "mm"
+Requires-Dist: accelerate>=0.33; extra == "mm"
+Requires-Dist: sentencepiece>=0.2; extra == "mm"
+Provides-Extra: temporal
+Requires-Dist: python-dateutil>=2.9; extra == "temporal"
+Requires-Dist: dateparser>=1.2; extra == "temporal"
+Provides-Extra: api
+Requires-Dist: fastapi>=0.110; extra == "api"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "api"
+Provides-Extra: mcp
+Requires-Dist: mcp>=1.0.0; extra == "mcp"
+Provides-Extra: g4f
+Requires-Dist: g4f>=7.1.2; extra == "g4f"
+Provides-Extra: agents
+Requires-Dist: smolagents>=1.0.0; extra == "agents"
+Provides-Extra: battery
+Requires-Dist: pybamm>=25.12.0; extra == "battery"
+Requires-Dist: pandas>=2.2; extra == "battery"
+Requires-Dist: matplotlib>=3.8; extra == "battery"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-xdist>=3.5; extra == "dev"
+Requires-Dist: ruff>=0.5; extra == "dev"
+Requires-Dist: mypy>=1.10; extra == "dev"
+Requires-Dist: types-requests; extra == "dev"
+Requires-Dist: pre-commit>=3.7; extra == "dev"
+Requires-Dist: streamlit>=1.36; extra == "dev"
+Requires-Dist: ragas>=0.1.15; extra == "dev"
+Requires-Dist: deepeval>=3.0; extra == "dev"
+Dynamic: license-file
+
 # top-papers-graph — генерация научных гипотез из графа знаний, который создается на основе научных публикаций и подходит для *любой* тематики
 
 Проект собирает публикации из нескольких крупных источников, нормализует метаданные в единый формат и помогает строить **проверяемый** граф знаний (KG) и evidence‑based синтез по вашей теме.
@@ -22,9 +85,6 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev,agents]"
 ```
-
-> Если вы хотите использовать **g4f** (LLM_PROVIDER=g4f или smolagents+g4f),
-> установите также: `pip install -e ".[g4f]"`.
 
 ### 2) Настройка
 Скопируйте `.env.example` → `.env`.  
@@ -101,16 +161,6 @@ top-papers-graph run --query "..." --llm ollama:llama3.2
 > Если GROBID не запущен, будет fallback‑парсинг PDF через `pypdf` (по умолчанию).
 > Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` (PyMuPDF).
 > Если PDF недоступен, пайплайн продолжит работу по абстрактам.
-
-> **Опционально (GNN mode):** для “более взрослого” режима генерации гипотез через
-> PyTorch Geometric (GNN link prediction) установите `pip install -e ".[gnn]"` и включите
-> `HYP_GNN_ENABLED=1`. Подробности: `docs/gnn.md`.
-
-> **Опционально (smolagents):** чтобы использовать Hugging Face **smolagents CodeAgent** вместо
-> встроенного агента, установите `pip install -e ".[agents]"` и включите
-> `HYP_AGENT_BACKEND=smolagents`.
-> Для **локальных HF моделей**: `pip install -e ".[agents_hf]"`.
-> Подробности: `docs/smolagents.md`.
 
 ### 4) Поиск статей по вашей теме (отдельный шаг)
 ```bash

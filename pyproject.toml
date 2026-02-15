@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "top-papers-graph"
-version = "0.3.1"
-description = "top-papers-graph: scientific paper discovery + knowledge graphs (GraphRAG) + expert supervision"
+version = "0.4.1"
+description = "top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -20,20 +20,28 @@ dependencies = [
   "python-dotenv>=1.0",
   "pyyaml>=6.0",
   "networkx>=3.3",
+  "numpy>=1.26,<2",
+  "pypdf>=4.0",
+
+  # Optional infra clients (services are optional; pipeline falls back to local artifacts)
   "neo4j>=5.20",
   "qdrant-client>=1.9",
+
+  # Optional LLM routing
+  "litellm>=1.0",
+
+  # Lightweight agent workflow helpers already used in the repo
   "langchain-core>=0.2",
   "langgraph>=0.1",
-  "litellm>=1.0",
-  "g4f>=7.1.2",
-  "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]
+# Higher-quality local embeddings
 embeddings = [
   "sentence-transformers>=2.7",
 ]
 
+# Multimodal ingestion + embeddings (optional)
 mm = [
   "pymupdf>=1.24",
   "pillow>=10.0",
@@ -44,11 +52,14 @@ mm = [
   "sentencepiece>=0.2",
 ]
 
+# Temporal parsing helpers
+
 temporal = [
   "python-dateutil>=2.9",
   "dateparser>=1.2",
 ]
 
+# FastAPI service (optional)
 api = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
@@ -58,9 +69,41 @@ mcp = [
   "mcp>=1.0.0",
 ]
 
+# Extra connectors / compatibility
+# g4f is intentionally OPTIONAL (it can be unstable in classroom environments).
+g4f = [
+  "g4f>=7.1.2",
+]
+
+# Optional dependency if you want to compare with Hugging Face smolagents.
+agents = [
+  "smolagents>=1.0.0",
+]
+
+# smolagents + local HF models via TransformersModel
+agents_hf = [
+  "smolagents[transformers]>=1.0.0",
+]
+
+# Optional "adult" GNN mode via PyTorch Geometric.
+# NOTE: PyG itself can be installed via PyPI.
+# For best performance, also install extension wheels (pyg-lib/torch-scatter/...) as described
+# in PyG's installation notes (see docs/gnn.md).
+gnn = [
+  "torch>=2.2",
+  "torch-geometric>=2.6.0",
+]
+
+gnn_ext = [
+  "pyg-lib>=0.4.0",
+  "torch-scatter>=2.1.2",
+  "torch-sparse>=0.6.18",
+  "torch-cluster>=1.6.3",
+  "torch-spline-conv>=1.2.2",
+]
+
 battery = [
   "pybamm>=25.12.0",
-  "numpy>=1.26",
   "pandas>=2.2",
   "matplotlib>=3.8",
 ]
@@ -74,7 +117,7 @@ dev = [
   "pre-commit>=3.7",
   "streamlit>=1.36",
   "ragas>=0.1.15",
-  "deepeval>=3.0"
+  "deepeval>=3.0",
 ]
 
 [project.scripts]

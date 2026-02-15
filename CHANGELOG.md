@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1 — Optional GNN mode (PyTorch Geometric)
+
+### Added
+- Optional **GNN link prediction** mode for hypothesis discovery via **PyTorch Geometric**:
+  - new extra dependencies: `.[gnn]` (+ `.[gnn_ext]` for extension wheels)
+  - new module: `scireason.gnn.pyg_link_prediction` (GraphSAGE + negative sampling)
+  - env flags: `HYP_GNN_ENABLED`, `HYP_GNN_EPOCHS`, `HYP_GNN_HIDDEN_DIM`, `HYP_GNN_NODE_CAP`
+  - docs: `docs/gnn.md` + install helper scripts in `scripts/`
+
+### Fixed
+- Base CLI import no longer requires optional Neo4j/Qdrant dependencies; optional stores now fail with a clear runtime error only when actually used.
+
 ## 0.2.0 — top-papers-graph rename + new data sources
 
 ### Changed

@@ -29,7 +29,7 @@
    - Verification: литература + temporal KG → verdict + план эксперимента
 
 6) **Human‑in‑the‑loop / data flywheel**
-   - 200–300 экспертов создают маленькие артефакты (JSON/YAML):
+   - ≈80 участников курса (экспертов по предметной области) создают маленькие артефакты (JSON/YAML):
      - trajectories (рассуждения)
      - graph_reviews (вердикты по утверждениям)
      - hypothesis_reviews (вердикты по гипотезам)

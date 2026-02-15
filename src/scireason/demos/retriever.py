@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from qdrant_client.http import models as qm
+try:  # pragma: no cover
+    from qdrant_client.http import models as qm
+except Exception:  # pragma: no cover
+    qm = None  # type: ignore[assignment]
 
 from ..config import settings
 from ..llm import embed

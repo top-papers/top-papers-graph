@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from qdrant_client.http import models as qm
+try:  # pragma: no cover
+    from qdrant_client.http import models as qm
+except Exception:  # pragma: no cover
+    qm = None  # type: ignore[assignment]
 
 from ..config import settings
 from ..llm import embed
@@ -24,6 +27,9 @@ def ensure_demo_collection(task: DemoTask, vector_size: Optional[int] = None) ->
     If vector_size is not provided, we infer it from a tiny embedding call.
     """
     name = demo_collection_name(task)
+
+    if qm is None:
+        raise RuntimeError("qdrant-client is not installed. Install optional dependencies: pip install -e '.[rag]'")
     if vector_size is None:
         vector_size = len(embed(["_demo_dim_probe_"])[0])
     qd = QdrantStore()
@@ -74,6 +80,8 @@ def upsert_demos(task: DemoTask, demos: Iterable[DemoExample]) -> int:
 
 
 def demo_filter(*, domain: Optional[str] = None, quality: Optional[str] = None, schema_version: Optional[str] = None) -> qm.Filter:
+    if qm is None:
+        raise RuntimeError("qdrant-client is not installed. Install optional dependencies: pip install -e '.[rag]'")
     must: List[qm.FieldCondition] = []
     if domain:
         must.append(qm.FieldCondition(key="domain", match=qm.MatchValue(value=domain)))

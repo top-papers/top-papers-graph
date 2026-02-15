@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha1
 from typing import Any, Dict, Optional
-from neo4j import GraphDatabase
+try:  # pragma: no cover
+    from neo4j import GraphDatabase
+except Exception:  # pragma: no cover
+    GraphDatabase = None  # type: ignore[assignment]
 
 from ..config import settings
 from ..temporal.schemas import TimeInterval, TemporalTriplet
@@ -21,6 +24,10 @@ class Neo4jTemporalStore:
     password: str = settings.neo4j_password
 
     def __post_init__(self) -> None:
+        if GraphDatabase is None:
+            raise RuntimeError(
+                "neo4j python driver is not installed. Install optional dependencies: pip install -e '.[rag]'"
+            )
         self._driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
 
     def close(self) -> None:

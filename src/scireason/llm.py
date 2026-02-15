@@ -4,9 +4,10 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
 from functools import lru_cache
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 from rich.console import Console
 
@@ -23,6 +24,369 @@ try:
     from g4f.client import Client as G4FClient  # type: ignore
 except Exception:  # pragma: no cover
     G4FClient = None
+
+
+def _resolve_auto_provider() -> str:
+    """Resolve settings.llm_provider='auto' into an actual provider.
+
+    Strategy (course-friendly):
+    1) If local Ollama is reachable -> 'ollama'
+    2) Else if g4f is installed -> 'g4f'
+    3) Else -> 'mock' (offline deterministic)
+    """
+
+    # 1) Ollama reachable?
+    try:
+        import httpx
+
+        base = getattr(settings, "ollama_base_url", "http://localhost:11434")
+        url = base.rstrip("/") + "/api/version"
+        r = httpx.get(url, timeout=1.5)
+        if r.status_code == 200:
+            return "ollama"
+    except Exception:
+        pass
+
+    # 2) g4f installed?
+    if G4FClient is not None:
+        return "g4f"
+
+    return "mock"
+
+
+def _resolve_model_for_ollama(model_req: str) -> str:
+    """If model is 'auto', pick the first available local Ollama model (best effort)."""
+    model_req = (model_req or "").strip()
+    if model_req and model_req.lower() != "auto":
+        return model_req
+
+    try:
+        import httpx
+
+        base = getattr(settings, "ollama_base_url", "http://localhost:11434")
+        url = base.rstrip("/") + "/api/tags"
+        r = httpx.get(url, timeout=2.0)
+        if r.status_code == 200:
+            data = r.json()
+            models = data.get("models") or []
+            if models:
+                name = models[0].get("name")
+                if name:
+                    return str(name)
+    except Exception:
+        pass
+
+    # Conservative default that many installations use in demos.
+    return "llama3.2"
+
+
+def _mock_json(schema_hint: str, user: str) -> Any:
+    """Offline deterministic JSON responses.
+
+    This is NOT intended for quality, only for running the whole pipeline (tests / classroom).
+    """
+    sh = (schema_hint or "").lower()
+
+    # TemporalTriplet[]
+    if "temporaltriplet" in sh or "subject" in sh and "predicate" in sh and "polarity" in sh:
+        # Make 3 toy triplets from the user text tokens.
+        toks = re.findall(r"[a-zA-Z0-9_\-]+", user.lower())
+        toks = [t for t in toks if len(t) >= 4][:12]
+        a = toks[0] if len(toks) > 0 else "a"
+        b = toks[1] if len(toks) > 1 else "b"
+        c = toks[2] if len(toks) > 2 else "c"
+        return [
+            {
+                "subject": a,
+                "predicate": "correlates_with",
+                "object": b,
+                "confidence": 0.55,
+                "polarity": "unknown",
+                "evidence_quote": "(mock) extracted from text",
+                "time": {"start": "2020", "end": "2020", "granularity": "year"},
+            },
+            {
+                "subject": b,
+                "predicate": "influences",
+                "object": c,
+                "confidence": 0.55,
+                "polarity": "unknown",
+                "evidence_quote": "(mock) extracted from text",
+                "time": {"start": "2021", "end": "2021", "granularity": "year"},
+            },
+            {
+                "subject": a,
+                "predicate": "may_relate_to",
+                "object": c,
+                "confidence": 0.5,
+                "polarity": "unknown",
+                "evidence_quote": "(mock) extracted from text",
+                "time": {"start": "2022", "end": "2022", "granularity": "year"},
+            },
+        ]
+
+    # HypothesisDraft
+    if "hypothesisdraft" in sh and "proposed_experiment" in sh:
+        return {
+            "title": "(mock) Graph-derived hypothesis",
+            "premise": "(mock) Premise based on graph signals.",
+            "mechanism": "(mock) Candidate mechanism.",
+            "time_scope": "(mock)",
+            "proposed_experiment": "(mock) Controlled experiment with metrics and ablations.",
+            "supporting_evidence": [],
+            "confidence_score": 5,
+        }
+
+    # Entities extraction
+    if "entities" in sh:
+        toks = re.findall(r"[a-zA-Z0-9_\-]+", user)
+        toks = [t.strip() for t in toks if len(t.strip()) >= 4]
+        uniq: list[str] = []
+        for t in toks:
+            if t.lower() not in {u.lower() for u in uniq}:
+                uniq.append(t)
+            if len(uniq) >= 8:
+                break
+        return {"entities": uniq}
+
+    # HypothesisTestResult
+    if "hypothesistestresult" in sh and "verdict" in sh:
+        return {
+            "verdict": "insufficient_evidence",
+            "summary": "(mock) Not enough evidence in the provided context.",
+            "supporting_evidence": [],
+            "contradicting_evidence": [],
+            "temporal_notes": None,
+            "recommended_experiments": "(mock) Add a targeted experiment.",
+            "confidence_score": 4,
+        }
+
+    # Generic fallback: empty object
+    return {}
+
+
+def chat_text(system: str, user: str, *, temperature: float = 0.2) -> str:
+    """Plain-text LLM call (used by code-writing agents)."""
+
+    provider = (settings.llm_provider or "").lower().strip() or "auto"
+    if provider == "auto":
+        provider = _resolve_auto_provider()
+
+    messages = [
+        {"role": "system", "content": system.strip()},
+        {"role": "user", "content": user.strip()},
+    ]
+
+    if provider == "mock":
+        # For code agents we return a small, safe, deterministic snippet that exercises tools.
+        # This keeps `--llm-provider mock` usable in smoke tests / offline runs.
+        seed = int(hashlib.blake2b((system + user).encode("utf-8"), digest_size=4).hexdigest(), 16)
+        random.seed(seed)
+        return (
+            "# mock provider: deterministic tool-using code\n"
+            "G = None\n"
+            "try:\n"
+            "    G = build_graph()\n"
+            "except Exception:\n"
+            "    pass\n"
+            "summary = graph_summary(G) if G is not None else {}\n"
+            "comms = []\n"
+            "try:\n"
+            "    comms = communities(G) if G is not None else []\n"
+            "except Exception:\n"
+            "    pass\n"
+            "cent = {}\n"
+            "try:\n"
+            "    cent = centrality(G, k=8) if G is not None else {}\n"
+            "except Exception:\n"
+            "    pass\n"
+            "bridges = []\n"
+            "try:\n"
+            "    bridges = cross_bridges(G, comms, top_k=8) if G is not None else []\n"
+            "except Exception:\n"
+            "    pass\n"
+            "_answer = {\"summary\": summary, \"communities\": comms[:3], \"centrality\": cent, \"bridges\": bridges}\n"
+            "try:\n"
+            "    final_answer(_answer)\n"
+            "except Exception:\n"
+            "    final_answer = _answer\n"
+        )
+
+    # ---- g4f ----
+    if provider == "g4f":
+        client = _g4f_client()
+        model_req = (settings.llm_model or "auto").strip() or "auto"
+        model_candidates = _g4f_model_candidates() if model_req.lower() in {"auto", ""} else [model_req]
+        if not model_candidates:
+            model_candidates = ["gpt-4o-mini", "gpt-4o"]
+
+        last_err: Exception | None = None
+        for mname in model_candidates:
+            try:
+                resp = client.chat.completions.create(
+                    model=mname,
+                    messages=messages,
+                    temperature=temperature,
+                )
+                text_out = (resp.choices[0].message.content or "").strip()
+                if text_out:
+                    return text_out
+            except Exception as e:
+                last_err = e
+                continue
+        raise RuntimeError(f"g4f failed (last_err={last_err})")
+
+    # ---- LiteLLM (including ollama/openai/anthropic/etc.) ----
+    if litellm is None:
+        raise RuntimeError("LiteLLM не установлен. Установите зависимости: pip install -e '.[dev]'")
+
+    model = settings.llm_model
+    if provider == "ollama":
+        model = _resolve_model_for_ollama(model)
+        model = f"ollama/{model}" if "/" not in model else model
+    else:
+        model = f"{provider}/{model}" if "/" not in model else model
+
+    resp = litellm.completion(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        **_litellm_kwargs(provider),
+    )
+    return str(resp["choices"][0]["message"]["content"] or "")
+
+
+def _normalize_message_content(content: Any) -> str:
+    """Normalize message content to plain text.
+
+    Some agent frameworks (including `smolagents`) may represent message content as a
+    list of segments, e.g. {"type": "text", "text": "..."}. For maximum provider
+    compatibility we collapse everything into a single string.
+    """
+
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (bytes, bytearray)):
+        try:
+            return content.decode("utf-8", errors="ignore")
+        except Exception:
+            return str(content)
+    if isinstance(content, list):
+        parts: List[str] = []
+        for p in content:
+            if isinstance(p, str):
+                parts.append(p)
+            elif isinstance(p, dict):
+                if p.get("type") == "text":
+                    parts.append(str(p.get("text") or ""))
+                else:
+                    # Best-effort fallback
+                    parts.append(str(p.get("text") or ""))
+            else:
+                parts.append(str(p))
+        return "\n".join([x for x in parts if x])
+    return str(content)
+
+
+def chat_messages(messages: List[Dict[str, Any]], *, temperature: float = 0.2) -> str:
+    """Chat completion over an explicit list of messages.
+
+    This is primarily used by the optional `smolagents` backend, where the agent builds
+    a multi-turn message history.
+    """
+
+    provider = (settings.llm_provider or "").lower().strip() or "auto"
+    if provider == "auto":
+        provider = _resolve_auto_provider()
+
+    norm_messages: List[Dict[str, str]] = []
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        role = str(m.get("role") or "user")
+        content = _normalize_message_content(m.get("content"))
+        norm_messages.append({"role": role, "content": content})
+
+    if provider == "mock":
+        # A deterministic snippet that is compatible with code agents.
+        blob = json.dumps(norm_messages, ensure_ascii=False, sort_keys=True)
+        seed = int(hashlib.blake2b(blob.encode("utf-8"), digest_size=4).hexdigest(), 16)
+        random.seed(seed)
+        return (
+            "# mock provider: deterministic tool-using code (chat_messages)\n"
+            f"# seed={seed}\n"
+            "G = None\n"
+            "try:\n"
+            "    G = build_graph()\n"
+            "except Exception:\n"
+            "    pass\n"
+            "summary = graph_summary(G) if G is not None else {}\n"
+            "comms = []\n"
+            "try:\n"
+            "    comms = communities(G) if G is not None else []\n"
+            "except Exception:\n"
+            "    pass\n"
+            "cent = {}\n"
+            "try:\n"
+            "    cent = centrality(G, k=8) if G is not None else {}\n"
+            "except Exception:\n"
+            "    pass\n"
+            "bridges = []\n"
+            "try:\n"
+            "    bridges = cross_bridges(G, comms, top_k=8) if G is not None else []\n"
+            "except Exception:\n"
+            "    pass\n"
+            "_answer = {\"summary\": summary, \"communities\": comms[:3], \"centrality\": cent, \"bridges\": bridges}\n"
+            "try:\n"
+            "    final_answer(_answer)\n"
+            "except Exception:\n"
+            "    final_answer = _answer\n"
+        )
+
+    # ---- g4f ----
+    if provider == "g4f":
+        client = _g4f_client()
+        model_req = (settings.llm_model or "auto").strip() or "auto"
+        model_candidates = _g4f_model_candidates() if model_req.lower() in {"auto", ""} else [model_req]
+        if not model_candidates:
+            model_candidates = ["gpt-4o-mini", "gpt-4o"]
+
+        last_err: Exception | None = None
+        for mname in model_candidates:
+            try:
+                resp = client.chat.completions.create(
+                    model=mname,
+                    messages=norm_messages,
+                    temperature=temperature,
+                )
+                text_out = (resp.choices[0].message.content or "").strip()
+                if text_out:
+                    return text_out
+            except Exception as e:
+                last_err = e
+                continue
+        raise RuntimeError(f"g4f failed (last_err={last_err})")
+
+    # ---- LiteLLM (including ollama/openai/anthropic/etc.) ----
+    if litellm is None:
+        raise RuntimeError("LiteLLM не установлен. Установите зависимости: pip install -e '.[dev]'")
+
+    model = settings.llm_model
+    if provider == "ollama":
+        model = _resolve_model_for_ollama(model)
+        model = f"ollama/{model}" if "/" not in model else model
+    else:
+        model = f"{provider}/{model}" if "/" not in model else model
+
+    resp = litellm.completion(
+        model=model,
+        messages=norm_messages,
+        temperature=temperature,
+        **_litellm_kwargs(provider),
+    )
+    return str(resp["choices"][0]["message"]["content"] or "")
 
 
 def _strip_code_fences(text: str) -> str:
@@ -305,7 +669,9 @@ def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2
     """Запрос к LLM с требованием вернуть JSON.
     schema_hint — строка-подсказка (например, pydantic model JSON schema или краткое описание).
     """
-    provider = (settings.llm_provider or "").lower()
+    provider = (settings.llm_provider or "").lower().strip() or "auto"
+    if provider == "auto":
+        provider = _resolve_auto_provider()
 
     messages = [
         {"role": "system", "content": system.strip()},
@@ -317,7 +683,11 @@ def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2
     ]
 
 
-    # ---- 1) g4f (default) ----
+    # ---- 0) offline mock ----
+    if provider == "mock":
+        return _mock_json(schema_hint=schema_hint, user=user)
+
+    # ---- 1) g4f ----
     if provider == "g4f":
         client = _g4f_client()
 
@@ -364,20 +734,24 @@ def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2
             f"g4f failed to produce valid JSON (last_err={last_err}; last_text={tail!r})"
         )
 
-    else:
-        # ---- 2) LiteLLM ----
-        if litellm is None:
-            raise RuntimeError("LiteLLM не установлен. Установите зависимости: pip install -e '.[dev]'")
+    # ---- 2) LiteLLM (incl. ollama/openai/anthropic/...) ----
+    if litellm is None:
+        raise RuntimeError("LiteLLM не установлен. Установите зависимости: pip install -e '.[dev]'")
 
-        resp = litellm.completion(
-            model=f"{settings.llm_provider}/{settings.llm_model}"
-            if "/" not in settings.llm_model
-            else settings.llm_model,
-            messages=messages,
-            temperature=temperature,
-            **_litellm_kwargs(settings.llm_provider),
-        )
-        text = resp["choices"][0]["message"]["content"]
+    model = settings.llm_model
+    if provider == "ollama":
+        model = _resolve_model_for_ollama(model)
+        model = f"ollama/{model}" if "/" not in model else model
+    else:
+        model = f"{provider}/{model}" if "/" not in model else model
+
+    resp = litellm.completion(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        **_litellm_kwargs(provider),
+    )
+    text = resp["choices"][0]["message"]["content"]
     return _json_loads_best_effort(text)
 
 

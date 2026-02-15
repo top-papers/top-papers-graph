@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
+
+if importlib.util.find_spec("qdrant_client") is None:
+    pytest.skip("qdrant-client is not installed (optional dependency)", allow_module_level=True)
+
 from scireason.graph.qdrant_store import QdrantStore
 
 

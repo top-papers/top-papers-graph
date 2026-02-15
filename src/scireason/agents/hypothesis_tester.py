@@ -10,7 +10,7 @@ thin, domain-agnostic verification layer that can be used for:
 3) pluggable experiment execution (future, domain-specific)
 
 The goal is to keep the MVP easy to run locally while providing an extensible API for future work
-by 200-300 experts.
+by ≈80 course participants.
 """
 
 import json

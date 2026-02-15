@@ -40,6 +40,7 @@ from .agents.debate_graph import run_debate
 from .agents.hypothesis_tester import load_hypothesis_from_json, test_hypothesis
 
 from .pipeline.e2e import run_pipeline
+from .pipeline.demo import run_demo_pipeline
 
 
 app = typer.Typer(help="top-papers-graph CLI (ex SciReason)", add_completion=False)
@@ -731,6 +732,105 @@ def run_cmd(
         use_llm_for_hypotheses=not no_llm_hypotheses,
     )
     console.print(f"[bold green]Artifacts saved:[/bold green] {run_path}")
+
+
+@app.command("demo-run")
+def demo_run_cmd(
+    query: str = typer.Option("temporal knowledge graph hypothesis", help="Demo query (offline)."),
+    edge_mode: str = typer.Option("cooccurrence", help="cooccurrence|llm_triplets"),
+    out_dir: Path = typer.Option(Path("runs"), help="Where to write demo artifacts."),
+    domain_id: str = typer.Option(None, help="Domain config id (defaults to env DOMAIN_ID or science)."),
+    no_llm_hypotheses: bool = typer.Option(False, help="Disable LLM rewriting for hypotheses."),
+    gnn: bool = typer.Option(False, help="Enable optional GNN link prediction (requires '.[gnn]')."),
+    agent_backend: Optional[str] = typer.Option(
+        None,
+        help="Override HYP_AGENT_BACKEND for this run (internal|smolagents).",
+    ),
+    llm_provider: Optional[str] = typer.Option(None, help="Override LLM_PROVIDER for this run (e.g. mock)."),
+    llm_model: Optional[str] = typer.Option(None, help="Override LLM_MODEL for this run."),
+) -> None:
+    """Offline demo pipeline: build temporal KG + hypotheses from a tiny built-in corpus.
+
+    This command is used for smoke tests and for the first classroom run without network/services.
+    """
+
+    if llm_provider:
+        settings.llm_provider = llm_provider.strip()
+    if llm_model:
+        settings.llm_model = llm_model.strip()
+
+    if gnn:
+        settings.hyp_gnn_enabled = True
+
+    if agent_backend:
+        settings.hyp_agent_backend = agent_backend.strip()
+
+    did = domain_id or settings.domain_id or "science"
+    run_path = run_demo_pipeline(
+        query=query,
+        domain_id=did,
+        edge_mode=edge_mode,
+        out_dir=out_dir,
+        use_llm_for_hypotheses=not no_llm_hypotheses,
+    )
+    console.print(f"[bold green]Demo artifacts saved:[/bold green] {run_path}")
+
+
+@app.command("smoke-all")
+def smoke_all(
+    out_dir: Path = typer.Option(Path("runs"), help="Where to write artifacts."),
+    include_g4f: bool = typer.Option(
+        False,
+        help="Also run smoke with LLM_PROVIDER=g4f (requires '.[g4f]' and internet; can be unstable).",
+    ),
+) -> None:
+    """Run an offline smoke matrix for key pipeline branches."""
+
+    # Prefer deterministic offline mode by default.
+    llm_providers = ["mock"]
+    if include_g4f:
+        llm_providers.append("g4f")
+
+    # Try both agent backends if smolagents is available.
+    import importlib.util
+
+    agent_backends = ["internal"]
+    if importlib.util.find_spec("smolagents") is not None:
+        agent_backends.append("smolagents")
+
+    combos = [
+        ("cooccurrence", True, False),
+        ("cooccurrence", False, False),
+        ("llm_triplets", True, False),
+        ("llm_triplets", False, False),
+        # Optional GNN branch (best-effort; will fall back if PyG isn't installed)
+        ("cooccurrence", True, True),
+        ("cooccurrence", False, True),
+    ]
+    for llm_provider in llm_providers:
+        settings.llm_provider = llm_provider
+        settings.llm_model = "mock" if llm_provider == "mock" else (settings.llm_model or "auto")
+
+        for agent_backend in agent_backends:
+            settings.hyp_agent_backend = agent_backend
+            for edge_mode, no_llm, gnn in combos:
+                settings.hyp_gnn_enabled = bool(gnn)
+                console.print(
+                    f"[cyan]Smoke[/cyan] llm_provider={llm_provider} agent_backend={agent_backend} edge_mode={edge_mode} no_llm_hypotheses={no_llm} gnn={gnn}"
+                )
+                rp = run_demo_pipeline(
+                    query="demo smoke",
+                    domain_id=settings.domain_id or "science",
+                    edge_mode=edge_mode,
+                    out_dir=out_dir,
+                    use_llm_for_hypotheses=not no_llm,
+                )
+                # Ensure key artifacts exist
+                for f in ["paper_records.json", "temporal_kg.json", "hypotheses.json"]:
+                    p = rp / f
+                    if not p.exists():
+                        raise RuntimeError(f"Smoke failed: missing {p}")
+    console.print("[bold green]Smoke-all: OK[/bold green]")
 
 
 if __name__ == "__main__":

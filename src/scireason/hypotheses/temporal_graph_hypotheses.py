@@ -15,10 +15,27 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from rich.console import Console
 
+from ..config import settings
 from ..llm import chat_json
 from ..reward.rule_based import RuleBasedReward
 from ..schemas import Citation, HypothesisDraft
 from ..temporal.temporal_kg_builder import EdgeStats, PaperRecord, TemporalKnowledgeGraph
+
+# Optional GNN link prediction (PyTorch Geometric). Must not break base installation.
+try:  # pragma: no cover
+    from ..agentic.graph_tools import build_nx_graph
+    from ..gnn.pyg_link_prediction import PyGLinkPredConfig, PyGUnavailableError, pyg_link_prediction
+except Exception:  # pragma: no cover
+    build_nx_graph = None
+    PyGLinkPredConfig = None
+    PyGUnavailableError = Exception
+    pyg_link_prediction = None
+
+# Optional agentic enhancer (code-writing) that can use graph algorithms.
+try:  # pragma: no cover
+    from ..agents.graph_candidate_agent import agent_generate_candidates
+except Exception:  # pragma: no cover
+    agent_generate_candidates = None
 
 
 console = Console()
@@ -84,6 +101,8 @@ def generate_candidates(
     kg: TemporalKnowledgeGraph,
     *,
     papers: Sequence[PaperRecord],
+    query: str = "",
+    domain: str = "",
     top_k: int = 10,
     recent_window_years: int = 3,
     min_edge_count: int = 2,
@@ -231,8 +250,100 @@ def generate_candidates(
             )
         )
 
+    # ---- 2b) Missing links via GNN (optional; PyTorch Geometric) ----
+    # This is intentionally best-effort: if PyG is not installed, we fall back to classic methods.
+    gnn_missing: List[HypothesisCandidate] = []
+    if (
+        bool(getattr(settings, "hyp_gnn_enabled", False))
+        and pyg_link_prediction is not None
+        and PyGLinkPredConfig is not None
+        and build_nx_graph is not None
+    ):
+        try:
+            cfg = PyGLinkPredConfig(
+                epochs=int(getattr(settings, "hyp_gnn_epochs", 80) or 80),
+                hidden_dim=int(getattr(settings, "hyp_gnn_hidden_dim", 64) or 64),
+                lr=float(getattr(settings, "hyp_gnn_lr", 0.01) or 0.01),
+                node_cap=int(getattr(settings, "hyp_gnn_node_cap", 300) or 300),
+                seed=int(getattr(settings, "hyp_gnn_seed", 7) or 7),
+                device="cpu",
+            )
+            G = build_nx_graph(kg, directed=False, min_total_count=1)
+            preds = pyg_link_prediction(G, top_k=int(top_k), config=cfg)
+        except PyGUnavailableError as e:
+            console.print("[yellow]GNN disabled/unavailable:[/yellow] ", end="")
+            console.print(str(e), markup=False)
+            preds = []
+        except Exception as e:
+            console.print("[yellow]GNN link prediction failed:[/yellow] ", end="")
+            console.print(f"{type(e).__name__}: {e}", markup=False)
+            preds = []
+
+        for u, w, prob in preds:
+            # evidence: papers that mention both u and w (best-effort)
+            ev: List[Citation] = []
+            ul, wl = str(u).lower(), str(w).lower()
+            for pr in papers:
+                low = pr.text.lower()
+                if ul in low and wl in low:
+                    ev.append(Citation(source_id=pr.paper_id, text_snippet=_sentence_snippet(pr.text, ul, wl)))
+                if len(ev) >= 3:
+                    break
+
+            gnn_missing.append(
+                HypothesisCandidate(
+                    kind="gnn_missing_link",
+                    source=str(u),
+                    target=str(w),
+                    predicate="may_relate_to",
+                    # Scale to be comparable with other heuristic scores.
+                    score=float(prob) * 10.0,
+                    time_scope=time_scope,
+                    evidence=ev,
+                    graph_signals={
+                        "gnn_prob": float(prob),
+                        "gnn_hidden_dim": float(cfg.hidden_dim),
+                        "gnn_epochs": float(cfg.epochs),
+                    },
+                )
+            )
+
     # Combine
-    out = emerging + missing
+    out = emerging + missing + gnn_missing
+
+    # ---- 3) Agentic graph reasoning (optional) ----
+    if agent_generate_candidates is not None:
+        try:
+            agent_cands = agent_generate_candidates(
+                kg,
+                papers=papers,
+                query=query,
+                domain=domain,
+                top_k=top_k,
+                recent_window_years=recent_window_years,
+            )
+        except Exception:
+            agent_cands = []
+
+        # Map to HypothesisCandidate and avoid exact duplicates.
+        seen = {(c.source, c.predicate, c.target) for c in out}
+        for ac in agent_cands:
+            k = (ac.source, ac.predicate, ac.target)
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(
+                HypothesisCandidate(
+                    kind=f"agent_{ac.kind}",
+                    source=ac.source,
+                    target=ac.target,
+                    predicate=ac.predicate,
+                    score=float(ac.score),
+                    time_scope=ac.time_scope,
+                    evidence=ac.evidence,
+                    graph_signals={"agent_score": float(ac.score), **(ac.graph_signals or {})},
+                )
+            )
     out.sort(key=lambda c: c.score, reverse=True)
     return out[: top_k]
 
@@ -316,7 +427,7 @@ def generate_hypotheses(
 ) -> List[HypothesisDraft]:
     """Generate ranked hypothesis drafts from a temporal KG."""
 
-    candidates = generate_candidates(kg, papers=papers, top_k=top_k)
+    candidates = generate_candidates(kg, papers=papers, query=query, domain=domain, top_k=top_k)
     drafts: List[HypothesisDraft] = []
 
     for c in candidates:

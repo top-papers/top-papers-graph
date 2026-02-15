@@ -7,30 +7,22 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # ===== LLM =====
-    # Default: g4f (routes requests to available providers; see g4f docs).
-    # You can always switch back to LiteLLM providers via env:
-    #   LLM_PROVIDER=ollama  LLM_MODEL=llama3.2
-    llm_provider: str = "g4f"  # g4f|ollama|openai|anthropic|...
-    # Default: let g4f auto-route to a working model/provider.
-    # You can still pin a specific model via env/CLI (e.g. LLM_MODEL=deepseek-r1).
+    # Default: `auto` for classroom robustness.
+    # auto -> try local Ollama (if reachable) -> g4f (if installed) -> LiteLLM providers -> mock (offline)
+    llm_provider: str = "auto"  # auto|mock|ollama|g4f|openai|anthropic|...
     llm_model: str = "auto"
     ollama_base_url: str = "http://localhost:11434"
 
     # g4f fine-tuning (optional)
-    # Comma-separated provider class names to try in order (RetryProvider).
-    # Example: "Phind,FreeChatgpt,Liaobots".
     g4f_providers: str | None = None
-    # Optional api_key for providers that require it.
     g4f_api_key: str | None = None
 
     # ===== Embeddings =====
-    # Default: hash embeddings (no heavyweight deps, no API keys). If you want higher quality
-    # local embeddings: `pip install -e '.[embeddings]'` and set EMBED_PROVIDER=sentence-transformers.
     embed_provider: str = "hash"  # hash|sentence-transformers|openai|ollama|...
     embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     hash_embed_dim: int = 384
 
-    # ===== Infra =====
+    # ===== Infra (optional services) =====
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "please_change_me"
@@ -45,22 +37,19 @@ class Settings(BaseSettings):
     http_cache_ttl_seconds: int = 7 * 24 * 3600
     http_timeout_seconds: int = 30
 
-
     # ===== External APIs =====
-    # A single place to provide your contact email for "polite" API pools (Crossref/OpenAlex/etc.).
     contact_email: str | None = None
-    # Optional explicit User-Agent. If not set, we will build one from the project name + contact_email.
     user_agent: str | None = None
 
     # Semantic Scholar
     s2_api_key: str | None = None
 
-    # NCBI / PubMed (E-utilities). API key is optional but can raise rate limits.
+    # NCBI / PubMed
     ncbi_api_key: str | None = None
     ncbi_tool: str = "top-papers-graph"
     ncbi_email: str | None = None
 
-    # Crossref / OpenAlex "polite" pool mailto (optional; falls back to contact_email)
+    # Crossref / OpenAlex
     crossref_mailto: str | None = None
     openalex_mailto: str | None = None
     openalex_api_key: str | None = None
@@ -87,8 +76,46 @@ class Settings(BaseSettings):
     temporal_default_granularity: str = "year"  # year|month|day
 
     # ===== Domain =====
-    domain_id: str = "science"  # e.g. ied_fastcharge
-    domain_config_path: str | None = None  # optional explicit path to configs/domains/<id>.yaml
+    domain_id: str = "science"
+    domain_config_path: str | None = None
+
+    # ===== Agentic hypothesis generation (code-writing agent) =====
+    hyp_agent_enabled: bool = True
+    # internal|smolagents
+    # - internal: lightweight built-in code agent (works fully offline with --llm-provider mock)
+    # - smolagents: Hugging Face smolagents CodeAgent (optional dependency)
+    hyp_agent_backend: str = "internal"
+    hyp_agent_max_steps: int = 4
+    hyp_agent_timeout_seconds: int = 20
+
+    # ===== smolagents integration (optional) =====
+    # Only used when HYP_AGENT_BACKEND=smolagents.
+    #
+    # smol_model_backend:
+    # - scireason: wrap this project's LLM router (LLM_PROVIDER=auto|g4f|ollama|...) into a smolagents Model
+    # - transformers: smolagents.TransformersModel for local HF models (requires smolagents[transformers])
+    # - g4f: direct smolagents Model that calls g4f client (requires g4f)
+    smol_model_backend: str = "scireason"
+    smol_model_id: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+    smol_max_new_tokens: int = 768
+    smol_device_map: str | None = None
+    smol_torch_dtype: str | None = None  # e.g. float16|bfloat16
+    smol_g4f_model: str = "auto"
+    smol_executor: str = "local"  # local|docker (docker requires Docker)
+    smol_print_steps: bool = False
+
+    # ===== Optional GNN (PyTorch Geometric) for hypothesis discovery =====
+    # Disabled by default to keep the base installation lightweight.
+    # Enable via:
+    #   HYP_GNN_ENABLED=1
+    hyp_gnn_enabled: bool = False
+    hyp_gnn_epochs: int = 80
+    hyp_gnn_hidden_dim: int = 64
+    hyp_gnn_lr: float = 0.01
+    # To keep training fast for classroom-sized runs, we restrict to an induced
+    # subgraph of the most connected terms.
+    hyp_gnn_node_cap: int = 300
+    hyp_gnn_seed: int = 7
 
 
 settings = Settings()
