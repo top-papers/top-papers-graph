@@ -720,8 +720,7 @@ smol_model_id: Optional[str] = typer.Option(
             settings.llm_model = llm_model.strip()
 
 # smolagents model overrides (CLI > env)
-if settings.smol_model_backend:
-    settings.smol_model_backend = smol_model_backend.strip()
+
 if smol_model_id:
     settings.smol_model_id = smol_model_id.strip()
 
