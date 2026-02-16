@@ -719,8 +719,12 @@ def run_cmd(
         if llm_model:
             settings.llm_model = llm_model.strip()
 
+<<<<<<< HEAD
     # Apply overrides (CLI > env/config defaults)
     _apply_llm_overrides()
+=======
+
+>>>>>>> 4b764f1ef18eb8f9b4f2392395b6de0d99c57e12
 
     # smolagents model overrides (CLI > env)
     if smol_model_backend:
