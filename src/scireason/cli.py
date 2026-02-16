@@ -719,12 +719,7 @@ smol_model_id: Optional[str] = typer.Option(
         if llm_model:
             settings.llm_model = llm_model.strip()
 
-# smolagents model overrides (CLI > env)
 
-if smol_model_id:
-    settings.smol_model_id = smol_model_id.strip()
-
-    _apply_llm_overrides()
 
 # smolagents model overrides (CLI > env)
 if smol_model_backend:
