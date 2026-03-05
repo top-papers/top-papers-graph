@@ -15,6 +15,7 @@ Designed to be used in CI on pull requests.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -54,82 +55,167 @@ def _is_empty(v: Any) -> bool:
     return False
 
 
+def _resolve_domain_config(domain_value: str) -> Dict[str, Any]:
+    """Resolve domain config from configs/domains/*.yaml.
+
+    Supports both:
+    - legacy domain id (e.g. "science")
+    - Wikidata QID stored in trajectory artifact (e.g. "Q336")
+    """
+    dv = (domain_value or "").strip()
+    if not dv:
+        return {}
+
+    qid = dv.upper() if re.fullmatch(r"Q\d+", dv.upper()) else ""
+
+    domain_dir = REPO_ROOT / "configs" / "domains"
+    for cfg_path in sorted(domain_dir.glob("*.yaml")):
+        try:
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+
+        # QID match
+        if qid:
+            if str(cfg.get("wikidata_qid") or "").strip().upper() == qid:
+                return cfg
+            continue
+
+        # legacy match
+        domain_id = str(cfg.get("domain_id") or "").strip().lower()
+        stem = cfg_path.stem.strip().lower()
+        dv_norm = dv.strip().lower()
+        if dv_norm in {domain_id, stem}:
+            return cfg
+
+    return {}
+
+
 def _required_condition_keys(domain: str) -> List[str]:
     """Domain-specific condition requirements for trajectories.
 
-    Why: different scientific domains have different "boundary conditions" that must accompany a claim.
-    The list should be defined in the domain YAML (artifact_validation.trajectory_required_conditions).
+    For artifact v2 the trajectory stores `domain` as a Wikidata QID (e.g. Q336).
+    We map it back to configs/domains/*.yaml via `wikidata_qid`.
     """
-    d = (domain or "").strip().lower()
-
-    # Try load from domain config: configs/domains/<domain>.yaml
-    candidate_ids: List[str] = []
-    if d:
-        candidate_ids.append(d)
-        # common normalization: keep only letters/numbers/underscore
-        norm = "".join(ch if ch.isalnum() else "_" for ch in d)
-        if norm != d:
-            candidate_ids.append(norm)
-
-    for cid in candidate_ids:
-        cfg_path = REPO_ROOT / "configs" / "domains" / f"{cid}.yaml"
-        if not cfg_path.exists():
-            continue
-        try:
-            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-            av = cfg.get("artifact_validation") or {}
-            req = av.get("trajectory_required_conditions") or []
-            if isinstance(req, list):
-                return [str(x) for x in req]
-        except Exception:
-            pass
-
+    cfg = _resolve_domain_config(domain)
+    av = (cfg.get("artifact_validation") or {}) if isinstance(cfg, dict) else {}
+    req = av.get("trajectory_required_conditions") or []
+    if isinstance(req, list):
+        return [str(x) for x in req]
     return []
+
 
 
 def validate_trajectory(path: Path) -> List[str]:
     errs: List[str] = []
     doc = _load_yaml(path)
 
+    artifact_version = int(doc.get("artifact_version") or 1)
+    domain = str(doc.get("domain") or "").strip()
+
+    if _is_empty(domain):
+        errs.append("domain required")
+
     steps = doc.get("steps", [])
     if not isinstance(steps, list) or len(steps) == 0:
-        return ["steps[] must be a non-empty list"]
+        errs.append("steps[] must be a non-empty list")
+        return errs
+
+    n_steps = len(steps)
+    required_keys = _required_condition_keys(domain) if domain else []
 
     for i, step in enumerate(steps, start=1):
         if not isinstance(step, dict):
             errs.append(f"step {i}: must be object")
             continue
 
-        evidence = step.get("evidence", {})
-        conditions = step.get("conditions", {})
-
         if _is_empty(step.get("claim")):
             errs.append(f"step {i}: missing claim")
 
-        if not isinstance(evidence, dict) or _is_empty(evidence):
-            errs.append(f"step {i}: missing evidence")
-        else:
-            if _is_empty(evidence.get("source")):
-                errs.append(f"step {i}: evidence.source required")
-            if _is_empty(evidence.get("page")):
-                errs.append(f"step {i}: evidence.page required")
-            if _is_empty(evidence.get("snippet_or_summary")):
-                errs.append(f"step {i}: evidence.snippet_or_summary required")
-            etype = str(evidence.get("type", "")).strip().lower()
-            if etype in {"figure", "table"} and _is_empty(evidence.get("figure_or_table")):
-                errs.append(f"step {i}: evidence.figure_or_table required for {etype}")
-
+        # conditions
+        conditions = step.get("conditions", {})
         if not isinstance(conditions, dict) or _is_empty(conditions):
             errs.append(f"step {i}: missing conditions")
         else:
-            # Domain-specific required condition keys (configurable)
-            domain = str(doc.get("domain") or "").strip().lower()
-            required = _required_condition_keys(domain)
-            for k in required:
+            for k in required_keys:
                 if _is_empty(conditions.get(k)):
-                    errs.append(f"step {i}: conditions.{k} required (use 'unknown' if not stated)")
+                    errs.append(f"step {i}: conditions.{k} required for domain={domain}")
+
+        # inference / next_question (recommended to be non-empty)
+        if _is_empty(step.get("inference")):
+            errs.append(f"step {i}: missing inference")
+        if _is_empty(step.get("next_question")):
+            errs.append(f"step {i}: missing next_question")
+
+        if artifact_version >= 2:
+            # v2: sources[]
+            sources = step.get("sources", [])
+            if not isinstance(sources, list) or len(sources) == 0:
+                errs.append(f"step {i}: missing sources[] (must be non-empty list)")
+            else:
+                for j, src in enumerate(sources, start=1):
+                    if not isinstance(src, dict):
+                        errs.append(f"step {i} source {j}: must be object")
+                        continue
+                    stype = str(src.get("type") or "").strip().lower()
+                    if stype == "figure":
+                        stype = "image"
+                    if stype not in {"text", "image", "table"}:
+                        errs.append(f"step {i} source {j}: invalid type='{src.get('type')}' (use text/image/table)")
+                    if _is_empty(src.get("source")):
+                        errs.append(f"step {i} source {j}: source required")
+                    if _is_empty(src.get("snippet_or_summary")):
+                        errs.append(f"step {i} source {j}: snippet_or_summary required")
+        else:
+            # v1 legacy: evidence{}
+            evidence = step.get("evidence", {})
+            if not isinstance(evidence, dict) or _is_empty(evidence):
+                errs.append(f"step {i}: missing evidence")
+            else:
+                if _is_empty(evidence.get("source")):
+                    errs.append(f"step {i}: evidence.source required")
+                if _is_empty(evidence.get("page")):
+                    errs.append(f"step {i}: evidence.page required")
+                if _is_empty(evidence.get("snippet_or_summary")):
+                    errs.append(f"step {i}: evidence.snippet_or_summary required")
+                etype = str(evidence.get("type", "")).strip().lower()
+                if etype in {"figure", "table"} and _is_empty(evidence.get("figure_or_table")):
+                    errs.append(f"step {i}: evidence.figure_or_table required for {etype}")
+
+    # edges (optional): directed graph as ordered pairs [from, to]
+    edges = doc.get("edges", [])
+    if edges is None:
+        edges = []
+    if not _is_empty(edges):
+        if not isinstance(edges, list):
+            errs.append("edges must be a list of [from,to]")
+        else:
+            seen: set[tuple[int, int]] = set()
+            for k, e in enumerate(edges, start=1):
+                if not isinstance(e, (list, tuple)) or len(e) != 2:
+                    errs.append(f"edge {k}: must be [from, to]")
+                    continue
+                a, b = e[0], e[1]
+                try:
+                    a_i = int(a)
+                    b_i = int(b)
+                except Exception:
+                    errs.append(f"edge {k}: from/to must be integers")
+                    continue
+                if a_i == b_i:
+                    errs.append(f"edge {k}: self-loop {a_i}->{b_i} is not allowed")
+                    continue
+                if not (1 <= a_i <= n_steps) or not (1 <= b_i <= n_steps):
+                    errs.append(f"edge {k}: out of range (steps are 1..{n_steps})")
+                    continue
+                t = (a_i, b_i)
+                if t in seen:
+                    errs.append(f"edge {k}: duplicate edge {a_i}->{b_i}")
+                else:
+                    seen.add(t)
 
     return errs
+
 
 
 def validate_graph_review(path: Path) -> List[str]:
