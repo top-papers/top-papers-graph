@@ -751,6 +751,86 @@ def run_cmd(
     console.print(f"[bold green]Artifacts saved:[/bold green] {run_path}")
 
 
+@app.command("export-temporal-events")
+def export_temporal_events(
+    out: Path = typer.Option(Path("runs/temporal_events.json"), help="Where to save the exported event stream JSON."),
+    limit: int = typer.Option(5000, help="Maximum number of Neo4j events to export."),
+) -> None:
+    """Export the Event layer from Neo4j for temporal model training/evaluation."""
+    store = Neo4jTemporalStore()
+    try:
+        rows = store.export_event_stream(limit=limit)
+    finally:
+        store.close()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    console.print(f"[green]Exported events:[/green] {out} (n={len(rows)})")
+
+
+@app.command("train-tgn")
+def train_tgn(
+    temporal_kg_json: Path = typer.Option(..., help="Path to temporal_kg.json produced by the pipeline."),
+    out: Path = typer.Option(Path("runs/tgn_predictions.json"), help="Where to save top temporal link predictions."),
+    top_k: int = typer.Option(20, help="Number of temporal link predictions to keep."),
+) -> None:
+    """Train/evaluate the lightweight TGNN-style predictor on a temporal KG artifact."""
+    from .temporal.temporal_kg_builder import TemporalKnowledgeGraph, EdgeStats, NodeStats
+    from .tgnn.event_dataset import build_event_stream, chronological_split, event_stats
+    from .tgnn.tgn_link_prediction import TGNLinkPredConfig, tgn_link_prediction
+
+    raw = json.loads(temporal_kg_json.read_text(encoding="utf-8"))
+    kg = TemporalKnowledgeGraph(meta=dict(raw.get("meta") or {}))
+    for n in raw.get("nodes", []):
+        term = str(n.get("term") or "")
+        if not term:
+            continue
+        kg.nodes[term] = NodeStats(term=term, doc_freq=int(n.get("doc_freq") or 0), yearly_doc_freq=dict(n.get("yearly_doc_freq") or {}))
+    for e in raw.get("edges", []):
+        edge = EdgeStats(
+            source=str(e.get("source") or ""),
+            target=str(e.get("target") or ""),
+            predicate=str(e.get("predicate") or "may_relate_to"),
+            directed=bool(e.get("directed", True)),
+            total_count=int(e.get("total_count") or 0),
+            yearly_count={int(k): int(v) for k, v in dict(e.get("yearly_count") or {}).items()},
+            confidence_sum=float(e.get("mean_confidence") or 0.0) * max(1, int(e.get("total_count") or 1)),
+            confidence_n=max(1, int(e.get("total_count") or 1)),
+            polarity_counts=dict(e.get("polarity_counts") or {"supports": 0, "contradicts": 0, "unknown": 0}),
+            papers=set(e.get("papers") or []),
+            evidence_quotes=list(e.get("evidence_quotes") or []),
+            features=dict(e.get("features") or {}),
+            score=float(e.get("score") or 0.0),
+        )
+        kg.edges.append(edge)
+
+    events = build_event_stream(kg)
+    train_events, valid_events, test_events = chronological_split(events)
+    preds = tgn_link_prediction(
+        train_events + valid_events,
+        top_k=top_k,
+        config=TGNLinkPredConfig(
+            recent_window_years=int(getattr(settings, "hyp_tgnn_recent_window_years", 3) or 3),
+            recency_half_life_years=float(getattr(settings, "hyp_tgnn_half_life_years", 2.0) or 2.0),
+            min_candidate_score=float(getattr(settings, "hyp_tgnn_min_candidate_score", 0.05) or 0.05),
+        ),
+    )
+    payload = {
+        "stats": {
+            **event_stats(events),
+            "train_events": len(train_events),
+            "valid_events": len(valid_events),
+            "test_events": len(test_events),
+        },
+        "predictions": [
+            {"source": u, "target": v, "score": score}
+            for u, v, score in preds
+        ],
+    }
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    console.print(f"[green]Saved TGNN predictions:[/green] {out}")
+
+
 @app.command("demo-run")
 def demo_run_cmd(
     query: str = typer.Option("temporal knowledge graph hypothesis", help="Demo query (offline)."),
@@ -758,23 +838,24 @@ def demo_run_cmd(
     out_dir: Path = typer.Option(Path("runs"), help="Where to write demo artifacts."),
     domain_id: str = typer.Option(None, help="Domain config id (defaults to env DOMAIN_ID or science)."),
     no_llm_hypotheses: bool = typer.Option(False, help="Disable LLM rewriting for hypotheses."),
-    gnn: bool = typer.Option(False, help="Enable optional GNN link prediction (requires '.[gnn]')."),
+    tgnn: bool = typer.Option(True, help="Enable TGNN/TGN-style temporal link prediction (default on)."),
+    gnn: bool = typer.Option(False, help="Enable optional static GNN baseline (requires '.[gnn]')."),
     agent_backend: Optional[str] = typer.Option(
         None,
         help="Override HYP_AGENT_BACKEND for this run (internal|smolagents).",
     ),
     llm_provider: Optional[str] = typer.Option(None, help="Override LLM_PROVIDER for this run (e.g. mock)."),
     llm_model: Optional[str] = typer.Option(None, help="Override LLM_MODEL for this run."),
-smol_model_backend: Optional[str] = typer.Option(
-    None,
-    "--smol-model-backend",
-    help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
-),
-smol_model_id: Optional[str] = typer.Option(
-    None,
-    "--smol-model-id",
-    help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
-),
+    smol_model_backend: Optional[str] = typer.Option(
+        None,
+        "--smol-model-backend",
+        help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
+    ),
+    smol_model_id: Optional[str] = typer.Option(
+        None,
+        "--smol-model-id",
+        help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
+    ),
 ) -> None:
     """Offline demo pipeline: build temporal KG + hypotheses from a tiny built-in corpus.
 
@@ -785,7 +866,12 @@ smol_model_id: Optional[str] = typer.Option(
         settings.llm_provider = llm_provider.strip()
     if llm_model:
         settings.llm_model = llm_model.strip()
+    if smol_model_backend:
+        settings.smol_model_backend = smol_model_backend.strip()
+    if smol_model_id:
+        settings.smol_model_id = smol_model_id.strip()
 
+    settings.hyp_tgnn_enabled = bool(tgnn)
     if gnn:
         settings.hyp_gnn_enabled = True
 

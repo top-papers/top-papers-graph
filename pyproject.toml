@@ -102,6 +102,22 @@ gnn_ext = [
   "torch-spline-conv>=1.2.2",
 ]
 
+# Temporal link prediction / TGNN track.
+tgnn = [
+  "torch>=2.2",
+]
+
+# Neo4j as graph + vector DB, GraphRAG integration.
+neo4j_rag = [
+  "neo4j-graphrag>=1.8.0",
+]
+
+# Optional RDF/SHACL validation track for temporal KG contracts.
+rdf_validation = [
+  "rdflib>=7.0",
+  "pyshacl>=0.30.0",
+]
+
 battery = [
   "pybamm>=25.12.0",
   "pandas>=2.2",

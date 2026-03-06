@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Optional
 import json
 from rich.console import Console
 
+from ..config import settings
 from ..llm import embed
+from ..temporal.schemas import TemporalEvent
 from ..temporal.temporal_triplet_extractor import extract_temporal_triplets
 from ..mm.mm_embed import embed_text as mm_embed_text, embed_images as mm_embed_images
-from ..mm.pdf_mm_extract import PageRecord
 from .qdrant_store import QdrantStore
 from .neo4j_store import Neo4jStore
 from .temporal_neo4j_store import Neo4jTemporalStore
@@ -27,10 +28,12 @@ def build_temporal_and_multimodal(
     """Build:
     1) текстовые эмбеддинги (обычный RAG) -> Qdrant
     2) (опционально) мультимодальные эмбеддинги (CLIP) -> Qdrant
-    3) темпоральные утверждения -> Neo4j (Assertion + Time)
+    3) темпоральные утверждения -> Neo4j (Assertion + Time + Event)
     4) (опционально) страницы/кэпшены -> Neo4j (Page)
+    5) (best-effort) chunk/assertion embeddings -> Neo4j vector indexes
 
-    collection_mm используется только если установлен mm backend (open_clip).
+    Qdrant is preserved for backward compatibility, but Neo4j now also receives vector-friendly
+    embeddings so the repo can operate with a unified graph + vector backend.
     """
     meta = json.loads((paper_dir / "meta.json").read_text(encoding="utf-8"))
     paper_id = meta.get("id") or paper_dir.name
@@ -44,7 +47,7 @@ def build_temporal_and_multimodal(
         chunks.append(rec["text"])
 
     vectors = embed(chunks)
-    vector_size = len(vectors[0]) if vectors else 384
+    vector_size = len(vectors[0]) if vectors else int(getattr(settings, "hash_embed_dim", 384) or 384)
 
     qd = QdrantStore()
     qd.ensure_collection(collection_text, vector_size=vector_size)
@@ -68,10 +71,18 @@ def build_temporal_and_multimodal(
     )
     neo.close()
 
-    # ---------- 3) TEMPORAL ASSERTIONS ----------
+    # ---------- 3) TEMPORAL ASSERTIONS + EVENTS ----------
     tneo = Neo4jTemporalStore()
     tneo.ensure_schema()
-    # ensure paper exists (idempotent)
+    if bool(getattr(settings, "neo4j_vector_enabled", True)):
+        try:
+            tneo.ensure_vector_indexes(
+                chunk_dimensions=vector_size,
+                assertion_dimensions=int(getattr(settings, "neo4j_vector_assertion_dimensions", vector_size) or vector_size),
+            )
+        except Exception as e:
+            console.print(f"[yellow]Neo4j vector indexes skipped: {e}[/yellow]")
+
     tneo.upsert_paper(
         {
             "id": paper_id,
@@ -82,21 +93,73 @@ def build_temporal_and_multimodal(
         }
     )
 
-    for idx, (cid, t) in enumerate(zip(chunk_ids, chunks)):
+    event_counter = 0
+    for idx, (cid, t, chunk_vec) in enumerate(zip(chunk_ids, chunks, vectors)):
         if idx >= max_chunks_for_triplets:
             break
-        # provenance node (best effort)
         try:
-            tneo.upsert_chunk(paper_id=paper_id, chunk_id=cid, text=t, chunk_index=idx)
-        except Exception:
-            pass
+            tneo.upsert_chunk(
+                paper_id=paper_id,
+                chunk_id=cid,
+                text=t,
+                chunk_index=idx,
+                embedding=list(chunk_vec) if chunk_vec is not None else None,
+            )
+        except Exception as e:
+            console.print(f"[yellow]Chunk upsert failed for {cid}: {e}[/yellow]")
+
         try:
             triplets = extract_temporal_triplets(domain=domain, chunk_text=t, paper_year=paper_year)
         except Exception as e:
             console.print(f"[yellow]Temporal triplets extraction failed: {e}[/yellow]")
             continue
-        for tr in triplets:
-            tneo.upsert_assertion(paper_id=paper_id, t=tr, chunk_id=cid)
+
+        triplet_embeddings: list[list[float]] = []
+        if triplets:
+            try:
+                triplet_embeddings = embed([tr.as_text() for tr in triplets])
+            except Exception:
+                triplet_embeddings = []
+
+        for tr_idx, tr in enumerate(triplets):
+            assertion_embedding = None
+            if tr_idx < len(triplet_embeddings):
+                assertion_embedding = list(triplet_embeddings[tr_idx])
+            elif chunk_vec is not None:
+                assertion_embedding = list(chunk_vec)
+
+            assertion_id = tneo.upsert_assertion(
+                paper_id=paper_id,
+                t=tr,
+                chunk_id=cid,
+                evidence_quote=tr.evidence_quote,
+                embedding=assertion_embedding,
+                extraction_method="llm_triplet",
+                review_status="pending",
+            )
+
+            event_counter += 1
+            ev = TemporalEvent(
+                event_id=f"{paper_id}:event:{event_counter:05d}",
+                paper_id=str(paper_id),
+                chunk_id=str(cid),
+                assertion_id=str(assertion_id),
+                subject=tr.subject,
+                predicate=tr.predicate,
+                object=tr.object,
+                ts_start=tr.time.start if tr.time else (str(paper_year) if paper_year else None),
+                ts_end=tr.time.end if tr.time else (str(paper_year) if paper_year else None),
+                granularity=tr.time.granularity if tr.time else "year",
+                confidence=float(tr.confidence),
+                polarity=tr.polarity,
+                event_type="extracted",
+                extraction_method="llm_triplet",
+                evidence_quote=tr.evidence_quote,
+            )
+            try:
+                tneo.upsert_event(ev)
+            except Exception as e:
+                console.print(f"[yellow]Event upsert failed for assertion {assertion_id}: {e}[/yellow]")
 
     tneo.close()
 
@@ -106,7 +169,6 @@ def build_temporal_and_multimodal(
         console.print("[dim]No multimodal pages.jsonl found — skip multimodal stage.[/dim]")
         return
 
-    # Neo4j pages
     mmneo = Neo4jMMStore()
     mmneo.ensure_schema()
 
@@ -127,7 +189,6 @@ def build_temporal_and_multimodal(
         console.print("[dim]collection_mm is None — skip multimodal vector index.[/dim]")
         return
 
-    # MM embeddings (CLIP)
     try:
         mm_text_vecs = mm_embed_text([r.get("text", "") for r in page_recs])
         mm_img_vecs = mm_embed_images([Path(r["image_path"]) for r in page_recs])
@@ -138,8 +199,6 @@ def build_temporal_and_multimodal(
     dim = len(mm_text_vecs[0]) if mm_text_vecs else 512
     qd.ensure_collection(collection_mm, vector_size=dim)
 
-    # store as separate points with different IDs to avoid collision
-    # ids: page_text:<paper_id>:<page> and page_img:<paper_id>:<page>
     ids, vecs, payloads = [], [], []
     for r, v in zip(page_recs, mm_text_vecs):
         pid = f"page_text:{paper_id}:{int(r['page'])}"

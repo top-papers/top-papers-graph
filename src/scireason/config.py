@@ -104,10 +104,16 @@ class Settings(BaseSettings):
     smol_executor: str = "local"  # local|docker (docker requires Docker)
     smol_print_steps: bool = False
 
-    # ===== Optional GNN (PyTorch Geometric) for hypothesis discovery =====
-    # Disabled by default to keep the base installation lightweight.
-    # Enable via:
-    #   HYP_GNN_ENABLED=1
+    # ===== Temporal link prediction / TGNN =====
+    # Enabled by default: the project should prefer event-stream temporal prediction over
+    # static graph link prediction whenever the temporal KG is available.
+    hyp_tgnn_enabled: bool = True
+    hyp_tgnn_recent_window_years: int = 3
+    hyp_tgnn_half_life_years: float = 2.0
+    hyp_tgnn_min_candidate_score: float = 0.05
+
+    # ===== Static GNN baseline (PyTorch Geometric) =====
+    # Kept as an optional baseline for ablations and course comparisons.
     hyp_gnn_enabled: bool = False
     hyp_gnn_epochs: int = 80
     hyp_gnn_hidden_dim: int = 64
@@ -116,6 +122,11 @@ class Settings(BaseSettings):
     # subgraph of the most connected terms.
     hyp_gnn_node_cap: int = 300
     hyp_gnn_seed: int = 7
+
+    # ===== Neo4j vector indexing =====
+    neo4j_vector_enabled: bool = True
+    neo4j_vector_chunk_dimensions: int = 384
+    neo4j_vector_assertion_dimensions: int = 384
 
 
 settings = Settings()

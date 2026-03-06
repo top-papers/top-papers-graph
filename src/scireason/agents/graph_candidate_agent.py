@@ -192,50 +192,29 @@ def agent_generate_candidates(
 
             smol_tools = make_graph_tools(edges=edges, weights=weights, directed=False)
 
-            task = (
-                "Using the temporal knowledge graph, propose up to {k} candidate hypotheses as edges (source, predicate, target).
-"
-                "Return a LIST of dicts with keys: kind, source, target, predicate, score, graph_signals.
-"
-                "Where:
-"
-                "- kind is one of: cross_bridge, link_prediction, central_emergence
-"
-                "- predicate is a short snake_case relation like may_relate_to, influences, correlates_with
-"
-                "- score is a float where higher is better
-"
-                "- graph_signals is a dict of floats (e.g. adamic_adar, pagerank_u, pagerank_v, comm_u, comm_v)
+            task = """Using the temporal knowledge graph, propose up to {k} candidate hypotheses as edges (source, predicate, target).
+Return a LIST of dicts with keys: kind, source, target, predicate, score, graph_signals.
+Where:
+- kind is one of: cross_bridge, link_prediction, central_emergence
+- predicate is a short snake_case relation like may_relate_to, influences, correlates_with
+- score is a float where higher is better
+- graph_signals is a dict of floats (e.g. adamic_adar, pagerank_u, pagerank_v, comm_u, comm_v)
 
-"
-                "Core graph tools you may call:
-"
-                "- build_graph()
-"
-                "- communities(G, method='greedy', max_communities=...)
-"
-                "- centrality(G, k=...)
-"
-                "- cross_bridges(G, comms, top_k=...)
-"
-                "- link_prediction(G, method=..., k=...)
-"
-                "- spectral_link_prediction(G, dim=..., k=...)
+Core graph tools you may call:
+- build_graph()
+- communities(G, method='greedy', max_communities=...)
+- centrality(G, k=...)
+- cross_bridges(G, comms, top_k=...)
+- link_prediction(G, method=..., k=...)
+- spectral_link_prediction(G, dim=..., k=...)
 
-"
-                "Optional research + storage tools (best-effort, may be empty offline):
-"
-                "- api_search_papers(query, limit=..., sources='semantic_scholar,openalex', with_abstracts=True)
-"
-                "- vector_index(collection, texts, ids=None, backend='auto')
-"
-                "- vector_search(collection, query, limit=..., backend='auto')
-"
-                "- graph_store_put(name, G), graph_store_neighbors(name, node), graph_store_shortest_path(name, src, dst)
+Optional research + storage tools (best-effort, may be empty offline):
+- api_search_papers(query, limit=..., sources='semantic_scholar,openalex', with_abstracts=True)
+- vector_index(collection, texts, ids=None, backend='auto')
+- vector_search(collection, query, limit=..., backend='auto')
+- graph_store_put(name, G), graph_store_neighbors(name, node), graph_store_shortest_path(name, src, dst)
 
-"
-                "IMPORTANT: end by calling final_answer(<the_list>)."
-            ).format(k=int(top_k))
+IMPORTANT: end by calling final_answer(<the_list>).""".format(k=int(top_k))
 
             context = f"Domain: {domain}\nQuery: {query}\nTime scope (recent): {time_scope}\n"
 

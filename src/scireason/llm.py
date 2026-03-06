@@ -8,7 +8,19 @@ import random
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential
+except Exception:  # pragma: no cover
+    def retry(*args, **kwargs):
+        def _decorator(fn):
+            return fn
+        return _decorator
+
+    def stop_after_attempt(*args, **kwargs):
+        return None
+
+    def wait_exponential(*args, **kwargs):
+        return None
 from rich.console import Console
 
 from .config import settings

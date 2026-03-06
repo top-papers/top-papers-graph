@@ -2,18 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha1
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
+
 try:  # pragma: no cover
     from neo4j import GraphDatabase
 except Exception:  # pragma: no cover
     GraphDatabase = None  # type: ignore[assignment]
 
 from ..config import settings
-from ..temporal.schemas import TimeInterval, TemporalTriplet
+from ..temporal.schemas import TemporalEvent, TimeInterval, TemporalTriplet
 
 
 def _assertion_id(paper_id: str, t: TemporalTriplet) -> str:
-    key = f"{paper_id}|{t.subject}|{t.predicate}|{t.object}|{t.polarity}|{t.time.start if t.time else ''}|{t.time.end if t.time else ''}"
+    key = (
+        f"{paper_id}|{t.subject}|{t.predicate}|{t.object}|{t.polarity}|"
+        f"{t.time.start if t.time else ''}|{t.time.end if t.time else ''}"
+    )
     return sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
@@ -26,7 +30,7 @@ class Neo4jTemporalStore:
     def __post_init__(self) -> None:
         if GraphDatabase is None:
             raise RuntimeError(
-                "neo4j python driver is not installed. Install optional dependencies: pip install -e '.[rag]'"
+                "neo4j python driver is not installed. Install base dependencies with neo4j support enabled."
             )
         self._driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
 
@@ -40,10 +44,60 @@ class Neo4jTemporalStore:
             "CREATE CONSTRAINT time_key IF NOT EXISTS FOR (t:Time) REQUIRE t.key IS UNIQUE",
             "CREATE CONSTRAINT assertion_id IF NOT EXISTS FOR (a:Assertion) REQUIRE a.id IS UNIQUE",
             "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE",
+            "CREATE CONSTRAINT event_id IF NOT EXISTS FOR (e:Event) REQUIRE e.id IS UNIQUE",
         ]
         with self._driver.session() as s:
             for q in cypher:
                 s.run(q)
+
+    def ensure_vector_indexes(
+        self,
+        *,
+        chunk_dimensions: Optional[int] = None,
+        assertion_dimensions: Optional[int] = None,
+        entity_dimensions: Optional[int] = None,
+    ) -> None:
+        """Best-effort vector indexes for Neo4j as graph + vector DB.
+
+        Compatible with current Neo4j vector index syntax. Older servers may reject these
+        statements; callers should treat failures as non-fatal.
+        """
+
+        queries = []
+        if chunk_dimensions:
+            queries.append(
+                (
+                    "chunk_embedding_idx",
+                    f"CREATE VECTOR INDEX chunk_embedding_idx IF NOT EXISTS "
+                    f"FOR (c:Chunk) ON c.embedding "
+                    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {int(chunk_dimensions)}, `vector.similarity_function`: 'cosine'}}}}",
+                )
+            )
+        if assertion_dimensions:
+            queries.append(
+                (
+                    "assertion_embedding_idx",
+                    f"CREATE VECTOR INDEX assertion_embedding_idx IF NOT EXISTS "
+                    f"FOR (a:Assertion) ON a.embedding "
+                    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {int(assertion_dimensions)}, `vector.similarity_function`: 'cosine'}}}}",
+                )
+            )
+        if entity_dimensions:
+            queries.append(
+                (
+                    "entity_embedding_idx",
+                    f"CREATE VECTOR INDEX entity_embedding_idx IF NOT EXISTS "
+                    f"FOR (e:Entity) ON e.embedding "
+                    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {int(entity_dimensions)}, `vector.similarity_function`: 'cosine'}}}}",
+                )
+            )
+        with self._driver.session() as s:
+            for _, q in queries:
+                try:
+                    s.run(q)
+                except Exception:
+                    # Best effort only: older Neo4j versions or restricted deployments may not support vector indexes.
+                    continue
 
     def upsert_paper(self, paper: Dict[str, Any]) -> None:
         q = """
@@ -56,28 +110,39 @@ class Neo4jTemporalStore:
         with self._driver.session() as s:
             s.run(q, **paper)
 
-    def upsert_chunk(self, paper_id: str, chunk_id: str, text: str, chunk_index: Optional[int] = None) -> None:
-        """Upsert a text chunk node for provenance.
-
-        We keep the text truncated to avoid huge Neo4j properties. The full chunk lives in Qdrant.
-        """
+    def upsert_chunk(
+        self,
+        paper_id: str,
+        chunk_id: str,
+        text: str,
+        chunk_index: Optional[int] = None,
+        embedding: Optional[list[float]] = None,
+    ) -> None:
+        """Upsert a text chunk node for provenance and optional vector retrieval."""
         t = (text or "").strip()
-        if len(t) > 2000:
-            t = t[:2000] + "…"
+        if len(t) > 4000:
+            t = t[:4000] + "…"
 
         q = """
         MATCH (p:Paper {id:$paper_id})
         MERGE (c:Chunk {id:$chunk_id})
         SET c.paper_id=$paper_id,
             c.idx=$chunk_index,
-            c.text=$text
+            c.text=$text,
+            c.embedding=$embedding
         MERGE (p)-[:HAS_CHUNK]->(c)
         """
         with self._driver.session() as s:
-            s.run(q, paper_id=paper_id, chunk_id=chunk_id, chunk_index=chunk_index, text=t)
+            s.run(
+                q,
+                paper_id=paper_id,
+                chunk_id=chunk_id,
+                chunk_index=chunk_index,
+                text=t,
+                embedding=embedding,
+            )
 
     def upsert_time(self, interval: TimeInterval) -> str:
-        # MVP: time node = start/end/granularity. В дальнейшем можно строить иерархию year->month->day (TG-RAG).
         start = interval.start or ""
         end = interval.end or start
         key = f"{interval.granularity}:{start}:{end}"
@@ -100,6 +165,9 @@ class Neo4jTemporalStore:
         t: TemporalTriplet,
         chunk_id: Optional[str] = None,
         evidence_quote: Optional[str] = None,
+        embedding: Optional[list[float]] = None,
+        extraction_method: str = "llm_triplet",
+        review_status: str = "pending",
     ) -> str:
         aid = _assertion_id(paper_id, t)
         time_key = None
@@ -115,9 +183,15 @@ class Neo4jTemporalStore:
             a.confidence = $confidence,
             a.polarity = $polarity,
             a.paper_id = $paper_id,
-            a.evidence_quote = $evidence_quote
+            a.evidence_quote = $evidence_quote,
+            a.embedding = $embedding,
+            a.extraction_method = $extraction_method,
+            a.review_status = $review_status,
+            a.object = $obj,
+            a.subject = $subj
         MERGE (a)-[:SUBJECT]->(s)
         MERGE (a)-[:OBJECT]->(o)
+        MERGE (p)-[:HAS_ASSERTION]->(a)
         MERGE (a)-[:ASSERTED_IN]->(p)
         WITH a
         OPTIONAL MATCH (t:Time {key: $time_key})
@@ -138,11 +212,13 @@ class Neo4jTemporalStore:
                 paper_id=paper_id,
                 time_key=time_key,
                 evidence_quote=(evidence_quote or t.evidence_quote or None),
+                embedding=embedding,
+                extraction_method=extraction_method,
+                review_status=review_status,
             ).single()
             assert rec
             assertion_id = rec["aid"]
 
-        # Optional provenance edge to a chunk node
         if chunk_id:
             q_ev = """
             MATCH (a:Assertion {id:$aid})
@@ -157,6 +233,105 @@ class Neo4jTemporalStore:
                 s.run(q_ev, aid=assertion_id, chunk_id=chunk_id, quote=quote)
 
         return assertion_id
+
+    def upsert_event(self, event: TemporalEvent) -> str:
+        event_id = event.stable_id()
+        time_key = self.upsert_time(
+            TimeInterval(start=event.ts_start, end=event.ts_end, granularity=event.granularity)
+        )
+        q = """
+        MERGE (s:Entity {name:$subj})
+        MERGE (o:Entity {name:$obj})
+        MATCH (p:Paper {id:$paper_id})
+        MATCH (t:Time {key:$time_key})
+        MERGE (e:Event {id:$event_id})
+        SET e.paper_id=$paper_id,
+            e.chunk_id=$chunk_id,
+            e.assertion_id=$assertion_id,
+            e.predicate=$pred,
+            e.confidence=$confidence,
+            e.polarity=$polarity,
+            e.ts_start=$ts_start,
+            e.ts_end=$ts_end,
+            e.granularity=$granularity,
+            e.split=$split,
+            e.event_type=$event_type,
+            e.extraction_method=$extraction_method,
+            e.weight=$weight,
+            e.evidence_quote=$evidence_quote
+        MERGE (e)-[:SOURCE_ENTITY]->(s)
+        MERGE (e)-[:TARGET_ENTITY]->(o)
+        MERGE (e)-[:FROM_PAPER]->(p)
+        MERGE (e)-[:AT_TIME]->(t)
+        WITH e
+        OPTIONAL MATCH (a:Assertion {id:$assertion_id})
+        FOREACH (_ IN CASE WHEN a IS NULL THEN [] ELSE [1] END |
+            MERGE (e)-[:ASSERTS]->(a)
+        )
+        RETURN e.id as event_id
+        """
+        with self._driver.session() as s:
+            rec = s.run(
+                q,
+                event_id=event_id,
+                paper_id=event.paper_id,
+                chunk_id=event.chunk_id,
+                assertion_id=event.assertion_id,
+                subj=event.subject,
+                obj=event.object,
+                pred=event.predicate,
+                confidence=float(event.confidence),
+                polarity=event.polarity,
+                ts_start=event.ts_start,
+                ts_end=event.ts_end,
+                granularity=event.granularity,
+                split=event.split,
+                event_type=event.event_type,
+                extraction_method=event.extraction_method,
+                weight=float(event.weight),
+                evidence_quote=event.evidence_quote,
+                time_key=time_key,
+            ).single()
+            assert rec
+            return str(rec["event_id"])
+
+    def export_event_stream(self, limit: int = 1000) -> list[dict[str, Any]]:
+        q = """
+        MATCH (e:Event)-[:SOURCE_ENTITY]->(s:Entity)
+        MATCH (e)-[:TARGET_ENTITY]->(o:Entity)
+        OPTIONAL MATCH (e)-[:AT_TIME]->(t:Time)
+        RETURN e.id as event_id,
+               e.paper_id as paper_id,
+               e.chunk_id as chunk_id,
+               e.assertion_id as assertion_id,
+               s.name as subject,
+               e.predicate as predicate,
+               o.name as object,
+               e.confidence as confidence,
+               e.polarity as polarity,
+               coalesce(e.ts_start, t.start) as ts_start,
+               coalesce(e.ts_end, t.end) as ts_end,
+               coalesce(e.granularity, t.granularity) as granularity,
+               e.split as split,
+               e.event_type as event_type,
+               e.extraction_method as extraction_method,
+               e.weight as weight,
+               e.evidence_quote as evidence_quote
+        ORDER BY coalesce(e.ts_start, t.start) ASC, e.id ASC
+        LIMIT $limit
+        """
+        with self._driver.session() as s:
+            return [dict(r) for r in s.run(q, limit=int(limit))]
+
+    def search_chunks_by_vector(self, index_name: str, query_embedding: list[float], limit: int = 8) -> list[dict[str, Any]]:
+        q = """
+        CALL db.index.vector.queryNodes($index_name, $limit, $embedding)
+        YIELD node, score
+        RETURN node.id as id, node.paper_id as paper_id, node.text as text, score
+        ORDER BY score DESC
+        """
+        with self._driver.session() as s:
+            return [dict(r) for r in s.run(q, index_name=index_name, limit=int(limit), embedding=query_embedding)]
 
     def query_assertions(self, entity: str, time: Optional[TimeInterval] = None, limit: int = 50):
         """Простой поиск утверждений вокруг сущности с (опциональным) фильтром по времени."""
@@ -190,15 +365,6 @@ class Neo4jTemporalStore:
         weight: float,
         time_interval: str = "unknown",
     ) -> None:
-        """Tag Assertion nodes with expert verdict/weight (best effort).
-
-        Notes
-        -----
-        * Matching is done by (subject, predicate, object). In many domains expert `time_interval`
-          refers to experimental conditions (T, SOC, chemistry, ...), not to calendar time.
-        * We store the expert fields directly on the Assertion node so they can be used by
-          retrievers and reward models without rebuilding the graph.
-        """
         q = """
         MATCH (a:Assertion)-[:SUBJECT]->(s:Entity {name: $subj})
         MATCH (a)-[:OBJECT]->(o:Entity {name: $obj})
@@ -219,15 +385,15 @@ class Neo4jTemporalStore:
             )
 
     def get_assertion_details(self, assertion_id: str) -> Optional[dict]:
-        """Fetch a minimal assertion record for expert correction workflows."""
         q = """
         MATCH (p:Paper)-[:HAS_ASSERTION]->(a:Assertion {id:$aid})
-        MATCH (s:Entity)-[:SUBJECT_OF]->(a)
+        MATCH (a)-[:SUBJECT]->(s:Entity)
+        MATCH (a)-[:OBJECT]->(o:Entity)
         OPTIONAL MATCH (a)-[:AT_TIME]->(t:Time)
         RETURN p.id as paper_id,
                s.name as subject,
                a.predicate as predicate,
-               a.object as object,
+               o.name as object,
                a.polarity as polarity,
                a.confidence as confidence,
                a.evidence_quote as evidence_quote,
@@ -240,7 +406,6 @@ class Neo4jTemporalStore:
             return dict(rec) if rec else None
 
     def link_replacement(self, old_id: str, new_id: str, *, rationale: str = "", reviewer_id: str = "") -> None:
-        """Mark an assertion as replaced by another one (used for temporal corrections)."""
         q = """
         MATCH (old:Assertion {id:$old_id})
         MATCH (new:Assertion {id:$new_id})

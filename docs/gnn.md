@@ -1,57 +1,71 @@
-# Optional GNN mode (PyTorch Geometric)
+# Temporal link prediction and optional static GNN baseline
 
-This repository supports an **optional “adult” GNN mode** for hypothesis discovery.
+Репозиторий теперь различает два режима поиска недостающих связей:
 
-When enabled, the pipeline will run a small **link prediction** model (GraphSAGE + negative sampling)
-on the term graph to propose **missing edges** that can be turned into *testable hypotheses*.
+1. **TGNN / TGN-style temporal prediction** — основной режим
+2. **Static GNN (PyTorch Geometric / GraphSAGE)** — optional baseline для ablation studies
 
-## Why this mode exists
+## Основной режим: TGNN / TGN-style
 
-Classic graph heuristics (common neighbors / Adamic–Adar / Jaccard) are strong and cheap baselines,
-but they often struggle on sparse graphs and in the presence of long-range dependencies.
+По умолчанию проект предпочитает event-stream temporal prediction.
 
-A GNN can learn node representations by aggregating multi-hop neighborhoods and often produces
-better candidate links for “bridge” hypotheses.
+### Что происходит
 
-## Install
+Во время `generate_candidates(...)`:
 
-Minimal install (works in most environments):
+1. Из temporal KG строится chronological event stream.
+2. Считаются recency-aware node memories.
+3. Вычисляются temporal common neighbors и pair recurrence.
+4. Формируются top-k кандидаты `kind = tgnn_missing_link`.
+
+### Почему это лучше для temporal KG
+
+Static GNN видит только агрегированный граф. TGNN/TGN-style predictor использует порядок
+временных событий, поэтому лучше подходит для задач вида:
+- emerging relations
+- future edge prediction
+- temporal hypothesis discovery
+
+### Knobs
+
+```bash
+HYP_TGNN_ENABLED=1
+HYP_TGNN_RECENT_WINDOW_YEARS=3
+HYP_TGNN_HALF_LIFE_YEARS=2.0
+HYP_TGNN_MIN_CANDIDATE_SCORE=0.05
+```
+
+### CLI
+
+```bash
+top-papers-graph train-tgn --temporal-kg-json runs/<run_id>/temporal_kg.json
+```
+
+Или экспортировать event layer из Neo4j:
+
+```bash
+top-papers-graph export-temporal-events --out runs/temporal_events.json
+```
+
+## Optional static GNN baseline (PyTorch Geometric)
+
+Static GraphSAGE link prediction сохранён как baseline.
+
+### Install
 
 ```bash
 pip install -e ".[gnn]"
 ```
 
-For **best performance** (recommended), also install the PyG extension wheels (`pyg-lib`, `torch-scatter`, ...).
+Для лучшей производительности можно также установить PyG extension wheels.
 
-Convenience scripts:
-
-```bash
-./scripts/install_pyg_extensions.sh      # Linux/macOS
-# Windows PowerShell:
-#   .\scripts\install_pyg_extensions.ps1
-```
-
-```bash
-# 1) check torch and cuda
-python -c "import torch; print(torch.__version__); print(torch.version.cuda)"
-
-# 2) install extensions via the official wheel index
-# Example for CPU-only PyTorch 2.5.*:
-#   pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv \
-#     -f https://data.pyg.org/whl/torch-2.5.0+cpu.html
-```
-
-See the official PyG installation notes for the exact `TORCH` and `CUDA` values.
-
-## Enable in the pipeline
-
-Set the env var:
+### Enable baseline
 
 ```bash
 HYP_GNN_ENABLED=1
 ```
 
-Optional knobs:
+Дополнительные параметры:
 
 ```bash
 HYP_GNN_EPOCHS=80
@@ -60,14 +74,11 @@ HYP_GNN_LR=0.01
 HYP_GNN_NODE_CAP=300
 ```
 
-## What happens when enabled
+### Что делает baseline
 
-During `generate_candidates(...)`:
+1. Строит NetworkX граф из temporal KG.
+2. Берёт индуцированный подграф top-degree узлов.
+3. Обучает небольшой GraphSAGE encoder + dot-product decoder.
+4. Возвращает top-k кандидатов `kind = gnn_missing_link`.
 
-1. Build a NetworkX term graph from the temporal KG.
-2. Take an induced subgraph of top-degree nodes (`HYP_GNN_NODE_CAP`) for speed.
-3. Train a small GraphSAGE encoder with a dot-product decoder.
-4. Produce top-k predicted non-edges with high probability.
-5. Convert them into hypothesis candidates (`kind = gnn_missing_link`).
-
-If PyG is not installed, the pipeline prints a warning and falls back to heuristic methods.
+Если PyG не установлен, пайплайн не падает: просто остаётся temporal predictor + эвристики.
