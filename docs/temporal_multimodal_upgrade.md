@@ -2,7 +2,7 @@
 
 Этот репозиторий обновлён так, чтобы поддерживать два ключевых направления развития GraphRAG:
 
-1) **Мультимодальность (VL-модели + MM Knowledge Graph)** — извлекаем смысл из **текста, таблиц, фигур и страниц** и связываем его с текстовыми сущностями.
+1) **Мультимодальность (VL-модели + MM Knowledge Graph)** — извлекаем смысл из **таблиц/фигур/формул** и связываем его с текстовыми сущностями.
 2) **Темпоральность (Temporal GraphRAG)** — различаем *один и тот же факт в разные периоды* и избегаем «темпоральных галлюцинаций».
 
 ---
@@ -11,111 +11,102 @@
 
 ### 1) Мультимодальная интеграция
 
-- `src/scireason/mm/structured_pdf.py`
-  - новый unified extractor поверх **Docling** + fallback на `pdf_mm_extract.py`
-  - сохраняет `structured_chunks.jsonl` со стабильными объектами `text/table/figure/page`
-  - экспортирует page images, figure images, table markdown/CSV/HTML, condition-friendly provenance
+- `src/scireason/mm/pdf_mm_extract.py`
+  - рендерит PDF по страницам в `mm/images/page_XXX.png`
+  - сохраняет `mm/pages.jsonl` с текстом по странице + (опционально) VLM-описанием
 
 - `src/scireason/mm/vlm.py`
-  - поддержка **открытых VLM** через `transformers`
-  - добавлена поддержка **Qwen2-VL** и **g4f vision**
+  - адаптер к **открытым VL-моделям** через `transformers`
+  - по умолчанию `VLM_BACKEND=none` (не требует GPU)
 
 - `src/scireason/mm/mm_embed.py`
   - кросс‑модальные эмбеддинги через **OpenCLIP** (текст и изображения в одном пространстве)
 
 - `src/scireason/graph/mm_neo4j_store.py`
-  - сохраняет страницы в Neo4j как `(:Page)`
+  - сохраняет страницы/картинки/таблицы в Neo4j как `(:Page)` и связи `(:Paper)-[:HAS_PAGE]->(:Page)`
 
-- `src/scireason/graph/build_tg_mmkg.py`
-  - индексирует **все структурные чанки** в Qdrant
-  - создаёт `Chunk`-узлы с modality/page/figure/table provenance
-  - извлекает temporal assertions не только из plain-text, но и из `text/table/figure` evidence
+- `src/scireason/graph/mm_retrieval.py`
+  - retrieval по мультимодальному индексу Qdrant (text→image/text)
 
 ### 2) Темпоральные графы
 
 - `src/scireason/temporal/schemas.py`
-  - `TimeInterval`, `TemporalTriplet`, `TemporalEvent`
+  - `TimeInterval`, `TemporalTriplet`
 
 - `src/scireason/temporal/temporal_triplet_extractor.py`
   - извлекает триплеты **с временем** (если есть в тексте)
   - если времени нет — подставляет `paper_year` как «суррогат» времени (MVP)
 
 - `src/scireason/graph/temporal_neo4j_store.py`
-  - хранит утверждения как `(:Assertion)` + связи к `(:Entity)`, `(:Paper)`, `(:Chunk)` и `(:Time)`
-  - поддерживает vector indexes Neo4j для `Chunk` / `Assertion`
+  - хранит утверждения как `(:Assertion)` + связи к `(:Entity)`, `(:Paper)` и `(:Time)`
+  - таким образом можно иметь **несколько утверждений** между теми же сущностями, но *в разные периоды*
 
-### 3) Экспертный слой поверх графа
-
-- `src/scireason/report/expert_cards.py`
-  - генерирует `chunk_cards.jsonl`
-  - формирует auto-filled **Task 2 review cards** по шаблону курса
-
-- `src/scireason/report/expert_report.py`
-  - делает query-centric retrieval
-  - запускает graph analytics (centrality, communities, bridges, link prediction)
-  - строит визуализации temporal graph / timeline / community structure
-  - собирает `expert_report.md/json`
-
-- `src/scireason/pipeline/e2e.py`
-  - `top-papers-graph run` теперь вызывает **полный** expert pipeline в одну команду
+- `src/scireason/graph/build_tg_mmkg.py`
+  - единая сборка: текстовый индекс + темпоральные утверждения + мультимодальные страницы
 
 ---
 
 ## Как включить мультимодальность
 
-### Вариант A: локальный Qwen2-VL + OpenCLIP
+### Вариант A (рекомендуемый MVP): только страницы/картинки без VLM
+1) Установить зависимости:
 ```bash
-pip install -e ".[mm,temporal,g4f]"
-
-export VLM_BACKEND=qwen2_vl
-export VLM_MODEL_ID=Qwen/Qwen2-VL-7B-Instruct
-export MM_EMBED_BACKEND=open_clip
-
-top-papers-graph run --query "your topic" --multimodal
+pip install -e ".[mm]"
+```
+2) В `.env`:
+```env
+VLM_BACKEND=none
+MM_EMBED_BACKEND=open_clip
+```
+3) Запустить:
+```bash
+top-papers-graph parse-mm --pdf data/raw_pdfs/PAPER.pdf --meta configs/meta/paper.json --vlm false
+top-papers-graph build-tg-mmkg --paper-dir data/papers/parsed/<paper_id> --collection-text demo --collection-mm demo_mm
 ```
 
-### Вариант B: g4f route для VLM/LLM
-```bash
-pip install -e ".[g4f,mm,temporal]"
-
-export VLM_BACKEND=g4f
-export MM_EMBED_BACKEND=open_clip
-
-top-papers-graph run --query "your topic" --llm g4f:deepseek-r1 --multimodal
+### Вариант B: с VLM (подписи, извлечение таблиц/формул)
+1) В `.env`:
+```env
+VLM_BACKEND=qwen2_vl
+VLM_MODEL_ID=Qwen/Qwen2-VL-7B-Instruct
 ```
+2) Повторить `parse-mm` с `--vlm true`.
+
+> На CPU будет медленно. Для курса это нормально как «инструмент на выделенных машинах».
+> Для продакшн‑скорости: vLLM + quantization (следующая итерация проекта).
 
 ---
 
 ## Как включить темпоральность
 
-Темпоральная часть включается автоматически при `top-papers-graph run` и `build-tg-mmkg`.
+Темпоральная часть включается автоматически при `build-tg-mmkg`.
 
 Для проверки быстро:
 - откройте Neo4j Browser и выполните:
 ```cypher
 MATCH (a:Assertion)-[:AT_TIME]->(t:Time)
-RETURN a.subject, a.predicate, a.object, t.start, t.end, t.granularity
+RETURN a.predicate, a.confidence, t.start, t.end, t.granularity
 LIMIT 25
 ```
 
 ---
 
-## Что получают эксперты на второй задаче
+## Что должны сделать участники (эксперты) в новых потоках
 
-1. **Карточки assertions** c полями:
-   - `subject/predicate/object`
-   - `time_interval`
-   - `evidence.page`
-   - `evidence.figure_or_table`
-   - `evidence.snippet_or_summary`
-   - авто-предложенный `verdict` и `rationale`
-2. **Карточки чанков** с modality/page/section/condition hints.
-3. **Готовый expert report** с query-centric evidence retrieval и графовыми визуализациями.
+1) **MM verification**
+   - проверить, что к страницам с ключевыми графиками/таблицами есть адекватные подписи
+   - поправить “ошибочные” извлечения таблиц/формул
+   - отметить важные визуальные объекты (в будущем: как отдельные ноды Figure/Table)
+
+2) **Temporal sanity-check**
+   - проверить корректность «привязки ко времени» у ключевых утверждений
+   - где важно — выставить интервал точнее (например, “2018–2022”, “Q1 2024”)
 
 ---
 
 ## Ограничения текущей версии (честно)
 
-- Качество выделения отдельных фигур/таблиц зависит от версии Docling и структуры PDF.
-- VLM JSON-parsing всё ещё мягкий: мы сохраняем текстовый multimodal summary, а не строгое schema-first представление.
-- Глубокие графовые алгоритмы запускаются локально через NetworkX; для крупного production-графа стоит добавить отдельный графовый compute-layer.
+- Детект отдельных фигур/таблиц пока не реализован — MVP хранит *страницы целиком*.
+- Временная иерархия (year→month→day) и PPR‑поиск как в академических работах — планируемая следующая итерация.
+- VLM‑вывод сейчас парсится «мягко» (текстом). На следующем шаге переведём на JSON‑schema.
+

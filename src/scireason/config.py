@@ -65,8 +65,8 @@ class Settings(BaseSettings):
     demo_collection_hypothesis: str = "demos_hypothesis_test"
 
     # ===== Multimodal (VL + MM embeddings) =====
-    vlm_backend: str = "none"  # none|g4f|qwen2_vl|llava|phi3_vision
-    vlm_model_id: str = "Qwen/Qwen2-VL-7B-Instruct"
+    vlm_backend: str = "none"  # none|qwen2_vl|llava|phi3_vision
+    vlm_model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct"
     mm_embed_backend: str = "none"  # none|open_clip
     open_clip_model: str = "ViT-B-32"
     open_clip_pretrained: str = "laion2b_s34b_b79k"

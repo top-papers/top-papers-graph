@@ -117,31 +117,11 @@ class Neo4jTemporalStore:
         text: str,
         chunk_index: Optional[int] = None,
         embedding: Optional[list[float]] = None,
-        *,
-        modality: str = "text",
-        page: Optional[int] = None,
-        figure_or_table: Optional[str] = None,
-        image_path: Optional[str] = None,
-        table_markdown: Optional[str] = None,
-        section: Optional[str] = None,
-        summary: Optional[str] = None,
-        backend: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Upsert a chunk node for provenance and optional vector retrieval.
-
-        The expert pipeline stores text / table / figure / page chunks in the same logical node
-        type so assertions can always point to a stable evidence object.
-        """
+        """Upsert a text chunk node for provenance and optional vector retrieval."""
         t = (text or "").strip()
         if len(t) > 4000:
             t = t[:4000] + "…"
-
-        table_md = (table_markdown or "").strip() or None
-        if table_md and len(table_md) > 4000:
-            table_md = table_md[:4000] + "…"
-
-        meta_json = metadata or {}
 
         q = """
         MATCH (p:Paper {id:$paper_id})
@@ -149,16 +129,7 @@ class Neo4jTemporalStore:
         SET c.paper_id=$paper_id,
             c.idx=$chunk_index,
             c.text=$text,
-            c.embedding=$embedding,
-            c.modality=$modality,
-            c.page=$page,
-            c.figure_or_table=$figure_or_table,
-            c.image_path=$image_path,
-            c.table_markdown=$table_markdown,
-            c.section=$section,
-            c.summary=$summary,
-            c.backend=$backend,
-            c.metadata=$metadata
+            c.embedding=$embedding
         MERGE (p)-[:HAS_CHUNK]->(c)
         """
         with self._driver.session() as s:
@@ -169,15 +140,6 @@ class Neo4jTemporalStore:
                 chunk_index=chunk_index,
                 text=t,
                 embedding=embedding,
-                modality=modality,
-                page=page,
-                figure_or_table=figure_or_table,
-                image_path=image_path,
-                table_markdown=table_md,
-                section=section,
-                summary=(summary or None),
-                backend=backend,
-                metadata=meta_json,
             )
 
     def upsert_time(self, interval: TimeInterval) -> str:
@@ -402,6 +364,12 @@ class Neo4jTemporalStore:
         verdict: str,
         weight: float,
         time_interval: str = "unknown",
+        *,
+        start_date: str = "unknown",
+        end_date: str = "unknown",
+        valid_from: str = "unknown",
+        valid_to: str = "+inf",
+        time_source: str = "unknown",
     ) -> None:
         q = """
         MATCH (a:Assertion)-[:SUBJECT]->(s:Entity {name: $subj})
@@ -409,7 +377,12 @@ class Neo4jTemporalStore:
         WHERE a.predicate = $pred
         SET a.expert_verdict = $verdict,
             a.expert_weight = $weight,
-            a.expert_time_interval = $time_interval
+            a.expert_time_interval = $time_interval,
+            a.expert_start_date = $start_date,
+            a.expert_end_date = $end_date,
+            a.expert_valid_from = $valid_from,
+            a.expert_valid_to = $valid_to,
+            a.expert_time_source = $time_source
         """
         with self._driver.session() as s:
             s.run(
@@ -420,6 +393,11 @@ class Neo4jTemporalStore:
                 verdict=verdict,
                 weight=float(weight),
                 time_interval=time_interval,
+                start_date=start_date,
+                end_date=end_date,
+                valid_from=valid_from,
+                valid_to=valid_to,
+                time_source=time_source,
             )
 
     def get_assertion_details(self, assertion_id: str) -> Optional[dict]:

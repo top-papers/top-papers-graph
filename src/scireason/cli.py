@@ -41,6 +41,7 @@ from .agents.hypothesis_tester import load_hypothesis_from_json, test_hypothesis
 
 from .pipeline.e2e import run_pipeline
 from .pipeline.demo import run_demo_pipeline
+from .pipeline.task2_validation import prepare_task2_validation_bundle
 
 
 app = typer.Typer(help="top-papers-graph CLI (ex SciReason)", add_completion=False)
@@ -498,6 +499,11 @@ def apply_graph_reviews(
                 verdict=str(rec.get("verdict")),
                 weight=float(rec.get("weight", 0.0)),
                 time_interval=str(rec.get("time_interval", "unknown")),
+                start_date=str(rec.get("start_date", "unknown")),
+                end_date=str(rec.get("end_date", "unknown")),
+                valid_from=str(rec.get("valid_from", rec.get("start_date", "unknown"))),
+                valid_to=str(rec.get("valid_to", "+inf")),
+                time_source=str(rec.get("time_source", "unknown")),
             )
             count += 1
         tneo.close()
@@ -584,6 +590,34 @@ def apply_temporal_corrections(
     )
 
 
+@app.command("prepare-task2-validation")
+def prepare_task2_validation(
+    trajectory: Path = typer.Option(..., help="Путь к YAML артефакту Task 1 (trajectory)."),
+    out_dir: Path = typer.Option(Path("runs/task2_validation"), help="Куда сохранить bundle для эксперта."),
+    multimodal: bool = typer.Option(True, help="Пробовать мультимодальный ingest PDF (страницы + VLM при наличии)."),
+    vlm: bool = typer.Option(True, help="Запускать VLM на страницах PDF, если VLM backend настроен."),
+    edge_mode: str = typer.Option("auto", help="auto|llm_triplets|cooccurrence"),
+    suggest_links: bool = typer.Option(True, help="Добавить scout/suggested_links.json для поиска дополнительных ссылок."),
+    max_papers: int = typer.Option(0, help="Если >0 — ограничить число статей из trajectory YAML."),
+    max_link_queries: int = typer.Option(4, help="Сколько topic/next_question запросов использовать для scout."),
+) -> None:
+    """Task 2 orchestrator: trajectory YAML -> reference graph + automatic temporal KG + review templates.
+
+    Command is designed for Google Colab / notebook usage and does not require Neo4j/Qdrant.
+    """
+    bundle_dir = prepare_task2_validation_bundle(
+        trajectory,
+        out_dir=out_dir,
+        include_multimodal=multimodal,
+        run_vlm=vlm,
+        edge_mode=edge_mode,
+        suggest_links=suggest_links,
+        max_papers=max_papers,
+        max_link_queries=max_link_queries,
+    )
+    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
+
+
 @app.command("pybamm-fastcharge")
 def pybamm_fastcharge(
     profile: str = typer.Option("baseline_cc", help="baseline_cc|proposed_two_stage|..."),
@@ -628,27 +662,9 @@ def run_cmd(
     search_limit: int = typer.Option(50, help="Сколько результатов запросить у источников."),
     top_papers: int = typer.Option(20, help="Сколько лучших статей взять в пайплайн."),
     out_dir: Path = typer.Option(Path("runs"), help="Куда сохранить артефакты запуска."),
-    multimodal: bool = typer.Option(
-        True,
-        "--multimodal/--no-multimodal",
-        help="Полный expert-pipeline: структурный PDF parsing, text/table/figure chunks, MM retrieval.",
-    ),
+    multimodal: bool = typer.Option(False, help="Извлекать страницы/картинки (MM) при наличии зависимостей."),
     no_llm_hypotheses: bool = typer.Option(False, help="Не использовать LLM для переформулировки гипотез."),
-    collection_text: Optional[str] = typer.Option(
-        None,
-        "--collection-text",
-        help="Qdrant коллекция для текстовых/структурных чанков. По умолчанию берётся из domain config.",
-    ),
-    collection_mm: Optional[str] = typer.Option(
-        None,
-        "--collection-mm",
-        help="Qdrant коллекция для multimodal чанков (figure/table/page). По умолчанию <text>_mm.",
-    ),
-    max_chunks_for_triplets: int = typer.Option(
-        24,
-        help="Сколько лучших структурных чанков на статью использовать для извлечения temporal triplets.",
-    ),
-    retrieval_k: int = typer.Option(10, help="Сколько query-centric evidence hits включать в итоговый expert report."),
+
     # --- LLM overrides (CLI > env/config defaults) ---
     llm: Optional[str] = typer.Option(
         None,
@@ -678,21 +694,6 @@ def run_cmd(
         "--llm-model",
         help="Явно задать имя модели провайдера.",
     ),
-    vlm_backend: Optional[str] = typer.Option(
-        None,
-        "--vlm-backend",
-        help="none|g4f|qwen2_vl|llava|phi3_vision — мультимодальная модель для figure/table interpretation.",
-    ),
-    vlm_model_id: Optional[str] = typer.Option(
-        None,
-        "--vlm-model-id",
-        help="Model id/path for VLM (e.g. Qwen/Qwen2-VL-7B-Instruct).",
-    ),
-    mm_embed_backend: Optional[str] = typer.Option(
-        None,
-        "--mm-embed-backend",
-        help="none|open_clip — backend for multimodal embeddings / text-image retrieval.",
-    ),
     smol_model_backend: Optional[str] = typer.Option(
         None,
         "--smol-model-backend",
@@ -704,17 +705,20 @@ def run_cmd(
         help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
     ),
 ) -> None:
-    """Полностью автоматический expert-пайплайн: query → papers → structured MM chunks → Qdrant/Neo4j → TGNN → report."""
-
+    """Полностью автоматический пайплайн: query → papers → temporal KG → hypotheses."""
+    # ---- Apply LLM overrides ----
     def _apply_llm_overrides() -> None:
         # 1) single-flag format
         if llm:
             raw = llm.strip()
+
+            # Accept provider/model as "provider:model" or "provider/model"
             if ":" in raw:
                 prov, model = raw.split(":", 1)
             elif "/" in raw:
                 prov, model = raw.split("/", 1)
             else:
+                # No separator -> assume g4f model
                 prov, model = "g4f", raw
 
             prov = prov.strip().lower()
@@ -727,10 +731,12 @@ def run_cmd(
                 settings.llm_provider = "g4f"
                 settings.llm_model = model
             else:
+                # LiteLLM-style provider/model
                 settings.llm_provider = prov
                 settings.llm_model = model
             return
 
+        # 2) convenience flags
         if local_model:
             settings.llm_provider = "ollama"
             settings.llm_model = local_model.strip()
@@ -741,20 +747,16 @@ def run_cmd(
             settings.llm_model = g4f_model.strip()
             return
 
+        # 3) explicit provider/model flags
         if llm_provider:
             settings.llm_provider = llm_provider.strip()
         if llm_model:
             settings.llm_model = llm_model.strip()
 
+    # Apply overrides (CLI > env/config defaults)
     _apply_llm_overrides()
 
-    if vlm_backend:
-        settings.vlm_backend = vlm_backend.strip()
-    if vlm_model_id:
-        settings.vlm_model_id = vlm_model_id.strip()
-    if mm_embed_backend:
-        settings.mm_embed_backend = mm_embed_backend.strip()
-
+    # smolagents model overrides (CLI > env)
     if smol_model_backend:
         settings.smol_model_backend = smol_model_backend.strip()
     if smol_model_id:
@@ -762,9 +764,7 @@ def run_cmd(
 
     console.print(
         f"[bold]LLM:[/bold] {settings.llm_provider}/{settings.llm_model}  |  "
-        f"[bold]Embeddings:[/bold] {getattr(settings, 'embed_provider', 'hash')}  |  "
-        f"[bold]VLM:[/bold] {getattr(settings, 'vlm_backend', 'none')}/{getattr(settings, 'vlm_model_id', '')}  |  "
-        f"[bold]MM embeddings:[/bold] {getattr(settings, 'mm_embed_backend', 'none')}"
+        f"[bold]Embeddings:[/bold] {getattr(settings, 'embed_provider', 'hash')}"
     )
 
     did = domain_id or settings.domain_id or "science"
@@ -781,52 +781,9 @@ def run_cmd(
         run_dir=out_dir,
         include_multimodal=multimodal,
         use_llm_for_hypotheses=not no_llm_hypotheses,
-        collection_text=collection_text,
-        collection_mm=collection_mm,
-        max_chunks_for_triplets=max_chunks_for_triplets,
-        retrieval_k=retrieval_k,
     )
     console.print(f"[bold green]Artifacts saved:[/bold green] {run_path}")
 
-
-
-
-@app.command("task2-bundle")
-def task2_bundle(
-    trajectory: Path = typer.Option(..., exists=True, dir_okay=False, readable=True, help="Task 1 YAML trajectory file."),
-    out_dir: Path = typer.Option(Path("runs/task2_validation"), help="Where to save the Task 2 validation bundle."),
-    multimodal: bool = typer.Option(True, "--multimodal/--no-multimodal", help="Run the structured multimodal pipeline for the auto graph."),
-    no_llm_hypotheses: bool = typer.Option(False, help="Disable LLM hypothesis rewriting inside the auto pipeline."),
-    collection_text: Optional[str] = typer.Option(None, help="Override Qdrant text collection for the auto graph run."),
-    collection_mm: Optional[str] = typer.Option(None, help="Override Qdrant multimodal collection for the auto graph run."),
-    max_chunks_for_triplets: int = typer.Option(24, help="How many best chunks per paper to use for temporal triplets."),
-    retrieval_k: int = typer.Option(10, help="How many retrieval hits to expose in the expert report."),
-    enable_reference_scout: bool = typer.Option(True, "--reference-scout/--no-reference-scout", help="Generate an auxiliary reference-scout file with candidate validating links."),
-) -> None:
-    """Build a Task 2 validation bundle from a Task 1 YAML.
-
-    The bundle contains:
-    - a gold graph that exactly reproduces the expert reasoning trajectory,
-    - an automatically built temporal graph from the papers referenced in Task 1,
-    - triplet tables/HTML visualisations for manual validation,
-    - an optional reference-scout file for experts.
-    """
-    from .task2_validation import build_task2_validation_bundle
-
-    bundle = build_task2_validation_bundle(
-        trajectory,
-        out_dir=out_dir,
-        include_auto_pipeline=True,
-        multimodal=multimodal,
-        no_llm_hypotheses=no_llm_hypotheses,
-        collection_text=collection_text,
-        collection_mm=collection_mm,
-        max_chunks_for_triplets=max_chunks_for_triplets,
-        retrieval_k=retrieval_k,
-        enable_reference_scout=enable_reference_scout,
-    )
-    console.print(f"[bold green]Task 2 bundle saved:[/bold green] {bundle.bundle_dir}")
-    console.print(f"[green]Manifest:[/green] {bundle.manifest_path}")
 
 @app.command("export-temporal-events")
 def export_temporal_events(

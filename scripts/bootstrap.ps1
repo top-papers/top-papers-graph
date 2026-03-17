@@ -22,7 +22,7 @@ $Py = if ($env:PYTHON) { $env:PYTHON } else { "python" }
 # Default extras for the course.
 # - agents: optional smolagents backend
 # - g4f: open/free LLM access (can be unstable, but useful for the course)
-$Extras = "dev,agents,g4f,mm,temporal"
+$Extras = "dev,agents,g4f"
 
 foreach ($a in $args) {
   switch ($a) {

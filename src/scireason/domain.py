@@ -75,15 +75,17 @@ def _candidate_paths(domain_id: str) -> List[Path]:
 def load_domain_config(domain_id: Optional[str] = None) -> DomainConfig:
     """Load domain configuration.
 
+    Supports both canonical `domain_id` values (for example `science`) and Wikidata QIDs
+    stored in expert trajectory artifacts (for example `Q336`).
+
     If the config file is missing, returns a minimal DomainConfig so the system stays usable.
     """
     did = (domain_id or settings.domain_id or "science").strip()
 
-    for path in _candidate_paths(did):
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    def _from_data(data: dict[str, Any], fallback: str) -> DomainConfig:
         return DomainConfig(
-            domain_id=str(data.get("domain_id") or did),
-            title=str(data.get("title") or did),
+            domain_id=str(data.get("domain_id") or fallback),
+            title=str(data.get("title") or fallback),
             keywords=list(data.get("keywords") or []),
             seed_queries=list(data.get("seed_queries") or []),
             kg=dict(data.get("kg") or {}),
@@ -91,6 +93,35 @@ def load_domain_config(domain_id: Optional[str] = None) -> DomainConfig:
             artifact_validation=dict(data.get("artifact_validation") or {}),
             term_graph=dict(data.get("term_graph") or {}),
         )
+
+    for path in _candidate_paths(did):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return _from_data(data, did)
+
+    # Expert trajectories store a Wikidata QID in `domain`. Support that form directly.
+    qid = did.upper()
+    if qid.startswith("Q") and qid[1:].isdigit():
+        candidate_dirs: list[Path] = []
+        try:
+            repo_root = Path(__file__).resolve().parents[2]
+            candidate_dirs.append(repo_root / "configs" / "domains")
+        except Exception:
+            pass
+        candidate_dirs.append(Path("configs") / "domains")
+
+        seen: set[str] = set()
+        for directory in candidate_dirs:
+            key = str(directory)
+            if key in seen or not directory.exists():
+                continue
+            seen.add(key)
+            for cfg_path in sorted(directory.glob("*.yaml")):
+                try:
+                    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                except Exception:
+                    continue
+                if str(data.get("wikidata_qid") or "").strip().upper() == qid:
+                    return _from_data(data, did)
 
     # Fallback
     return DomainConfig(domain_id=did, title=did)

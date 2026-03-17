@@ -33,47 +33,26 @@ top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol
 
 ### 1) Установка
 ```bash
-# Вариант 1 (рекомендуется): expert-bootstrap со всеми открытыми зависимостями для полного конвейера
+# Вариант 1 (рекомендуется для курса): одна команда
 ./scripts/bootstrap.sh  # Windows: .\scripts\bootstrap.ps1
 
 # Вариант 2 (ручной):
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e ".[dev,agents,g4f,mm,temporal]"
+pip install -e ".[dev,agents]"
 ```
 
-По умолчанию bootstrap теперь ставит extras, нужные именно для **экспертного мультимодального пайплайна**:
-- `mm` — структурный PDF parsing, figure/table extraction, OpenCLIP, Transformers/Qwen2-VL support;
-- `temporal` — нормализация временных выражений;
-- `g4f` — открытый API-маршрут для текстовых и vision-моделей.
+> Если вы хотите использовать **g4f** (LLM_PROVIDER=g4f или smolagents+g4f),
+> установите также: `pip install -e ".[g4f]"`.
 
 ### 2) Настройка
 Скопируйте `.env.example` → `.env`.  
 По умолчанию используется домен `science` (`configs/domains/science.yaml`).
 
-### 3) Полностью автоматический экспертный пайплайн (рекомендуется)
-Одна команда запускает весь конвейер: поиск статей → скачивание PDF → Docling/PyMuPDF parsing в `text/table/figure/page` чанки → индексация в Qdrant → temporal/MM graph в Neo4j → TGNN-кандидаты → hypothesis generation → Task-2 review cards → итоговый expert report с визуализациями.
-
+### 3) Полностью автоматический пайплайн (рекомендуется)
+Одна команда:
 ```bash
-# локальный Qwen2-VL + OpenCLIP
-top-papers-graph run \
-  --query "graph neural network survey" \
-  --sources all \
-  --top-papers 20 \
-  --multimodal \
-  --vlm-backend qwen2_vl \
-  --vlm-model-id Qwen/Qwen2-VL-7B-Instruct \
-  --mm-embed-backend open_clip
-
-# или через g4f vision/text route
-top-papers-graph run \
-  --query "battery fast charging degradation mechanisms" \
-  --sources all \
-  --top-papers 20 \
-  --multimodal \
-  --llm g4f:deepseek-r1 \
-  --vlm-backend g4f \
-  --mm-embed-backend open_clip
+top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
 ```
 
 #### Оффлайн демонстрация (без интернета и сервисов)
@@ -85,7 +64,7 @@ top-papers-graph smoke-all
 #### Запуск в Docker (из коробки)
 
 В репозитории есть Dockerfile для CLI/API и `docker-compose.yml`, который поднимает **всю инфраструктуру**, используемую проектом:
-**Neo4j** (графовая БД), **Qdrant** (векторное хранилище), **GROBID** (fallback PDF parsing). По умолчанию docker-образ теперь собирается с extras `mm,temporal,g4f`, чтобы expert-конвейер был доступен без дополнительной ручной доустановки.
+**Neo4j** (графовая БД), **Qdrant** (векторное хранилище для demo‑few‑shot) и **GROBID** (парсинг PDF).
 
 ```bash
 # 1) Собрать образ и поднять стек
@@ -133,18 +112,14 @@ top-papers-graph run --query "..." --llm ollama:llama3.2
 ```
 
 Артефакты появятся в `runs/<timestamp>_<slug>/`:
-- `processed_papers/<paper_id>/structured_chunks.jsonl` — unified multimodal chunks (`text/table/figure/page`)
-- `indexing_status.json` — статус загрузки чанков в Qdrant/Neo4j
 - `temporal_kg.json` — темпоральный граф знаний (термы/связи/временные счётчики)
 - `hypotheses.json` + `hypotheses.md` — ранжированный набор проверяемых гипотез
-- `review_queue/chunk_cards.jsonl` — карточки чанков с page/modality/condition hints
-- `review_queue/graph_reviews_auto/` — auto-filled Task-2 review cards по шаблону курса
-- `expert_report/expert_report.md` + `expert_report.json` — итоговый отчёт для эксперта
-- `expert_report/*.png` — визуализации temporal KG, timeline и community structure
+- `review_queue/` — шаблоны для экспертной разметки (hypothesis_reviews)
 
-> Пайплайн старается скачать PDF (если доступен OA) и сначала использовать **Docling** для структурного извлечения текста, таблиц, картинок и page images.
-> Если Docling/GROBID недоступны, включается fallback через существующий PyMuPDF/pypdf pipeline, поэтому запуск не обрывается.
-> Если PDF недоступен, пайплайн продолжит работу по абстрактам, но часть multimodal-артефактов и task-2 evidence cards будет беднее.
+> Пайплайн старается скачать PDF (если доступен OA) и распарсить его через GROBID.
+> Если GROBID не запущен, будет fallback‑парсинг PDF через `pypdf` (по умолчанию).
+> Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` (PyMuPDF).
+> Если PDF недоступен, пайплайн продолжит работу по абстрактам.
 
 > **Опционально (GNN mode):** для “более взрослого” режима генерации гипотез через
 > PyTorch Geometric (GNN link prediction) установите `pip install -e ".[gnn]"` и включите

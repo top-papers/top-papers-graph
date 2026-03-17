@@ -55,6 +55,39 @@ def _is_empty(v: Any) -> bool:
     return False
 
 
+TIME_TOKEN_RE = re.compile(r"^(?:\d{4}|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}|unknown|\+inf|-inf)$")
+
+
+def _is_time_token(v: Any) -> bool:
+    if v is None:
+        return False
+    return bool(TIME_TOKEN_RE.fullmatch(str(v).strip()))
+
+
+def _has_structured_temporal_fields(a: Dict[str, Any]) -> bool:
+    return any(not _is_empty(a.get(k)) for k in ("start_date", "end_date", "valid_from", "valid_to"))
+
+
+def _validate_temporal_fields(a: Dict[str, Any], prefix: str) -> List[str]:
+    errs: List[str] = []
+    if _has_structured_temporal_fields(a):
+        # Evidence interval is the primary temporal axis in graph reviews.
+        if _is_empty(a.get("start_date")):
+            errs.append(f"{prefix}: missing start_date (use 'unknown' or '-inf' if needed)")
+        elif not _is_time_token(a.get("start_date")):
+            errs.append(f"{prefix}: invalid start_date '{a.get('start_date')}'")
+
+        if _is_empty(a.get("end_date")):
+            errs.append(f"{prefix}: missing end_date (use publication date, 'unknown' or '+inf' if needed)")
+        elif not _is_time_token(a.get("end_date")):
+            errs.append(f"{prefix}: invalid end_date '{a.get('end_date')}'")
+
+        for k in ("valid_from", "valid_to"):
+            if not _is_empty(a.get(k)) and not _is_time_token(a.get(k)):
+                errs.append(f"{prefix}: invalid {k} '{a.get(k)}'")
+    return errs
+
+
 def _resolve_domain_config(domain_value: str) -> Dict[str, Any]:
     """Resolve domain config from configs/domains/*.yaml.
 
@@ -235,17 +268,26 @@ def validate_graph_review(path: Path) -> List[str]:
             if _is_empty(a.get(k)):
                 errs.append(f"assertion {i}: missing {k}")
 
-        if _is_empty(a.get("time_interval")):
-            errs.append(f"assertion {i}: missing time_interval (use 'unknown' if not stated)")
+        has_legacy_interval = not _is_empty(a.get("time_interval"))
+        if has_legacy_interval:
+            # Legacy free-form field remains supported for backward compatibility.
+            pass
+        elif not _has_structured_temporal_fields(a):
+            errs.append(
+                f"assertion {i}: missing temporal information (provide time_interval or start_date/end_date; use 'unknown' if not stated)"
+            )
+
+        errs.extend(_validate_temporal_fields(a, f"assertion {i}"))
 
         ev = a.get("evidence", {})
         if not isinstance(ev, dict) or _is_empty(ev):
             errs.append(f"assertion {i}: missing evidence")
         else:
-            if _is_empty(ev.get("page")):
-                errs.append(f"assertion {i}: evidence.page required")
             if _is_empty(ev.get("snippet_or_summary")):
                 errs.append(f"assertion {i}: evidence.snippet_or_summary required")
+            has_locator = not _is_empty(ev.get("page")) or not _is_empty(ev.get("figure_or_table")) or not _is_empty(ev.get("paper_id")) or not _is_empty(ev.get("source"))
+            if not has_locator:
+                errs.append(f"assertion {i}: evidence should include page, figure_or_table, paper_id, or source")
 
         verdict = str(a.get("verdict", "")).strip()
         if verdict not in {"accepted", "rejected", "needs_time_fix", "needs_evidence_fix", "added"}:
@@ -334,10 +376,19 @@ def validate_temporal_correction(path: Path) -> List[str]:
         if not isinstance(ct, dict) or _is_empty(ct):
             errs.append(f"correction {i}: missing corrected_time object")
         else:
-            if _is_empty(ct.get("start")):
-                errs.append(f"correction {i}: corrected_time.start required")
             if _is_empty(ct.get("granularity")):
                 errs.append(f"correction {i}: corrected_time.granularity required")
+            if _is_empty(ct.get("start")) and _is_empty(ct.get("end")):
+                errs.append(f"correction {i}: corrected_time must include start and/or end")
+            for key in ("start", "end"):
+                if not _is_empty(ct.get(key)) and not _is_time_token(ct.get(key)):
+                    errs.append(f"correction {i}: invalid corrected_time.{key} '{ct.get(key)}'")
+
+        ot = c.get("original_time")
+        if isinstance(ot, dict) and not _is_empty(ot):
+            for key in ("start", "end"):
+                if not _is_empty(ot.get(key)) and not _is_time_token(ot.get(key)):
+                    errs.append(f"correction {i}: invalid original_time.{key} '{ot.get(key)}'")
 
     return errs
 

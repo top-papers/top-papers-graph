@@ -1,5 +1,7 @@
 {
-  "domain": "example_domain",
+  "artifact_version": 3,
+  "domain": "example_domain_or_wikidata_qid",
+  "topic": "example topic",
   "paper_id": "doi:...",
   "reviewer_id": "expert_001",
   "timestamp": "2026-02-01T12:00:00Z",
@@ -9,23 +11,21 @@
       "subject": "Method X",
       "predicate": "improves",
       "object": "Outcome Y",
-      "start_date": "-infinity",
-      "end_date": "2025-01-15",
-      "valid_from": "2025-01-15",
-      "valid_to": "+infinity",
-      "time_interval": "-infinity..2025-01-15",
-      "validity_interval": "2025-01-15..+infinity",
-      "temporal_basis": "publication_date|publication_year_proxy|explicit_evidence_date|aggregated_edge_years|manual_yaml_source|unknown",
-      "relation_kind": "causal|correlational|associative|manual_reasoning|manual_support",
-      "conditions": {
-        "hints": ["25 C", "pH 7.4"]
-      },
+      "start_date": "2021",
+      "end_date": "2024",
+      "valid_from": "2021",
+      "valid_to": "+inf",
+      "time_source": "explicit_text",
+      "time_source_note": "Период 2021-2024 прямо указан в статье; claim считаем валидным до опровержения.",
+      "time_interval": "evidence:2021..2024|valid:2021..+inf",
       "evidence": {
+        "paper_id": "doi:10.xxxx/xxxxx",
         "page": 6,
         "figure_or_table": "Figure 5",
+        "source": "doi:10.xxxx/xxxxx",
         "snippet_or_summary": "Коротко: что именно утверждается источником"
       },
-      "verdict": "accepted|rejected|needs_time_fix|needs_evidence_fix|added",
+      "verdict": "accepted",
       "rationale": "Почему так (границы применимости, альтернативы, риски)"
     }
   ]
