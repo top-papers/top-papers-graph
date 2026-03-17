@@ -75,6 +75,7 @@ def run_pipeline(
     sources: Optional[List[str]] = None,
     search_limit: int = 50,
     top_papers: int = 20,
+    selected_papers: Optional[Sequence[PaperMetadata]] = None,
     run_dir: Optional[Path] = None,
     include_multimodal: bool = True,
     use_llm_for_hypotheses: bool = True,
@@ -105,11 +106,16 @@ def run_pipeline(
     except Exception as e:
         console.print(f"[yellow]Could not compile expert overrides: {e}[/yellow]")
 
-    # 1) Search papers
-    console.print(f"[bold cyan]Search[/bold cyan] query='{query}' sources={sources or ['all']}")
-    papers = search_papers(query, sources=sources, limit=search_limit)
-    papers = _rank_papers(papers, query)
-    selected = papers[:top_papers]
+    # 1) Search papers / use explicit paper set
+    if selected_papers is None:
+        console.print(f"[bold cyan]Search[/bold cyan] query='{query}' sources={sources or ['all']}")
+        papers = search_papers(query, sources=sources, limit=search_limit)
+        papers = _rank_papers(papers, query)
+        selected = papers[:top_papers]
+    else:
+        console.print(f"[bold cyan]Selected papers provided[/bold cyan] n={len(selected_papers)}")
+        selected = list(selected_papers)[:top_papers]
+
     (out / "papers_selected.json").write_text(
         json.dumps([p.model_dump(mode="json") for p in selected], ensure_ascii=False, indent=2),
         encoding="utf-8",

@@ -128,6 +128,14 @@ battery = [
   "matplotlib>=3.8",
 ]
 
+
+notebook_viz = [
+  "pandas>=2.2",
+  "panel>=1.4",
+  "hvplot>=0.10",
+  "pyvis>=0.3.2",
+]
+
 dev = [
   "pytest>=8.0",
   "pytest-xdist>=3.5",

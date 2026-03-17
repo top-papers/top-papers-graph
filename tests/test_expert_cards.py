@@ -11,7 +11,11 @@ def _make_processed_dir(tmp_path):
     paper_dir = processed / "paper1"
     paper_dir.mkdir(parents=True)
     (paper_dir / "meta.json").write_text(
-        json.dumps({"id": "doi:paper1", "title": "Demo paper", "year": 2024}, ensure_ascii=False, indent=2),
+        json.dumps(
+            {"id": "doi:paper1", "title": "Demo paper", "year": 2024, "published_date": "2024-05-01"},
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
     rows = [
@@ -89,3 +93,9 @@ def test_generate_task2_review_cards_creates_template_payloads(tmp_path) -> None
     first = payload["assertions"][0]
     assert first["evidence"]["page"] in {3, 4}
     assert first["verdict"] in {"accepted", "needs_time_fix", "needs_evidence_fix"}
+    assert first["start_date"] == "2024"
+    assert first["end_date"] == "2024-05-01"
+    assert first["valid_from"] == "2024-05-01"
+    assert first["valid_to"] == "+infinity"
+    assert first["relation_kind"] in {"causal", "correlational", "associative"}
+    assert "hints" in first["conditions"]

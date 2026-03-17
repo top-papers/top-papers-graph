@@ -9,13 +9,23 @@
       "subject": "Method X",
       "predicate": "improves",
       "object": "Outcome Y",
-      "time_interval": "If applicable: year range / before-after / condition window",
+      "start_date": "-infinity",
+      "end_date": "2025-01-15",
+      "valid_from": "2025-01-15",
+      "valid_to": "+infinity",
+      "time_interval": "-infinity..2025-01-15",
+      "validity_interval": "2025-01-15..+infinity",
+      "temporal_basis": "publication_date|publication_year_proxy|explicit_evidence_date|aggregated_edge_years|manual_yaml_source|unknown",
+      "relation_kind": "causal|correlational|associative|manual_reasoning|manual_support",
+      "conditions": {
+        "hints": ["25 C", "pH 7.4"]
+      },
       "evidence": {
         "page": 6,
         "figure_or_table": "Figure 5",
         "snippet_or_summary": "Коротко: что именно утверждается источником"
       },
-      "verdict": "accepted|rejected|needs_time_fix",
+      "verdict": "accepted|rejected|needs_time_fix|needs_evidence_fix|added",
       "rationale": "Почему так (границы применимости, альтернативы, риски)"
     }
   ]

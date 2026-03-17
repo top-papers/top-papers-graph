@@ -789,6 +789,45 @@ def run_cmd(
     console.print(f"[bold green]Artifacts saved:[/bold green] {run_path}")
 
 
+
+
+@app.command("task2-bundle")
+def task2_bundle(
+    trajectory: Path = typer.Option(..., exists=True, dir_okay=False, readable=True, help="Task 1 YAML trajectory file."),
+    out_dir: Path = typer.Option(Path("runs/task2_validation"), help="Where to save the Task 2 validation bundle."),
+    multimodal: bool = typer.Option(True, "--multimodal/--no-multimodal", help="Run the structured multimodal pipeline for the auto graph."),
+    no_llm_hypotheses: bool = typer.Option(False, help="Disable LLM hypothesis rewriting inside the auto pipeline."),
+    collection_text: Optional[str] = typer.Option(None, help="Override Qdrant text collection for the auto graph run."),
+    collection_mm: Optional[str] = typer.Option(None, help="Override Qdrant multimodal collection for the auto graph run."),
+    max_chunks_for_triplets: int = typer.Option(24, help="How many best chunks per paper to use for temporal triplets."),
+    retrieval_k: int = typer.Option(10, help="How many retrieval hits to expose in the expert report."),
+    enable_reference_scout: bool = typer.Option(True, "--reference-scout/--no-reference-scout", help="Generate an auxiliary reference-scout file with candidate validating links."),
+) -> None:
+    """Build a Task 2 validation bundle from a Task 1 YAML.
+
+    The bundle contains:
+    - a gold graph that exactly reproduces the expert reasoning trajectory,
+    - an automatically built temporal graph from the papers referenced in Task 1,
+    - triplet tables/HTML visualisations for manual validation,
+    - an optional reference-scout file for experts.
+    """
+    from .task2_validation import build_task2_validation_bundle
+
+    bundle = build_task2_validation_bundle(
+        trajectory,
+        out_dir=out_dir,
+        include_auto_pipeline=True,
+        multimodal=multimodal,
+        no_llm_hypotheses=no_llm_hypotheses,
+        collection_text=collection_text,
+        collection_mm=collection_mm,
+        max_chunks_for_triplets=max_chunks_for_triplets,
+        retrieval_k=retrieval_k,
+        enable_reference_scout=enable_reference_scout,
+    )
+    console.print(f"[bold green]Task 2 bundle saved:[/bold green] {bundle.bundle_dir}")
+    console.print(f"[green]Manifest:[/green] {bundle.manifest_path}")
+
 @app.command("export-temporal-events")
 def export_temporal_events(
     out: Path = typer.Option(Path("runs/temporal_events.json"), help="Where to save the exported event stream JSON."),

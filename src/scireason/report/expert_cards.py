@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from ..mm.structured_pdf import StructuredChunk, load_structured_chunks
+from ..review_schema import NEG_INFINITY, POS_INFINITY, normalize_temporal_payload
 from ..temporal.temporal_kg_builder import EdgeStats, TemporalKnowledgeGraph
 
 
@@ -168,6 +169,18 @@ def _build_chunk_map(processed_dir: Path) -> Dict[str, List[ChunkLike]]:
     return out
 
 
+def _build_meta_map(processed_dir: Path) -> Dict[str, Dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for paper_dir in _iter_paper_dirs(processed_dir):
+        try:
+            meta = json.loads((paper_dir / "meta.json").read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+        paper_id = str(meta.get("id") or paper_dir.name)
+        out[paper_id] = meta
+    return out
+
+
 def _predicate_tokens(predicate: str) -> List[str]:
     toks = [t.lower() for t in re.split(r"[^a-zA-Z0-9]+", predicate or "") if t]
     return [t for t in toks if len(t) >= 3]
@@ -243,8 +256,8 @@ def _best_evidence(edge: EdgeStats, chunk_map: Dict[str, List[ChunkLike]]) -> Di
     return best
 
 
-def _suggest_verdict(edge: EdgeStats, evidence: Dict[str, Any]) -> str:
-    has_time = bool(_time_interval_for_edge(edge))
+def _suggest_verdict(edge: EdgeStats, evidence: Dict[str, Any], temporal: Dict[str, Any]) -> str:
+    has_time = bool((temporal.get("start_date") or "").strip()) and bool((temporal.get("end_date") or "").strip())
     has_evidence = bool((evidence.get("snippet_or_summary") or "").strip())
     if not has_evidence:
         return "needs_evidence_fix"
@@ -274,10 +287,55 @@ def _rationale(edge: EdgeStats, evidence: Dict[str, Any], verdict: str) -> str:
     return " ".join(base)
 
 
-def _assertion_id(edge: EdgeStats) -> str:
-    interval = _time_interval_for_edge(edge)
+def _assertion_id(edge: EdgeStats, temporal: Optional[Dict[str, Any]] = None) -> str:
+    temporal = temporal or {}
+    interval = temporal.get("time_interval") or _time_interval_for_edge(edge)
     raw = f"{edge.source}|{edge.predicate}|{edge.target}|{interval}"
     return "A-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+
+
+def _relation_kind(edge: EdgeStats, evidence: Dict[str, Any]) -> str:
+    snippet = str(evidence.get("snippet_or_summary") or "").lower()
+    pred = str(edge.predicate or "").lower()
+    if any(h in snippet for h in _CORREL_HINTS) or any(h in pred for h in _CORREL_HINTS):
+        return "correlational"
+    if set(_predicate_tokens(edge.predicate)) & _CAUSAL_HINTS:
+        return "causal"
+    return "associative"
+
+
+def _temporal_fields_for_edge(edge: EdgeStats, evidence: Dict[str, Any], meta: Dict[str, Any]) -> Dict[str, Any]:
+    years = sorted(int(y) for y in (edge.yearly_count or {}).keys())
+    start_hint = str(years[0]) if years else NEG_INFINITY
+
+    published_date = str(meta.get("published_date") or "").strip()
+    year = meta.get("year")
+    if published_date:
+        end_hint = published_date
+        basis = "publication_date"
+    elif year not in (None, ""):
+        end_hint = str(year)
+        basis = "publication_year_proxy"
+    elif years:
+        end_hint = str(years[-1])
+        basis = "aggregated_edge_years"
+    else:
+        end_hint = POS_INFINITY
+        basis = "unknown"
+
+    temporal = normalize_temporal_payload(
+        {},
+        start_date_hint=start_hint,
+        end_date_hint=end_hint,
+        valid_from_hint=end_hint,
+        valid_to_hint=POS_INFINITY,
+        temporal_basis=basis,
+    )
+    temporal["temporal_notes"] = (
+        "start_date is the earliest observed year for this assertion in the aggregated KG; "
+        "end_date defaults to the evidence paper publication date (or publication year proxy)."
+    )
+    return temporal
 
 
 def generate_task2_review_cards(
@@ -296,6 +354,7 @@ def generate_task2_review_cards(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     chunk_map = _build_chunk_map(processed_dir)
+    meta_map = _build_meta_map(processed_dir)
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     per_paper: Dict[str, List[Dict[str, Any]]] = {}
@@ -304,18 +363,28 @@ def generate_task2_review_cards(
     for edge in edges:
         evidence = _best_evidence(edge, chunk_map)
         paper_id = str(evidence.get("paper_id") or (sorted(edge.papers)[0] if edge.papers else "unknown"))
-        verdict = _suggest_verdict(edge, evidence)
+        meta = meta_map.get(paper_id, {})
+        temporal = _temporal_fields_for_edge(edge, evidence, meta)
+        verdict = _suggest_verdict(edge, evidence, temporal)
         card = {
-            "assertion_id": _assertion_id(edge),
+            "assertion_id": _assertion_id(edge, temporal),
             "subject": edge.source,
             "predicate": edge.predicate,
             "object": edge.target,
-            "time_interval": _time_interval_for_edge(edge) or "If applicable: year range / before-after / condition window",
+            "start_date": temporal["start_date"],
+            "end_date": temporal["end_date"],
+            "valid_from": temporal["valid_from"],
+            "valid_to": temporal["valid_to"],
+            "time_interval": temporal["time_interval"],
+            "validity_interval": temporal["validity_interval"],
+            "temporal_basis": temporal["temporal_basis"],
             "evidence": {
                 "page": evidence.get("page"),
                 "figure_or_table": evidence.get("figure_or_table"),
                 "snippet_or_summary": evidence.get("snippet_or_summary") or "",
             },
+            "relation_kind": _relation_kind(edge, evidence),
+            "conditions": {"hints": extract_condition_hints(str(evidence.get("snippet_or_summary") or ""))},
             "verdict": verdict,
             "rationale": _rationale(edge, evidence, verdict),
             "metadata": {
@@ -326,6 +395,7 @@ def generate_task2_review_cards(
                 "modality": evidence.get("modality"),
                 "chunk_id": evidence.get("chunk_id"),
                 "score": round(float(edge.score or 0.0), 6),
+                "temporal_notes": temporal.get("temporal_notes"),
             },
         }
         per_paper.setdefault(paper_id, []).append(card)
