@@ -1,34 +1,29 @@
 from __future__ import annotations
 
-"""End-to-end pipeline: query -> papers -> temporal KG -> hypotheses.
+"""End-to-end pipeline: query -> papers -> temporal KG -> hypotheses -> expert report.
 
-This is the *missing orchestrator* that turns the repo into a fully automated pipeline.
-
-Design goals
-------------
-* One command should be enough for the student:
-    top-papers-graph run --query "..."
-* Best-effort automation: if PDFs are not available, keep going with abstract-only mode.
-* The pipeline should automatically pick up expert labels from `data/experts/...`.
+This is the main one-command orchestrator used by `top-papers-graph run`.
 """
 
 import json
 import re
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from rich.console import Console
 
 from ..domain import load_domain_config
+from ..graph.build_tg_mmkg import build_temporal_and_multimodal
 from ..graph.review_applier import compile_overrides
 from ..hypotheses.temporal_graph_hypotheses import generate_hypotheses
-from ..ingest.acquire import AcquireResult, acquire_pdfs
+from ..ingest.acquire import acquire_pdfs
 from ..ingest.mm_pipeline import ingest_pdf_multimodal_auto
 from ..ingest.pipeline import ingest_pdf_auto
 from ..papers.schema import PaperMetadata
 from ..papers.service import search_papers
+from ..report import generate_chunk_cards, generate_expert_report, generate_task2_review_cards
 from ..temporal.temporal_kg_builder import PaperRecord, build_temporal_kg, load_papers_from_processed
 
 
@@ -81,21 +76,26 @@ def run_pipeline(
     search_limit: int = 50,
     top_papers: int = 20,
     run_dir: Optional[Path] = None,
-    include_multimodal: bool = False,
+    include_multimodal: bool = True,
     use_llm_for_hypotheses: bool = True,
+    collection_text: Optional[str] = None,
+    collection_mm: Optional[str] = None,
+    max_chunks_for_triplets: int = 24,
+    retrieval_k: int = 10,
 ) -> Path:
     """Run end-to-end pipeline and return the run directory."""
 
     domain = load_domain_config(domain_id)
+    kg_cfg = domain.kg or {}
+    text_collection = collection_text or kg_cfg.get("collection") or domain.domain_id or "science"
+    mm_collection = collection_mm if collection_mm is not None else (f"{text_collection}_mm" if include_multimodal else None)
 
-    # Run id
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     rid = f"{ts}_{_slugify(query)}"
     base = run_dir or Path("runs")
     out = base / rid
     out.mkdir(parents=True, exist_ok=True)
 
-    # Compile expert overrides (if any) so this run automatically benefits from labels.
     overrides_path = Path("data/derived/expert_overrides.jsonl")
     try:
         stats = compile_overrides(Path("data/experts/graph_reviews"), overrides_path)
@@ -110,46 +110,89 @@ def run_pipeline(
     papers = search_papers(query, sources=sources, limit=search_limit)
     papers = _rank_papers(papers, query)
     selected = papers[:top_papers]
-
     (out / "papers_selected.json").write_text(
-        # NOTE: PaperMetadata includes `published_date: date`, which is not JSON serializable
-        # in standard `json.dumps(...)`. Pydantic's JSON mode converts dates/datetimes/UUIDs/etc.
-        # into JSON-friendly types (e.g., ISO strings) before dumping.
         json.dumps([p.model_dump(mode="json") for p in selected], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     console.print(f"[green]Selected papers:[/green] {len(selected)}")
 
-    # 2) Acquire PDFs (best-effort)
+    # 2) Acquire PDFs
     console.print("[bold cyan]Acquire PDFs[/bold cyan]")
     acq = acquire_pdfs(selected, raw_dir=out / "raw_pdfs", meta_dir=out / "raw_meta")
     (out / "acquire_results.json").write_text(
-        json.dumps([asdict(a) | {"pdf_path": str(a.pdf_path) if a.pdf_path else None, "meta_path": str(a.meta_path)} for a in acq], ensure_ascii=False, indent=2),
+        json.dumps(
+            [
+                asdict(a)
+                | {"pdf_path": str(a.pdf_path) if a.pdf_path else None, "meta_path": str(a.meta_path)}
+                for a in acq
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
-    # 3) Ingest PDFs (optional; pipeline still works without it)
+    # 3) Ingest PDFs
     processed_dir = out / "processed_papers"
     processed_dir.mkdir(parents=True, exist_ok=True)
 
     ingested_ids: set[str] = set()
+    paper_dirs: dict[str, Path] = {}
     for a, paper in zip(acq, selected):
         if not a.pdf_path:
             continue
         meta = paper.model_dump(mode="json")
         try:
             if include_multimodal:
-                ingest_pdf_multimodal_auto(a.pdf_path, meta, processed_dir)
+                paper_dir = ingest_pdf_multimodal_auto(a.pdf_path, meta, processed_dir)
             else:
-                ingest_pdf_auto(a.pdf_path, meta, processed_dir)
+                paper_dir = ingest_pdf_auto(a.pdf_path, meta, processed_dir)
             ingested_ids.add(paper.id)
+            paper_dirs[paper.id] = paper_dir
         except Exception as e:
             console.print(f"[yellow]Ingest failed for {paper.id}: {e}[/yellow]")
             continue
 
     console.print(f"[green]Ingested PDFs:[/green] {len(ingested_ids)}")
 
-    # 4) Load paper texts for KG
+    # 4) Build DB indexes / multimodal logical graph
+    console.print("[bold cyan]Index chunks + build temporal/MM graph[/bold cyan]")
+    indexing_status: list[dict[str, Any]] = []
+    for paper in selected:
+        paper_dir = paper_dirs.get(paper.id)
+        if paper_dir is None:
+            continue
+        has_mm = bool(include_multimodal and ((paper_dir / "structured_chunks.jsonl").exists() or (paper_dir / "mm" / "pages.jsonl").exists()))
+        try:
+            build_temporal_and_multimodal(
+                paper_dir=paper_dir,
+                collection_text=text_collection,
+                collection_mm=(mm_collection if has_mm else None),
+                domain=domain.title,
+                max_chunks_for_triplets=max_chunks_for_triplets,
+            )
+            indexing_status.append(
+                {
+                    "paper_id": paper.id,
+                    "paper_dir": str(paper_dir.as_posix()),
+                    "status": "ok",
+                    "multimodal": has_mm,
+                }
+            )
+        except Exception as e:
+            console.print(f"[yellow]Index/graph build failed for {paper.id}: {e}[/yellow]")
+            indexing_status.append(
+                {
+                    "paper_id": paper.id,
+                    "paper_dir": str(paper_dir.as_posix()),
+                    "status": "failed",
+                    "multimodal": has_mm,
+                    "error": str(e),
+                }
+            )
+    (out / "indexing_status.json").write_text(json.dumps(indexing_status, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 5) Load paper texts for KG
     pr_processed = load_papers_from_processed(processed_dir)
     pr_by_id = {p.paper_id: p for p in pr_processed}
     paper_records: List[PaperRecord] = []
@@ -163,7 +206,7 @@ def run_pipeline(
         json.dumps([asdict(r) for r in paper_records], ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    # 5) Build temporal KG
+    # 6) Build temporal KG
     edge_mode = str((domain.term_graph or {}).get("edge_mode", "auto"))
     console.print(f"[bold cyan]Build temporal KG[/bold cyan] edge_mode={edge_mode}")
     kg = build_temporal_kg(
@@ -176,7 +219,7 @@ def run_pipeline(
     kg.dump_json(out / "temporal_kg.json")
     console.print(f"[green]KG edges:[/green] {len(kg.edges)} nodes: {len(kg.nodes)}")
 
-    # 6) Generate hypotheses
+    # 7) Generate hypotheses
     console.print("[bold cyan]Generate hypotheses[/bold cyan]")
     hyps = generate_hypotheses(
         kg,
@@ -193,7 +236,6 @@ def run_pipeline(
         encoding="utf-8",
     )
 
-    # Markdown report
     md_lines = [f"# Hypotheses for: {query}", "", f"Domain: {domain.title} ({domain.domain_id})", ""]
     for i, h in enumerate(hyps, 1):
         md_lines += [
@@ -215,10 +257,13 @@ def run_pipeline(
             md_lines.append("")
     (out / "hypotheses.md").write_text("\n".join(md_lines), encoding="utf-8")
 
-    # 7) Export expert labeling templates (so quality can improve during the course)
-    review_dir = out / "review_queue" / "hypothesis_reviews"
-    review_dir.mkdir(parents=True, exist_ok=True)
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 8) Review assets
+    review_root = out / "review_queue"
+    review_root.mkdir(parents=True, exist_ok=True)
+
+    hypothesis_review_dir = review_root / "hypothesis_reviews"
+    hypothesis_review_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     for i, h in enumerate(hyps, 1):
         hid = f"H-{i:06d}"
         review = {
@@ -235,9 +280,60 @@ def run_pipeline(
             "suggested_revision": "",
             "hypothesis": h.model_dump(mode="json"),
         }
-        (review_dir / f"{hid}.json").write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
+        (hypothesis_review_dir / f"{hid}.json").write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Run config
+    chunk_cards_path = review_root / "chunk_cards.jsonl"
+    chunk_cards = generate_chunk_cards(processed_dir, out_path=chunk_cards_path)
+
+    task2_dir = review_root / "graph_reviews_auto"
+    task2_manifest = generate_task2_review_cards(
+        kg,
+        processed_dir=processed_dir,
+        domain_id=domain.domain_id,
+        out_dir=task2_dir,
+        max_assertions=250,
+    )
+
+    # 9) Expert report + visuals
+    report_dir = out / "expert_report"
+    report_payload = generate_expert_report(
+        query=query,
+        domain_title=domain.title,
+        domain_id=domain.domain_id,
+        kg=kg,
+        papers=paper_records,
+        processed_dir=processed_dir,
+        out_dir=report_dir,
+        collection_text=text_collection,
+        collection_mm=mm_collection if include_multimodal else None,
+        hypotheses=hyps,
+        retrieval_k=retrieval_k,
+        indexing_status=indexing_status,
+    )
+
+    # 10) Run config + manifest
+    artifact_manifest = {
+        "query": query,
+        "domain_id": domain.domain_id,
+        "sources": sources,
+        "search_limit": search_limit,
+        "top_papers": top_papers,
+        "include_multimodal": include_multimodal,
+        "collection_text": text_collection,
+        "collection_mm": mm_collection if include_multimodal else None,
+        "max_chunks_for_triplets": max_chunks_for_triplets,
+        "retrieval_k": retrieval_k,
+        "paper_records": len(paper_records),
+        "chunk_cards": len(chunk_cards),
+        "task2_files": len(task2_manifest),
+        "report_dir": str(report_dir.as_posix()),
+        "indexing_status_path": str((out / 'indexing_status.json').as_posix()),
+        "review_root": str(review_root.as_posix()),
+        "expert_report": str((report_dir / 'expert_report.md').as_posix()),
+        "visualizations": report_payload.get("visualizations", {}),
+    }
+    (out / "artifact_manifest.json").write_text(json.dumps(artifact_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
     (out / "run_config.json").write_text(
         json.dumps(
             {
@@ -249,6 +345,10 @@ def run_pipeline(
                 "include_multimodal": include_multimodal,
                 "edge_mode": edge_mode,
                 "use_llm_for_hypotheses": use_llm_for_hypotheses,
+                "collection_text": text_collection,
+                "collection_mm": mm_collection if include_multimodal else None,
+                "max_chunks_for_triplets": max_chunks_for_triplets,
+                "retrieval_k": retrieval_k,
             },
             ensure_ascii=False,
             indent=2,

@@ -144,7 +144,13 @@ def load_papers_from_processed(
     max_papers: Optional[int] = None,
     max_chars_per_paper: int = 40_000,
 ) -> List[PaperRecord]:
-    """Load PaperRecord list from `data/processed/papers/<paper_id>/...`."""
+    """Load PaperRecord list from processed paper directories.
+
+    Preference order for textual evidence aggregation:
+    1) `structured_chunks.jsonl` (new multimodal / expert pipeline)
+    2) legacy `chunks.jsonl`
+    3) paper abstract from metadata
+    """
     out: List[PaperRecord] = []
     if not processed_dir.exists():
         return out
@@ -152,7 +158,8 @@ def load_papers_from_processed(
     for d in sorted([p for p in processed_dir.iterdir() if p.is_dir()]):
         meta_path = d / "meta.json"
         chunks_path = d / "chunks.jsonl"
-        if not meta_path.exists() or not chunks_path.exists():
+        structured_path = d / "structured_chunks.jsonl"
+        if not meta_path.exists() or (not chunks_path.exists() and not structured_path.exists()):
             continue
 
         try:
@@ -168,22 +175,44 @@ def load_papers_from_processed(
         except Exception:
             year_int = None
 
-        # Join chunks (best-effort, truncated)
         texts: List[str] = []
         total = 0
-        for line in chunks_path.read_text(encoding="utf-8").splitlines():
+
+        if structured_path.exists():
             try:
-                rec = json.loads(line)
+                rows = [json.loads(line) for line in structured_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                rows = sorted(rows, key=lambda r: int(r.get("order") or 0))
+                for rec in rows:
+                    modality = str(rec.get("modality") or "text")
+                    if modality == "page":
+                        # Page nodes are useful for provenance / images, but duplicate text too much for KG building.
+                        continue
+                    t = str(rec.get("searchable_text") or rec.get("text") or rec.get("summary") or "")
+                    if not t:
+                        continue
+                    if total >= max_chars_per_paper:
+                        break
+                    remaining = max_chars_per_paper - total
+                    texts.append(t[:remaining])
+                    total += len(t[:remaining])
             except Exception:
-                continue
-            t = str(rec.get("text") or "")
-            if not t:
-                continue
-            if total >= max_chars_per_paper:
-                break
-            remaining = max_chars_per_paper - total
-            texts.append(t[:remaining])
-            total += len(t[:remaining])
+                texts = []
+                total = 0
+
+        if not texts and chunks_path.exists():
+            for line in chunks_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                t = str(rec.get("text") or "")
+                if not t:
+                    continue
+                if total >= max_chars_per_paper:
+                    break
+                remaining = max_chars_per_paper - total
+                texts.append(t[:remaining])
+                total += len(t[:remaining])
 
         text = "\n\n".join(texts).strip()
         if not text and meta.get("abstract"):
@@ -204,7 +233,6 @@ def load_papers_from_processed(
             break
 
     return out
-
 
 def _sentences(text: str) -> List[str]:
     # Simple sentence splitter (language-agnostic-ish)

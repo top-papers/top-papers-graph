@@ -50,6 +50,10 @@ mm = [
   "transformers>=4.44",
   "accelerate>=0.33",
   "sentencepiece>=0.2",
+  "docling>=2.0",
+  "pandas>=2.2",
+  "matplotlib>=3.8",
+  "tabulate>=0.9",
 ]
 
 # Temporal parsing helpers

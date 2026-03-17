@@ -7,7 +7,7 @@ services:
         # By default we keep the image lightweight.
         # You can enable extras at build time, e.g.:
         #   INSTALL_EXTRAS=temporal,api docker compose build app
-        INSTALL_EXTRAS: ${INSTALL_EXTRAS:-}
+        INSTALL_EXTRAS: ${INSTALL_EXTRAS:-mm,temporal,g4f}
     image: top-papers-graph:latest
     container_name: top_papers_graph_app
     environment:

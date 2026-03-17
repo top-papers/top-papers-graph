@@ -24,7 +24,7 @@ PY=${PYTHON:-python3}
 # Default extras for the course.
 # - agents: optional smolagents backend
 # - g4f: open/free LLM access (can be unstable, but useful for the course)
-EXTRAS="dev,agents,g4f"
+EXTRAS="dev,agents,g4f,mm,temporal"
 
 # Optional flags:
 #   --gnn      -> install PyTorch Geometric (GNN mode)
@@ -73,6 +73,6 @@ Next steps:
 Optional extras:
   ./scripts/bootstrap.sh --gnn      # installs PyG (GNN mode)
   ./scripts/bootstrap.sh --gnn-ext  # installs PyG + extensions (best performance)
-  ./scripts/bootstrap.sh --mm       # multimodal PDF parsing
+  ./scripts/bootstrap.sh --mm       # multimodal PDF parsing (already included by default in expert bootstrap)
   ./scripts/bootstrap.sh --agents-hf  # local HF models for smolagents
 MSG

@@ -628,9 +628,27 @@ def run_cmd(
     search_limit: int = typer.Option(50, help="Сколько результатов запросить у источников."),
     top_papers: int = typer.Option(20, help="Сколько лучших статей взять в пайплайн."),
     out_dir: Path = typer.Option(Path("runs"), help="Куда сохранить артефакты запуска."),
-    multimodal: bool = typer.Option(False, help="Извлекать страницы/картинки (MM) при наличии зависимостей."),
+    multimodal: bool = typer.Option(
+        True,
+        "--multimodal/--no-multimodal",
+        help="Полный expert-pipeline: структурный PDF parsing, text/table/figure chunks, MM retrieval.",
+    ),
     no_llm_hypotheses: bool = typer.Option(False, help="Не использовать LLM для переформулировки гипотез."),
-
+    collection_text: Optional[str] = typer.Option(
+        None,
+        "--collection-text",
+        help="Qdrant коллекция для текстовых/структурных чанков. По умолчанию берётся из domain config.",
+    ),
+    collection_mm: Optional[str] = typer.Option(
+        None,
+        "--collection-mm",
+        help="Qdrant коллекция для multimodal чанков (figure/table/page). По умолчанию <text>_mm.",
+    ),
+    max_chunks_for_triplets: int = typer.Option(
+        24,
+        help="Сколько лучших структурных чанков на статью использовать для извлечения temporal triplets.",
+    ),
+    retrieval_k: int = typer.Option(10, help="Сколько query-centric evidence hits включать в итоговый expert report."),
     # --- LLM overrides (CLI > env/config defaults) ---
     llm: Optional[str] = typer.Option(
         None,
@@ -660,6 +678,21 @@ def run_cmd(
         "--llm-model",
         help="Явно задать имя модели провайдера.",
     ),
+    vlm_backend: Optional[str] = typer.Option(
+        None,
+        "--vlm-backend",
+        help="none|g4f|qwen2_vl|llava|phi3_vision — мультимодальная модель для figure/table interpretation.",
+    ),
+    vlm_model_id: Optional[str] = typer.Option(
+        None,
+        "--vlm-model-id",
+        help="Model id/path for VLM (e.g. Qwen/Qwen2-VL-7B-Instruct).",
+    ),
+    mm_embed_backend: Optional[str] = typer.Option(
+        None,
+        "--mm-embed-backend",
+        help="none|open_clip — backend for multimodal embeddings / text-image retrieval.",
+    ),
     smol_model_backend: Optional[str] = typer.Option(
         None,
         "--smol-model-backend",
@@ -671,20 +704,17 @@ def run_cmd(
         help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
     ),
 ) -> None:
-    """Полностью автоматический пайплайн: query → papers → temporal KG → hypotheses."""
-    # ---- Apply LLM overrides ----
+    """Полностью автоматический expert-пайплайн: query → papers → structured MM chunks → Qdrant/Neo4j → TGNN → report."""
+
     def _apply_llm_overrides() -> None:
         # 1) single-flag format
         if llm:
             raw = llm.strip()
-
-            # Accept provider/model as "provider:model" or "provider/model"
             if ":" in raw:
                 prov, model = raw.split(":", 1)
             elif "/" in raw:
                 prov, model = raw.split("/", 1)
             else:
-                # No separator -> assume g4f model
                 prov, model = "g4f", raw
 
             prov = prov.strip().lower()
@@ -697,12 +727,10 @@ def run_cmd(
                 settings.llm_provider = "g4f"
                 settings.llm_model = model
             else:
-                # LiteLLM-style provider/model
                 settings.llm_provider = prov
                 settings.llm_model = model
             return
 
-        # 2) convenience flags
         if local_model:
             settings.llm_provider = "ollama"
             settings.llm_model = local_model.strip()
@@ -713,16 +741,20 @@ def run_cmd(
             settings.llm_model = g4f_model.strip()
             return
 
-        # 3) explicit provider/model flags
         if llm_provider:
             settings.llm_provider = llm_provider.strip()
         if llm_model:
             settings.llm_model = llm_model.strip()
 
-    # Apply overrides (CLI > env/config defaults)
     _apply_llm_overrides()
 
-    # smolagents model overrides (CLI > env)
+    if vlm_backend:
+        settings.vlm_backend = vlm_backend.strip()
+    if vlm_model_id:
+        settings.vlm_model_id = vlm_model_id.strip()
+    if mm_embed_backend:
+        settings.mm_embed_backend = mm_embed_backend.strip()
+
     if smol_model_backend:
         settings.smol_model_backend = smol_model_backend.strip()
     if smol_model_id:
@@ -730,7 +762,9 @@ def run_cmd(
 
     console.print(
         f"[bold]LLM:[/bold] {settings.llm_provider}/{settings.llm_model}  |  "
-        f"[bold]Embeddings:[/bold] {getattr(settings, 'embed_provider', 'hash')}"
+        f"[bold]Embeddings:[/bold] {getattr(settings, 'embed_provider', 'hash')}  |  "
+        f"[bold]VLM:[/bold] {getattr(settings, 'vlm_backend', 'none')}/{getattr(settings, 'vlm_model_id', '')}  |  "
+        f"[bold]MM embeddings:[/bold] {getattr(settings, 'mm_embed_backend', 'none')}"
     )
 
     did = domain_id or settings.domain_id or "science"
@@ -747,6 +781,10 @@ def run_cmd(
         run_dir=out_dir,
         include_multimodal=multimodal,
         use_llm_for_hypotheses=not no_llm_hypotheses,
+        collection_text=collection_text,
+        collection_mm=collection_mm,
+        max_chunks_for_triplets=max_chunks_for_triplets,
+        retrieval_k=retrieval_k,
     )
     console.print(f"[bold green]Artifacts saved:[/bold green] {run_path}")
 

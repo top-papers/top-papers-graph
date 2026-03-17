@@ -117,11 +117,31 @@ class Neo4jTemporalStore:
         text: str,
         chunk_index: Optional[int] = None,
         embedding: Optional[list[float]] = None,
+        *,
+        modality: str = "text",
+        page: Optional[int] = None,
+        figure_or_table: Optional[str] = None,
+        image_path: Optional[str] = None,
+        table_markdown: Optional[str] = None,
+        section: Optional[str] = None,
+        summary: Optional[str] = None,
+        backend: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Upsert a text chunk node for provenance and optional vector retrieval."""
+        """Upsert a chunk node for provenance and optional vector retrieval.
+
+        The expert pipeline stores text / table / figure / page chunks in the same logical node
+        type so assertions can always point to a stable evidence object.
+        """
         t = (text or "").strip()
         if len(t) > 4000:
             t = t[:4000] + "…"
+
+        table_md = (table_markdown or "").strip() or None
+        if table_md and len(table_md) > 4000:
+            table_md = table_md[:4000] + "…"
+
+        meta_json = metadata or {}
 
         q = """
         MATCH (p:Paper {id:$paper_id})
@@ -129,7 +149,16 @@ class Neo4jTemporalStore:
         SET c.paper_id=$paper_id,
             c.idx=$chunk_index,
             c.text=$text,
-            c.embedding=$embedding
+            c.embedding=$embedding,
+            c.modality=$modality,
+            c.page=$page,
+            c.figure_or_table=$figure_or_table,
+            c.image_path=$image_path,
+            c.table_markdown=$table_markdown,
+            c.section=$section,
+            c.summary=$summary,
+            c.backend=$backend,
+            c.metadata=$metadata
         MERGE (p)-[:HAS_CHUNK]->(c)
         """
         with self._driver.session() as s:
@@ -140,6 +169,15 @@ class Neo4jTemporalStore:
                 chunk_index=chunk_index,
                 text=t,
                 embedding=embedding,
+                modality=modality,
+                page=page,
+                figure_or_table=figure_or_table,
+                image_path=image_path,
+                table_markdown=table_md,
+                section=section,
+                summary=(summary or None),
+                backend=backend,
+                metadata=meta_json,
             )
 
     def upsert_time(self, interval: TimeInterval) -> str:
