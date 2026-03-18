@@ -73,7 +73,7 @@ notebook_viz = [
   "bokeh>=3.4",
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
-  "pandas>=2.2",
+  "pandas>=2.2.2,<2.4",
 ]
 
 # Friendly aliases for the same notebook stack
@@ -85,7 +85,7 @@ notebook = [
   "bokeh>=3.4",
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
-  "pandas>=2.2",
+  "pandas>=2.2.2,<2.4",
 ]
 
 colab = [
@@ -96,7 +96,7 @@ colab = [
   "bokeh>=3.4",
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
-  "pandas>=2.2",
+  "pandas>=2.2.2,<2.4",
 ]
 
 # One-shot extra for the Task 2 notebook experience
@@ -118,7 +118,7 @@ task2_notebook = [
   "bokeh>=3.4",
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
-  "pandas>=2.2",
+  "pandas>=2.2.2,<2.4",
 ]
 
 # Temporal parsing helpers
@@ -189,7 +189,7 @@ rdf_validation = [
 
 battery = [
   "pybamm>=25.12.0",
-  "pandas>=2.2",
+  "pandas>=2.2.2,<2.4",
   "matplotlib>=3.8",
 ]
 
@@ -226,7 +226,7 @@ all = [
   "bokeh>=3.4",
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
-  "pandas>=2.2",
+  "pandas>=2.2.2,<2.4",
 ]
 
 dev = [
