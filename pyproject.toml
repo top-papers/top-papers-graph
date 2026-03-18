@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "top-papers-graph"
-version = "0.4.1"
+version = "0.4.2"
 description = "top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,6 +50,75 @@ mm = [
   "transformers>=4.44",
   "accelerate>=0.33",
   "sentencepiece>=0.2",
+]
+
+
+# Human-friendly alias for multimodal stack
+multimodal = [
+  "pymupdf>=1.24",
+  "pillow>=10.0",
+  "open_clip_torch>=2.24",
+  "torch>=2.2",
+  "transformers>=4.44",
+  "accelerate>=0.33",
+  "sentencepiece>=0.2",
+]
+
+# Notebook / Colab visualization helpers
+notebook_viz = [
+  "ipywidgets>=8.1",
+  "panel>=1.4",
+  "hvplot>=0.10",
+  "holoviews>=1.19",
+  "bokeh>=3.4",
+  "pyvis>=0.3.2",
+  "jupyter_bokeh>=4.0",
+  "pandas>=2.2",
+]
+
+# Friendly aliases for the same notebook stack
+notebook = [
+  "ipywidgets>=8.1",
+  "panel>=1.4",
+  "hvplot>=0.10",
+  "holoviews>=1.19",
+  "bokeh>=3.4",
+  "pyvis>=0.3.2",
+  "jupyter_bokeh>=4.0",
+  "pandas>=2.2",
+]
+
+colab = [
+  "ipywidgets>=8.1",
+  "panel>=1.4",
+  "hvplot>=0.10",
+  "holoviews>=1.19",
+  "bokeh>=3.4",
+  "pyvis>=0.3.2",
+  "jupyter_bokeh>=4.0",
+  "pandas>=2.2",
+]
+
+# One-shot extra for the Task 2 notebook experience
+# (temporal parsing + multimodal PDF support + notebook UI)
+task2_notebook = [
+  "python-dateutil>=2.9",
+  "dateparser>=1.2",
+  "pymupdf>=1.24",
+  "pillow>=10.0",
+  "open_clip_torch>=2.24",
+  "torch>=2.2",
+  "transformers>=4.44",
+  "accelerate>=0.33",
+  "sentencepiece>=0.2",
+  "ipywidgets>=8.1",
+  "panel>=1.4",
+  "hvplot>=0.10",
+  "holoviews>=1.19",
+  "bokeh>=3.4",
+  "pyvis>=0.3.2",
+  "jupyter_bokeh>=4.0",
+  "pandas>=2.2",
 ]
 
 # Temporal parsing helpers
@@ -122,6 +191,42 @@ battery = [
   "pybamm>=25.12.0",
   "pandas>=2.2",
   "matplotlib>=3.8",
+]
+
+
+# Broad convenience extra for local development.
+# Excludes gnn_ext because those wheels are often installed separately per PyG docs.
+all = [
+  "sentence-transformers>=2.7",
+  "pymupdf>=1.24",
+  "pillow>=10.0",
+  "open_clip_torch>=2.24",
+  "torch>=2.2",
+  "transformers>=4.44",
+  "accelerate>=0.33",
+  "sentencepiece>=0.2",
+  "python-dateutil>=2.9",
+  "dateparser>=1.2",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "mcp>=1.0.0",
+  "g4f>=7.1.2",
+  "smolagents>=1.0.0",
+  "smolagents[transformers]>=1.0.0",
+  "torch-geometric>=2.6.0",
+  "neo4j-graphrag>=1.8.0",
+  "rdflib>=7.0",
+  "pyshacl>=0.30.0",
+  "pybamm>=25.12.0",
+  "matplotlib>=3.8",
+  "ipywidgets>=8.1",
+  "panel>=1.4",
+  "hvplot>=0.10",
+  "holoviews>=1.19",
+  "bokeh>=3.4",
+  "pyvis>=0.3.2",
+  "jupyter_bokeh>=4.0",
+  "pandas>=2.2",
 ]
 
 dev = [

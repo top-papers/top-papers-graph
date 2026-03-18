@@ -1,10 +1,10 @@
 Metadata-Version: 2.4
 Name: top-papers-graph
-Version: 0.4.0
+Version: 0.4.2
 Summary: top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)
 Author: top-papers-graph contributors
 License: MIT
-Requires-Python: >=3.11
+Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: pydantic>=2.6
@@ -16,7 +16,7 @@ Requires-Dist: tenacity>=8.2
 Requires-Dist: python-dotenv>=1.0
 Requires-Dist: pyyaml>=6.0
 Requires-Dist: networkx>=3.3
-Requires-Dist: numpy>=1.26
+Requires-Dist: numpy<2,>=1.26
 Requires-Dist: pypdf>=4.0
 Requires-Dist: neo4j>=5.20
 Requires-Dist: qdrant-client>=1.9
@@ -33,6 +33,59 @@ Requires-Dist: torch>=2.2; extra == "mm"
 Requires-Dist: transformers>=4.44; extra == "mm"
 Requires-Dist: accelerate>=0.33; extra == "mm"
 Requires-Dist: sentencepiece>=0.2; extra == "mm"
+Provides-Extra: multimodal
+Requires-Dist: pymupdf>=1.24; extra == "multimodal"
+Requires-Dist: pillow>=10.0; extra == "multimodal"
+Requires-Dist: open_clip_torch>=2.24; extra == "multimodal"
+Requires-Dist: torch>=2.2; extra == "multimodal"
+Requires-Dist: transformers>=4.44; extra == "multimodal"
+Requires-Dist: accelerate>=0.33; extra == "multimodal"
+Requires-Dist: sentencepiece>=0.2; extra == "multimodal"
+Provides-Extra: notebook-viz
+Requires-Dist: ipywidgets>=8.1; extra == "notebook-viz"
+Requires-Dist: panel>=1.4; extra == "notebook-viz"
+Requires-Dist: hvplot>=0.10; extra == "notebook-viz"
+Requires-Dist: holoviews>=1.19; extra == "notebook-viz"
+Requires-Dist: bokeh>=3.4; extra == "notebook-viz"
+Requires-Dist: pyvis>=0.3.2; extra == "notebook-viz"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "notebook-viz"
+Requires-Dist: pandas>=2.2; extra == "notebook-viz"
+Provides-Extra: notebook
+Requires-Dist: ipywidgets>=8.1; extra == "notebook"
+Requires-Dist: panel>=1.4; extra == "notebook"
+Requires-Dist: hvplot>=0.10; extra == "notebook"
+Requires-Dist: holoviews>=1.19; extra == "notebook"
+Requires-Dist: bokeh>=3.4; extra == "notebook"
+Requires-Dist: pyvis>=0.3.2; extra == "notebook"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "notebook"
+Requires-Dist: pandas>=2.2; extra == "notebook"
+Provides-Extra: colab
+Requires-Dist: ipywidgets>=8.1; extra == "colab"
+Requires-Dist: panel>=1.4; extra == "colab"
+Requires-Dist: hvplot>=0.10; extra == "colab"
+Requires-Dist: holoviews>=1.19; extra == "colab"
+Requires-Dist: bokeh>=3.4; extra == "colab"
+Requires-Dist: pyvis>=0.3.2; extra == "colab"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "colab"
+Requires-Dist: pandas>=2.2; extra == "colab"
+Provides-Extra: task2-notebook
+Requires-Dist: python-dateutil>=2.9; extra == "task2-notebook"
+Requires-Dist: dateparser>=1.2; extra == "task2-notebook"
+Requires-Dist: pymupdf>=1.24; extra == "task2-notebook"
+Requires-Dist: pillow>=10.0; extra == "task2-notebook"
+Requires-Dist: open_clip_torch>=2.24; extra == "task2-notebook"
+Requires-Dist: torch>=2.2; extra == "task2-notebook"
+Requires-Dist: transformers>=4.44; extra == "task2-notebook"
+Requires-Dist: accelerate>=0.33; extra == "task2-notebook"
+Requires-Dist: sentencepiece>=0.2; extra == "task2-notebook"
+Requires-Dist: ipywidgets>=8.1; extra == "task2-notebook"
+Requires-Dist: panel>=1.4; extra == "task2-notebook"
+Requires-Dist: hvplot>=0.10; extra == "task2-notebook"
+Requires-Dist: holoviews>=1.19; extra == "task2-notebook"
+Requires-Dist: bokeh>=3.4; extra == "task2-notebook"
+Requires-Dist: pyvis>=0.3.2; extra == "task2-notebook"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "task2-notebook"
+Requires-Dist: pandas>=2.2; extra == "task2-notebook"
 Provides-Extra: temporal
 Requires-Dist: python-dateutil>=2.9; extra == "temporal"
 Requires-Dist: dateparser>=1.2; extra == "temporal"
@@ -45,10 +98,59 @@ Provides-Extra: g4f
 Requires-Dist: g4f>=7.1.2; extra == "g4f"
 Provides-Extra: agents
 Requires-Dist: smolagents>=1.0.0; extra == "agents"
+Provides-Extra: agents-hf
+Requires-Dist: smolagents[transformers]>=1.0.0; extra == "agents-hf"
+Provides-Extra: gnn
+Requires-Dist: torch>=2.2; extra == "gnn"
+Requires-Dist: torch-geometric>=2.6.0; extra == "gnn"
+Provides-Extra: gnn-ext
+Requires-Dist: pyg-lib>=0.4.0; extra == "gnn-ext"
+Requires-Dist: torch-scatter>=2.1.2; extra == "gnn-ext"
+Requires-Dist: torch-sparse>=0.6.18; extra == "gnn-ext"
+Requires-Dist: torch-cluster>=1.6.3; extra == "gnn-ext"
+Requires-Dist: torch-spline-conv>=1.2.2; extra == "gnn-ext"
+Provides-Extra: tgnn
+Requires-Dist: torch>=2.2; extra == "tgnn"
+Provides-Extra: neo4j-rag
+Requires-Dist: neo4j-graphrag>=1.8.0; extra == "neo4j-rag"
+Provides-Extra: rdf-validation
+Requires-Dist: rdflib>=7.0; extra == "rdf-validation"
+Requires-Dist: pyshacl>=0.30.0; extra == "rdf-validation"
 Provides-Extra: battery
 Requires-Dist: pybamm>=25.12.0; extra == "battery"
 Requires-Dist: pandas>=2.2; extra == "battery"
 Requires-Dist: matplotlib>=3.8; extra == "battery"
+Provides-Extra: all
+Requires-Dist: sentence-transformers>=2.7; extra == "all"
+Requires-Dist: pymupdf>=1.24; extra == "all"
+Requires-Dist: pillow>=10.0; extra == "all"
+Requires-Dist: open_clip_torch>=2.24; extra == "all"
+Requires-Dist: torch>=2.2; extra == "all"
+Requires-Dist: transformers>=4.44; extra == "all"
+Requires-Dist: accelerate>=0.33; extra == "all"
+Requires-Dist: sentencepiece>=0.2; extra == "all"
+Requires-Dist: python-dateutil>=2.9; extra == "all"
+Requires-Dist: dateparser>=1.2; extra == "all"
+Requires-Dist: fastapi>=0.110; extra == "all"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "all"
+Requires-Dist: mcp>=1.0.0; extra == "all"
+Requires-Dist: g4f>=7.1.2; extra == "all"
+Requires-Dist: smolagents>=1.0.0; extra == "all"
+Requires-Dist: smolagents[transformers]>=1.0.0; extra == "all"
+Requires-Dist: torch-geometric>=2.6.0; extra == "all"
+Requires-Dist: neo4j-graphrag>=1.8.0; extra == "all"
+Requires-Dist: rdflib>=7.0; extra == "all"
+Requires-Dist: pyshacl>=0.30.0; extra == "all"
+Requires-Dist: pybamm>=25.12.0; extra == "all"
+Requires-Dist: matplotlib>=3.8; extra == "all"
+Requires-Dist: ipywidgets>=8.1; extra == "all"
+Requires-Dist: panel>=1.4; extra == "all"
+Requires-Dist: hvplot>=0.10; extra == "all"
+Requires-Dist: holoviews>=1.19; extra == "all"
+Requires-Dist: bokeh>=3.4; extra == "all"
+Requires-Dist: pyvis>=0.3.2; extra == "all"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "all"
+Requires-Dist: pandas>=2.2; extra == "all"
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-xdist>=3.5; extra == "dev"
@@ -75,6 +177,25 @@ Dynamic: license-file
 - **CLI**, **FastAPI** (наружный API) и **MCP‑сервер** (интеграции с AI‑сервисами).
 
 ## Быстрый старт
+
+### Student quickstart (3 команды)
+
+**Linux/macOS:**
+```bash
+./scripts/bootstrap.sh
+top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+```
+
+**Windows (PowerShell):**
+```powershell
+.\scripts\bootstrap.ps1
+top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+```
+
+> Здесь используется **smolagents CodeAgent** (агент пишет и исполняет Python‑код) — это основной режим курса.
+
 ### 1) Установка
 ```bash
 # Вариант 1 (рекомендуется для курса): одна команда
@@ -85,6 +206,9 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev,agents]"
 ```
+
+> Если вы хотите использовать **g4f** (LLM_PROVIDER=g4f или smolagents+g4f),
+> установите также: `pip install -e ".[g4f]"`.
 
 ### 2) Настройка
 Скопируйте `.env.example` → `.env`.  
@@ -159,8 +283,18 @@ top-papers-graph run --query "..." --llm ollama:llama3.2
 
 > Пайплайн старается скачать PDF (если доступен OA) и распарсить его через GROBID.
 > Если GROBID не запущен, будет fallback‑парсинг PDF через `pypdf` (по умолчанию).
-> Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` (PyMuPDF).
+> Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` или `pip install -e ".[multimodal]"` (алиас для того же стека).
 > Если PDF недоступен, пайплайн продолжит работу по абстрактам.
+
+> **Опционально (GNN mode):** для “более взрослого” режима генерации гипотез через
+> PyTorch Geometric (GNN link prediction) установите `pip install -e ".[gnn]"` и включите
+> `HYP_GNN_ENABLED=1`. Подробности: `docs/gnn.md`.
+
+> **Опционально (smolagents):** чтобы использовать Hugging Face **smolagents CodeAgent** вместо
+> встроенного агента, установите `pip install -e ".[agents]"` и включите
+> `HYP_AGENT_BACKEND=smolagents`.
+> Для **локальных HF моделей**: `pip install -e ".[agents_hf]"`.
+> Подробности: `docs/smolagents.md`.
 
 ### 4) Поиск статей по вашей теме (отдельный шаг)
 ```bash

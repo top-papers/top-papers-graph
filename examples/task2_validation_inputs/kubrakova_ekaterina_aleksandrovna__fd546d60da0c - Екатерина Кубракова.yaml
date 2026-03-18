@@ -1,0 +1,265 @@
+artifact_version: 2
+topic: Использование агентов на больших языковых моделях (LLM) для моделирования влияния
+  поведенческих предубеждений (bias) на динамику фондового рынка.
+domain: Q647525
+cutoff_year: 2026
+papers:
+- id: https://link.springer.com/article/10.1007/s42001-026-00465-4
+  year: 2026
+  title: LLM agents reveal how human bias shapes path-dependent market dynamics
+- id: https://www.nature.com/articles/460685a
+  year: 2009
+  title: The economy needs agent-based modeling.
+- id: https://www.nature.com/articles/s43588-023-00527-x
+  year: 20230
+  title: Human-like intuitive behavior and reasoning biases emerged in large language
+    models but disappeared in ChatGPT
+- id: https://www.sciencedirect.com/science/article/pii/S016726812200316X?via%3Dihub
+  year: 2022
+  title: 'Herding with leading traders: Evidence from a laboratory social trading
+    platform'
+steps:
+- step_id: 1
+  claim: 'Традиционные агентные модели (ABM) сталкиваются с фундаментальной проблемой
+    при моделировании поведенческих предубеждений инвесторов, поскольку эти предубеждения
+    являются контекстно-зависимыми: их проявления варьируются не только в зависимости
+    от текущих рыночных условий, но и от таких факторов, как индивидуальная история
+    торговли или среда, в которой действует инвестор.'
+  sources:
+  - type: text
+    source: doi:10.1007/s42001-026-00465-4
+    snippet_or_summary: Despite their utility, artificial markets face a significant
+      challenge in incorporating context-dependent behavioral biases into agents,
+      limiting their ability to fully capture real-world financial dynamics
+  - type: text
+    source: https://www.nature.com/articles/460685a
+    snippet_or_summary: The economy needs agent-based modeling.
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: Проблема особенно остра для двух ключевых предубеждений — неприятия потерь
+      и стадного поведения
+  inference: Необходим принципиально новый подход к моделированию поведения инвесторов,
+    который сможет улавливать сложные нюансы поведенческих предубеждений, зависящие
+    от контекста.
+  next_question: Могут ли большие языковые модели (LLM), обученные на огромных массивах
+    человеческих текстов, служить основой для таких агентов?
+- step_id: 2
+  claim: Поскольку LLM обучаются на разнообразных текстах, созданных людьми, существует
+    предположение, что они могут демонстрировать поведенческие предубеждения, схожие
+    с человеческими, включая неприятие потерь и стадное поведение
+  sources:
+  - type: text
+    source: doi:10.1007/s42001-026-00465-4
+    snippet_or_summary: Since LLMs are trained on diverse human-generated texts, there
+      is growing speculation that they may exhibit behavioral biases similar to those
+      of humans
+  - type: text
+    source: https://www.nature.com/articles/s43588-023-00527-x
+    snippet_or_summary: The results show that as the models expand in size and linguistic
+      proficiency they increasingly display human-like intuitive system 1 thinking
+      and associated cognitive errors.
+    page: '833'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: Если гипотеза подтвердится, LLM-агенты могут стать прорывом в многоагентных
+    рыночных симуляциях, воспроизводя более человекоподобные паттерны поведения.
+  next_question: Как систематически проанализировать контекстно-зависимую природу
+    предубеждений LLM?
+- step_id: 3
+  claim: 'Для исследования контекстно-зависимой природы предубеждений LLM авторы разработали
+    двухэтапный подход: (1) микроанализ — контролируемые торговые эксперименты для
+    тестирования контекстно-зависимых предубеждений LLM, и (2) макроанализ — внедрение
+    LLM-агентов в искусственный рынок для многоагентных симуляций'
+  sources:
+  - type: text
+    source: https://link.springer.com/article/10.1007/s42001-026-00465-4#Bib1
+    snippet_or_summary: 'Our analysis proceeds in two stages. Micro analysis: we run
+      controlled trading experiments... Macro analysis: we introduce the LLM-based
+      agents in an artificial market..."'
+    locator: Figure 1
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: Микроанализ фокусируется на отдельных решениях, макроанализ — на эмерджентных
+      рыночных явлениях
+  inference: Такой подход позволяет связать микро-уровень индивидуальных предубеждений
+    с макро-уровнем рыночных аномалий.
+  next_question: Что показал микроанализ относительно неприятия потерь у LLM?
+- step_id: 4
+  claim: В микроанализе авторы обнаружили, что LLM могут демонстрировать неприятие
+    потерь с варьирующимися точками отсчета (reference points) в зависимости от контекста.
+    Анализ проводился в четырех различных контекстах с разными потенциальными точками
+    отсчета в однораундовых симуляциях
+  sources:
+  - type: text
+    source: https://link.springer.com/article/10.1007/s42001-026-00465-4#Bib1
+    snippet_or_summary: For loss aversion, we analyzed LLMs' decision-making across
+      four different contexts with varying potential reference points in single-turn
+      simulations
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: Точки отсчета включали цену покупки, исторический максимум, исторический
+      минимум и другие контекстуальные факторы
+  inference: LLM способны менять свою точку отсчета для оценки прибылей и убытков
+    в зависимости от контекста, что критически важно для моделирования эффекта диспозиции.
+  next_question: Как LLM ведут себя в отношении стадного поведения?
+- step_id: 5
+  claim: Для стадного поведения авторы провели многоагентные симуляции, чтобы оценить,
+    могут ли дисбаланс потока заявок (OFI) и лидерборд (информация об успешных инвесторах)
+    служить стимулами для проявления LLM стадного поведения. Результаты показали,
+    что LLM-агенты демонстрируют стадное поведение под влиянием обоих факторов
+  sources:
+  - type: text
+    source: https://link.springer.com/article/10.1007/s42001-026-00465-4#Bib1
+    snippet_or_summary: For herd behavior, we conducted multi-agent simulations to
+      assess whether order flow imbalance (OFI) and the leader-board... could serve
+      as stimuli for LLMs to exhibit herding behavior
+  - type: text
+    source: https://www.sciencedirect.com/science/article/pii/S016726812200316X?via%3Dihub
+    snippet_or_summary: We provide novel evidence about herd behavior and its impact
+      on asset price bubbles in an experimental financial market. We find that traders
+      imitate quotes of those with the highest wealth increases as ranked on the leader-boards,
+      despite that no traders possess private value-related information and that wealth
+      increases are not due to trading skills.
+    page: '93'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: Проводились многоагентные симуляции для анализа влияния OFI и лидерборда
+      на решения агентов. Лидерборд отражает действия прибыльных инвесторов
+  inference: LLM способны имитировать сложное стадное поведение, реагируя на различные
+    социальные сигналы, что соответствует выводам экспериментальных исследований на
+    людях
+  next_question: Как эти находки интегрировать в работающую модель искусственного
+    рынка?
+- step_id: 6
+  claim: На основе полученных результатов авторы предложили novel agent model — Fundamental-Chartist-LLM-Agent
+    (FCLAgent), который интегрирует контекстно-зависимые поведенческие предубеждения
+    LLM в торговые интенции, полагаясь на традиционные rule-based механизмы для ценообразования
+    ордеров
+  sources:
+  - type: text
+    source: https://link.springer.com/article/10.1007/s42001-026-00465-4#ref-CR39
+    snippet_or_summary: we propose a novel agent model, Fundamental-Chartist-LLM-Agent
+      (FCLAgent), which integrates context-dependent behavioral biases of LLMs into
+      trading intention, while relying on traditional rule-based mechanisms for order
+      pricing
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: гибридная архитектура (LLM для решений + правила для цен).  Это решает
+      проблему численных рассуждений LLM, делегируя вычисления цен детерминированным
+      правилам
+  inference: Гибридный подход позволяет извлечь психологически правдоподобное поведение
+    из LLM, не полагаясь на их способность выполнять числовые операции.
+  next_question: Какие макро-феномены удалось воспроизвести с помощью FCLAgent?
+- step_id: 7
+  claim: Включение FCLAgents в симуляции искусственного рынка позволило воспроизвести
+    эмпирически наблюдаемую рыночную аномалию — отрицательную корреляцию между близостью
+    цены к историческому максимуму и будущей доходностью (proximity to the all-time
+    high and future returns)
+  sources:
+  - type: text
+    source: https://link.springer.com/article/10.1007/s42001-026-00465-4#ref-CR39
+    snippet_or_summary: The simulation results demonstrated that the inclusion of
+      the FCLAgents enables the emergence of empirically observed market anomalies,
+      such as the negative correlation between proximity to the all-time high and
+      future returns
+  - type: text
+    source: https://www.sciencedirect.com/science/article/abs/pii/S0304405X11002121?via%3Dihub
+    snippet_or_summary: We find that nearness to the 52-week high positively predicts
+      future aggregate market returns, while nearness to the historical high negatively
+      predicts future market returns. We further show that our proxies contain information
+      about future market returns that is not captured by traditional macroeconomic
+      variables and that our results are robust across G7 countries. Comprehensive
+      Monte Carlo simulations and comparisons with the NYSE/Amex market cap index
+      confirm the significance of these findings.
+    page: '401'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: Эта аномалия связана с тем, что инвесторы воспринимают цену вблизи исторического
+      максимума как потенциальную потерь и начинают продавать
+  inference: FCLAgent успешно улавливает механизм, связывающий индивидуальные предубеждения
+    с макро-рыночными паттернами.
+  next_question: Какие еще аномалии удалось воспроизвести?
+- step_id: 8
+  claim: Симуляции также воспроизвели другую важную аномалию — корреляцию между дисбалансом
+    потока заявок (OFI) и будущими доходами, что согласуется с эмпирическими исследованиями
+    финансовых рынков
+  sources:
+  - type: text
+    source: https://link.springer.com/article/10.1007/s42001-026-00465-4#ref-CR39
+    snippet_or_summary: '"...and the correlation between OFIs and future returns"'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: Эта корреляция возникает из-за того, что агенты имитируют действия других
+      при наблюдении OFI
+  inference: Модель успешно воспроизводит микроструктурные эффекты, связывая поток
+    ордеров с последующими изменениями цен.
+  next_question: Каков общий вклад этого исследования?
+- step_id: 9
+  claim: Результаты исследования демонстрируют, что LLM-агенты могут значительно продвинуть
+    конструктивное моделирование рыночной динамики, создавая мост между микро-уровнем
+    поведенческих механизмов и макро-уровнем рыночных явлений, который традиционные
+    модели не могли охватить
+  sources:
+  - type: text
+    source: https://link.springer.com/article/10.1007/s42001-026-00465-4#ref-CR39
+    snippet_or_summary: Together, these results demonstrate how LLM-based agents can
+      advance constructive modeling of market dynamics" и "...bridging micro-level
+      behavioral mechanisms with macro-level market phenomena.
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: Исследование открывает путь к более реалистичным симуляциям финансовых
+      рынков
+  inference: Исследование открывает путь к более реалистичным симуляциям финансовых
+    рынков
+  next_question: Какие ограничения остаются и какие направления для будущих исследований
+    открываются?
+edges:
+- - 1
+  - 2
+- - 1
+  - 3
+- - 2
+  - 3
+- - 3
+  - 4
+- - 3
+  - 5
+- - 4
+  - 6
+- - 5
+  - 6
+- - 6
+  - 8
+- - 7
+  - 9
+- - 8
+  - 9
+generated_at: '2026-03-09T20:31:33Z'
+expert:
+  last_name: Кубракова
+  first_name: Екатерина
+  patronymic: Александровна
+  full_name: Кубракова Екатерина Александровна
+  latin_full_name: Kubrakova Ekaterina Aleksandrovna
+  latin_slug: kubrakova_ekaterina_aleksandrovna
+artifact_hash: fd546d60da0c
+submission_id: kubrakova_ekaterina_aleksandrovna__fd546d60da0c

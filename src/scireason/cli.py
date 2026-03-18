@@ -618,6 +618,31 @@ def prepare_task2_validation(
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
 
 
+@app.command("task2-bundle")
+def task2_bundle(
+    trajectory: Path = typer.Option(..., help="Путь к YAML артефакту Task 1 (trajectory)."),
+    out_dir: Path = typer.Option(Path("runs/task2_validation"), help="Куда сохранить bundle для эксперта."),
+    multimodal: bool = typer.Option(True, help="Пробовать мультимодальный ingest PDF (страницы + VLM при наличии)."),
+    vlm: bool = typer.Option(True, help="Запускать VLM на страницах PDF, если VLM backend настроен."),
+    edge_mode: str = typer.Option("auto", help="auto|llm_triplets|cooccurrence"),
+    suggest_links: bool = typer.Option(True, help="Добавить scout/suggested_links.json для поиска дополнительных ссылок."),
+    max_papers: int = typer.Option(0, help="Если >0 — ограничить число статей из trajectory YAML."),
+    max_link_queries: int = typer.Option(4, help="Сколько topic/next_question запросов использовать для scout."),
+) -> None:
+    """Alias for prepare-task2-validation, kept for notebook and legacy automation compatibility."""
+    bundle_dir = prepare_task2_validation_bundle(
+        trajectory,
+        out_dir=out_dir,
+        include_multimodal=multimodal,
+        run_vlm=vlm,
+        edge_mode=edge_mode,
+        suggest_links=suggest_links,
+        max_papers=max_papers,
+        max_link_queries=max_link_queries,
+    )
+    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
+
+
 @app.command("pybamm-fastcharge")
 def pybamm_fastcharge(
     profile: str = typer.Option("baseline_cc", help="baseline_cc|proposed_two_stage|..."),
