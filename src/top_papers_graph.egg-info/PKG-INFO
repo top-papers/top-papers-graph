@@ -1,0 +1,194 @@
+Metadata-Version: 2.4
+Name: top-papers-graph
+Version: 0.4.0
+Summary: top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)
+Author: top-papers-graph contributors
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pydantic>=2.6
+Requires-Dist: pydantic-settings>=2.2
+Requires-Dist: typer>=0.12
+Requires-Dist: rich>=13.7
+Requires-Dist: httpx>=0.27
+Requires-Dist: tenacity>=8.2
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: networkx>=3.3
+Requires-Dist: numpy>=1.26
+Requires-Dist: pypdf>=4.0
+Requires-Dist: neo4j>=5.20
+Requires-Dist: qdrant-client>=1.9
+Requires-Dist: litellm>=1.0
+Requires-Dist: langchain-core>=0.2
+Requires-Dist: langgraph>=0.1
+Provides-Extra: embeddings
+Requires-Dist: sentence-transformers>=2.7; extra == "embeddings"
+Provides-Extra: mm
+Requires-Dist: pymupdf>=1.24; extra == "mm"
+Requires-Dist: pillow>=10.0; extra == "mm"
+Requires-Dist: open_clip_torch>=2.24; extra == "mm"
+Requires-Dist: torch>=2.2; extra == "mm"
+Requires-Dist: transformers>=4.44; extra == "mm"
+Requires-Dist: accelerate>=0.33; extra == "mm"
+Requires-Dist: sentencepiece>=0.2; extra == "mm"
+Provides-Extra: temporal
+Requires-Dist: python-dateutil>=2.9; extra == "temporal"
+Requires-Dist: dateparser>=1.2; extra == "temporal"
+Provides-Extra: api
+Requires-Dist: fastapi>=0.110; extra == "api"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "api"
+Provides-Extra: mcp
+Requires-Dist: mcp>=1.0.0; extra == "mcp"
+Provides-Extra: g4f
+Requires-Dist: g4f>=7.1.2; extra == "g4f"
+Provides-Extra: agents
+Requires-Dist: smolagents>=1.0.0; extra == "agents"
+Provides-Extra: battery
+Requires-Dist: pybamm>=25.12.0; extra == "battery"
+Requires-Dist: pandas>=2.2; extra == "battery"
+Requires-Dist: matplotlib>=3.8; extra == "battery"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-xdist>=3.5; extra == "dev"
+Requires-Dist: ruff>=0.5; extra == "dev"
+Requires-Dist: mypy>=1.10; extra == "dev"
+Requires-Dist: types-requests; extra == "dev"
+Requires-Dist: pre-commit>=3.7; extra == "dev"
+Requires-Dist: streamlit>=1.36; extra == "dev"
+Requires-Dist: ragas>=0.1.15; extra == "dev"
+Requires-Dist: deepeval>=3.0; extra == "dev"
+Dynamic: license-file
+
+# top-papers-graph — генерация научных гипотез из графа знаний, который создается на основе научных публикаций и подходит для *любой* тематики
+
+Проект собирает публикации из нескольких крупных источников, нормализует метаданные в единый формат и помогает строить **проверяемый** граф знаний (KG) и evidence‑based синтез по вашей теме.
+
+> CLI: `top-papers-graph ...` (алиас `scireason ...` сохранён для обратной совместимости)
+
+## Возможности
+- **Источники публикаций**: arXiv, PubMed (NCBI), Europe PMC, bioRxiv/medRxiv, Crossref, OpenAlex, Semantic Scholar.
+- **Единая схема метаданных**: `PaperMetadata` (Pydantic) + нормализация ответов всех источников.
+- **Resolver идентификаторов**: DOI ⇄ PMID ⇄ arXivID ⇄ OpenAlexID.
+- **Кеширование и rate-limit** на уровне HTTP‑клиента (особенно полезно для NCBI/Crossref).
+- **CLI**, **FastAPI** (наружный API) и **MCP‑сервер** (интеграции с AI‑сервисами).
+
+## Быстрый старт
+### 1) Установка
+```bash
+# Вариант 1 (рекомендуется для курса): одна команда
+./scripts/bootstrap.sh  # Windows: .\scripts\bootstrap.ps1
+
+# Вариант 2 (ручной):
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[dev,agents]"
+```
+
+### 2) Настройка
+Скопируйте `.env.example` → `.env`.  
+По умолчанию используется домен `science` (`configs/domains/science.yaml`).
+
+### 3) Полностью автоматический пайплайн (рекомендуется)
+Одна команда:
+```bash
+top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
+```
+
+#### Оффлайн демонстрация (без интернета и сервисов)
+```bash
+top-papers-graph demo-run --edge-mode cooccurrence
+top-papers-graph smoke-all
+```
+
+#### Запуск в Docker (из коробки)
+
+В репозитории есть Dockerfile для CLI/API и `docker-compose.yml`, который поднимает **всю инфраструктуру**, используемую проектом:
+**Neo4j** (графовая БД), **Qdrant** (векторное хранилище для demo‑few‑shot) и **GROBID** (парсинг PDF).
+
+```bash
+# 1) Собрать образ и поднять стек
+docker compose up -d --build
+
+# 2) Запустить пайплайн внутри контейнера
+docker compose exec app top-papers-graph run \
+  --query "graph neural network survey" \
+  --sources all \
+  --top-papers 20
+
+# 3) Остановить и удалить тома (опционально)
+docker compose down -v
+```
+
+Подсказки:
+- GROBID доступен на `http://localhost:8070` (проверка: `/api/isalive`). Если он недоступен, пайплайн автоматически
+  переключится на локальный PDF‑парсер.
+- Neo4j Browser: `http://localhost:7474`.
+- Qdrant: `http://localhost:6333`.
+- Для локального Ollama на хосте используйте `OLLAMA_BASE_URL` (по умолчанию `http://host.docker.internal:11434`).
+
+По умолчанию LLM = **auto/auto**: проект пробует локальный Ollama (если доступен), иначе g4f (если установлен), иначе включает оффлайн `mock`.
+
+Вы можете явно переопределить модель в команде:
+```bash
+# g4f (если установлен: pip install -e '.[g4f]')
+top-papers-graph run --query "..." --g4f-model deepseek-r1
+
+# (опционально) попробовать в первую очередь конкретные модели (если они есть в g4f/models.py)
+G4F_MODEL_PREFER="gpt-4o-mini,deepseek-r1" top-papers-graph run --query "..."
+
+# (опционально) ограничить число попыток автоподбора (по умолчанию 25)
+G4F_AUTO_MAX_MODELS=10 top-papers-graph run --query "..."
+
+# (опционально) форсировать список провайдеров g4f (RetryProvider)
+G4F_PROVIDERS="Phind,FreeChatgpt,Liaobots" top-papers-graph run --query "..."
+
+# локальная модель через Ollama
+top-papers-graph run --query "..." --local-model llama3.2
+
+# универсальный формат (provider:model)
+top-papers-graph run --query "..." --llm g4f:gpt-4o-mini
+top-papers-graph run --query "..." --llm ollama:llama3.2
+```
+
+Артефакты появятся в `runs/<timestamp>_<slug>/`:
+- `temporal_kg.json` — темпоральный граф знаний (термы/связи/временные счётчики)
+- `hypotheses.json` + `hypotheses.md` — ранжированный набор проверяемых гипотез
+- `review_queue/` — шаблоны для экспертной разметки (hypothesis_reviews)
+
+> Пайплайн старается скачать PDF (если доступен OA) и распарсить его через GROBID.
+> Если GROBID не запущен, будет fallback‑парсинг PDF через `pypdf` (по умолчанию).
+> Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` (PyMuPDF).
+> Если PDF недоступен, пайплайн продолжит работу по абстрактам.
+
+### 4) Поиск статей по вашей теме (отдельный шаг)
+```bash
+top-papers-graph fetch "graph neural network survey" --source arxiv --limit 10 --out data/papers/arxiv.json
+top-papers-graph fetch "graph neural network survey" --source pubmed --limit 10 --out data/papers/pubmed.json
+```
+
+### 5) Наружный API (FastAPI)
+```bash
+pip install -e ".[api]"
+top-papers-graph-api
+```
+
+### 6) MCP‑сервер
+```bash
+pip install -e ".[mcp]"
+top-papers-graph-mcp
+```
+
+## Конфиг домена (topic‑agnostic)
+- Домен настраивается YAML‑файлом в `configs/domains/<DOMAIN_ID>.yaml`.
+- “Скептик” (критический чек‑лист) задаётся файлом в `configs/checklists/`.
+
+Смотрите: `docs/quickstart.md`, `docs/architecture.md`, `docs/sources.md`.
+
+## Примеры
+- `examples/battery_fastcharge/` — пример домена “быстрая зарядка батарей” с PyBaMM и профилями зарядки.
+  - Чтобы включить пример, укажите `DOMAIN_ID=ied_fastcharge` и пути на конфиги из `examples/...`.
+
+## Лицензия
+См. `LICENSE`.

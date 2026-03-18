@@ -1,0 +1,5 @@
+[console_scripts]
+scireason = scireason.cli:app
+top-papers-graph = scireason.cli:app
+top-papers-graph-api = scireason.api.main:main
+top-papers-graph-mcp = scireason.mcp.server:main
