@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: top-papers-graph
-Version: 0.4.2
+Version: 0.4.3
 Summary: top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)
 Author: top-papers-graph contributors
 License: MIT
@@ -49,7 +49,7 @@ Requires-Dist: holoviews>=1.19; extra == "notebook-viz"
 Requires-Dist: bokeh>=3.4; extra == "notebook-viz"
 Requires-Dist: pyvis>=0.3.2; extra == "notebook-viz"
 Requires-Dist: jupyter_bokeh>=4.0; extra == "notebook-viz"
-Requires-Dist: pandas>=2.2; extra == "notebook-viz"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "notebook-viz"
 Provides-Extra: notebook
 Requires-Dist: ipywidgets>=8.1; extra == "notebook"
 Requires-Dist: panel>=1.4; extra == "notebook"
@@ -58,7 +58,7 @@ Requires-Dist: holoviews>=1.19; extra == "notebook"
 Requires-Dist: bokeh>=3.4; extra == "notebook"
 Requires-Dist: pyvis>=0.3.2; extra == "notebook"
 Requires-Dist: jupyter_bokeh>=4.0; extra == "notebook"
-Requires-Dist: pandas>=2.2; extra == "notebook"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "notebook"
 Provides-Extra: colab
 Requires-Dist: ipywidgets>=8.1; extra == "colab"
 Requires-Dist: panel>=1.4; extra == "colab"
@@ -67,7 +67,7 @@ Requires-Dist: holoviews>=1.19; extra == "colab"
 Requires-Dist: bokeh>=3.4; extra == "colab"
 Requires-Dist: pyvis>=0.3.2; extra == "colab"
 Requires-Dist: jupyter_bokeh>=4.0; extra == "colab"
-Requires-Dist: pandas>=2.2; extra == "colab"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "colab"
 Provides-Extra: task2-notebook
 Requires-Dist: python-dateutil>=2.9; extra == "task2-notebook"
 Requires-Dist: dateparser>=1.2; extra == "task2-notebook"
@@ -85,7 +85,7 @@ Requires-Dist: holoviews>=1.19; extra == "task2-notebook"
 Requires-Dist: bokeh>=3.4; extra == "task2-notebook"
 Requires-Dist: pyvis>=0.3.2; extra == "task2-notebook"
 Requires-Dist: jupyter_bokeh>=4.0; extra == "task2-notebook"
-Requires-Dist: pandas>=2.2; extra == "task2-notebook"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "task2-notebook"
 Provides-Extra: temporal
 Requires-Dist: python-dateutil>=2.9; extra == "temporal"
 Requires-Dist: dateparser>=1.2; extra == "temporal"
@@ -118,7 +118,7 @@ Requires-Dist: rdflib>=7.0; extra == "rdf-validation"
 Requires-Dist: pyshacl>=0.30.0; extra == "rdf-validation"
 Provides-Extra: battery
 Requires-Dist: pybamm>=25.12.0; extra == "battery"
-Requires-Dist: pandas>=2.2; extra == "battery"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "battery"
 Requires-Dist: matplotlib>=3.8; extra == "battery"
 Provides-Extra: all
 Requires-Dist: sentence-transformers>=2.7; extra == "all"
@@ -150,7 +150,7 @@ Requires-Dist: holoviews>=1.19; extra == "all"
 Requires-Dist: bokeh>=3.4; extra == "all"
 Requires-Dist: pyvis>=0.3.2; extra == "all"
 Requires-Dist: jupyter_bokeh>=4.0; extra == "all"
-Requires-Dist: pandas>=2.2; extra == "all"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "all"
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-xdist>=3.5; extra == "dev"

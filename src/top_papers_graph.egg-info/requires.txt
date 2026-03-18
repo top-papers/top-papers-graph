@@ -51,7 +51,7 @@ holoviews>=1.19
 bokeh>=3.4
 pyvis>=0.3.2
 jupyter_bokeh>=4.0
-pandas>=2.2
+pandas<2.4,>=2.2.2
 
 [api]
 fastapi>=0.110
@@ -59,7 +59,7 @@ uvicorn[standard]>=0.29
 
 [battery]
 pybamm>=25.12.0
-pandas>=2.2
+pandas<2.4,>=2.2.2
 matplotlib>=3.8
 
 [colab]
@@ -70,7 +70,7 @@ holoviews>=1.19
 bokeh>=3.4
 pyvis>=0.3.2
 jupyter_bokeh>=4.0
-pandas>=2.2
+pandas<2.4,>=2.2.2
 
 [dev]
 pytest>=8.0
@@ -132,7 +132,7 @@ holoviews>=1.19
 bokeh>=3.4
 pyvis>=0.3.2
 jupyter_bokeh>=4.0
-pandas>=2.2
+pandas<2.4,>=2.2.2
 
 [notebook_viz]
 ipywidgets>=8.1
@@ -142,7 +142,7 @@ holoviews>=1.19
 bokeh>=3.4
 pyvis>=0.3.2
 jupyter_bokeh>=4.0
-pandas>=2.2
+pandas<2.4,>=2.2.2
 
 [rdf_validation]
 rdflib>=7.0
@@ -165,7 +165,7 @@ holoviews>=1.19
 bokeh>=3.4
 pyvis>=0.3.2
 jupyter_bokeh>=4.0
-pandas>=2.2
+pandas<2.4,>=2.2.2
 
 [temporal]
 python-dateutil>=2.9
