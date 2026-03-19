@@ -603,6 +603,8 @@ def prepare_task2_validation(
     remote_lookup: bool = typer.Option(False, help="Разрешить сетевое обогащение метаданных статей и scout-поиск."),
     g4f_model: str | None = typer.Option(None, "--g4f-model", help="Запустить Task 2 через g4f с указанной моделью."),
     local_model: str | None = typer.Option(None, "--local-model", help="Запустить Task 2 через локальную Ollama модель."),
+    vlm_backend: str | None = typer.Option(None, "--vlm-backend", help="Переопределить VLM backend для мультимодального шага (например g4f или qwen3_vl)."),
+    vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
     llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
     llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
 ) -> None:
@@ -624,6 +626,8 @@ def prepare_task2_validation(
         llm_model=llm_model,
         g4f_model=g4f_model,
         local_model=local_model,
+        vlm_backend=vlm_backend,
+        vlm_model_id=vlm_model_id,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
 
@@ -641,6 +645,8 @@ def task2_bundle(
     remote_lookup: bool = typer.Option(False, help="Разрешить сетевое обогащение метаданных статей и scout-поиск."),
     g4f_model: str | None = typer.Option(None, "--g4f-model", help="Запустить Task 2 через g4f с указанной моделью."),
     local_model: str | None = typer.Option(None, "--local-model", help="Запустить Task 2 через локальную Ollama модель."),
+    vlm_backend: str | None = typer.Option(None, "--vlm-backend", help="Переопределить VLM backend для мультимодального шага (например g4f или qwen3_vl)."),
+    vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
     llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
     llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
 ) -> None:
@@ -659,6 +665,8 @@ def task2_bundle(
         llm_model=llm_model,
         g4f_model=g4f_model,
         local_model=local_model,
+        vlm_backend=vlm_backend,
+        vlm_model_id=vlm_model_id,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
 

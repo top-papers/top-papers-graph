@@ -51,6 +51,58 @@ def _write_triplets_csv(json_path: Path, csv_path: Path) -> Path:
     return csv_path
 
 
+def _balanced_graph_palette() -> Dict[str, str]:
+    return {
+        "step": "#4c78a8",
+        "paper": "#7f8c8d",
+        "term": "#72b7b2",
+        "time": "#e0ac2b",
+        "assertion": "#b279a2",
+        "default": "#9aa5b1",
+        "edge": "#94a3b8",
+        "edge_temporal": "#7c8ba1",
+        "edge_support": "#6ba292",
+        "edge_warning": "#c28e6a",
+    }
+
+
+def _node_visual_style(attrs: Dict[str, Any]) -> Dict[str, Any]:
+    palette = _balanced_graph_palette()
+    raw_type = str(attrs.get("type") or attrs.get("node_type") or "").lower()
+    label = str(attrs.get("label") or attrs.get("term") or attrs.get("id") or "")
+
+    group = "default"
+    if "trajectory" in raw_type or "step" in raw_type:
+        group = "step"
+    elif "paper" in raw_type or attrs.get("paper_id") or attrs.get("papers"):
+        group = "paper"
+    elif "time" in raw_type or any(k in attrs for k in ("yearly_doc_freq", "valid_from", "valid_to")):
+        group = "time"
+    elif "assertion" in raw_type:
+        group = "assertion"
+    elif attrs.get("term") or raw_type in {"term", "entity", "concept"}:
+        group = "term"
+
+    return {
+        "group": group,
+        "color": palette.get(group, palette["default"]),
+        "label": label,
+    }
+
+
+def _edge_visual_style(attrs: Dict[str, Any]) -> Dict[str, Any]:
+    palette = _balanced_graph_palette()
+    predicate = str(attrs.get("predicate") or attrs.get("label") or "").lower()
+    color = palette["edge"]
+    if "time" in predicate or "valid" in predicate:
+        color = palette["edge_temporal"]
+    elif any(tok in predicate for tok in ("support", "influence", "relate", "correl")):
+        color = palette["edge_support"]
+    elif any(tok in predicate for tok in ("contrad", "conflict", "reject")):
+        color = palette["edge_warning"]
+    return {"color": color}
+
+
 def _networkx_from_payload(payload: Dict[str, Any]):
     import networkx as nx
 
@@ -93,16 +145,32 @@ def make_hvplot_payload(payload: Dict[str, Any]) -> Tuple[Any, Any]:
         import hvplot.networkx as hvnx  # noqa: F401
         import networkx as nx
 
-        pos = nx.spring_layout(G, seed=7)
+        node_colors = []
+        for node_id, attrs in G.nodes(data=True):
+            style = _node_visual_style(dict(attrs))
+            G.nodes[node_id]["viz_group"] = style["group"]
+            G.nodes[node_id]["viz_color"] = style["color"]
+            node_colors.append(style["color"])
+
+        edge_colors = []
+        for src, tgt, attrs in G.edges(data=True):
+            style = _edge_visual_style(dict(attrs))
+            G.edges[src, tgt]["viz_color"] = style["color"]
+            edge_colors.append(style["color"])
+
+        pos = nx.spring_layout(G, seed=7, k=0.9 / max(1, G.number_of_nodes() ** 0.5))
         plot = hvnx.draw(
             G,
             pos,
-            node_size=10,
+            node_size=14,
+            node_color=node_colors,
+            edge_color=edge_colors,
             with_labels=False,
-            arrowhead_length=0.015,
+            arrowhead_length=0.012,
+            edge_line_width=1.2,
             width=950,
             height=650,
-        )
+        ).opts(bgcolor="#ffffff")
         return G, plot
     except Exception:
         return G, None
@@ -165,6 +233,8 @@ def build_task2_validation_bundle(
     llm_model: str | None = None,
     g4f_model: str | None = None,
     local_model: str | None = None,
+    vlm_backend: str | None = None,
+    vlm_model_id: str | None = None,
 ) -> BundleResult:
     trajectory_path = Path(trajectory_path)
     out_dir = Path(out_dir)
@@ -188,6 +258,8 @@ def build_task2_validation_bundle(
             llm_model=llm_model,
             g4f_model=g4f_model,
             local_model=local_model,
+            vlm_backend=vlm_backend,
+            vlm_model_id=vlm_model_id,
         )
     else:
         bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -264,6 +336,16 @@ def build_task2_validation_bundle(
     scout = bundle_dir / "scout" / "suggested_links.json"
     if scout.exists():
         manifest["reference_scout"] = str(scout)
+
+    runtime_manifest = bundle_dir / "manifest.json"
+    if runtime_manifest.exists():
+        try:
+            runtime_payload = json.loads(runtime_manifest.read_text(encoding="utf-8"))
+        except Exception:
+            runtime_payload = {}
+        for key in ("llm_effective_provider", "llm_effective_model", "vlm_effective_backend", "vlm_effective_model"):
+            if runtime_payload.get(key) not in (None, ""):
+                manifest[key] = runtime_payload.get(key)
 
     manifest_path = bundle_dir / "task2_notebook_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

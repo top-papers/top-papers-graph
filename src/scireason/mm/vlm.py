@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Optional, Literal
 from ..config import settings
 
 
-Backend = Literal["none", "qwen2_vl", "llava", "phi3_vision", "g4f"]
+Backend = Literal["none", "qwen2_vl", "qwen3_vl", "llava", "phi3_vision", "g4f"]
 
 
 @dataclass
@@ -42,6 +43,19 @@ def _load_transformers_vlm(model_id: str):
         _require("transformers/torch")
 
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+
+    if "Qwen/Qwen3-VL" in model_id or "Qwen3-VL" in model_id:
+        try:
+            from transformers import Qwen3VLForConditionalGeneration  # type: ignore
+        except Exception:
+            _require("transformers>=4.57.0 with Qwen3-VL support")
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto" if torch.cuda.is_available() else None,
+            trust_remote_code=True,
+        )
+        return processor, model, "qwen3_vl"
 
     if "Qwen/Qwen2.5-VL" in model_id or "Qwen2.5-VL" in model_id:
         try:
@@ -150,7 +164,7 @@ def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_t
         f"\n\nЗадача/контекст: {prompt}"
     )
 
-    if family == "qwen2_5_vl":
+    if family in {"qwen2_5_vl", "qwen3_vl"}:
         messages = [
             {
                 "role": "user",
@@ -190,6 +204,23 @@ def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_t
             tables_md = rest
 
     return VLMResult(caption=caption, extracted_tables_md=tables_md, extracted_equations_md=equations_md)
+
+
+@contextmanager
+def temporary_vlm_selection(*, vlm_backend: Optional[str] = None, vlm_model_id: Optional[str] = None):
+    """Temporarily override VLM routing for notebook/CLI execution."""
+
+    prev_backend = getattr(settings, "vlm_backend", "none")
+    prev_model = getattr(settings, "vlm_model_id", "")
+    try:
+        if vlm_backend and str(vlm_backend).strip():
+            settings.vlm_backend = str(vlm_backend).strip()
+        if vlm_model_id and str(vlm_model_id).strip():
+            settings.vlm_model_id = str(vlm_model_id).strip()
+        yield
+    finally:
+        settings.vlm_backend = prev_backend
+        settings.vlm_model_id = prev_model
 
 
 def describe_image(
