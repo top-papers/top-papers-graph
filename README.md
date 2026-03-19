@@ -161,3 +161,44 @@ top-papers-graph-mcp
 
 ## Лицензия
 См. `LICENSE`.
+
+
+## Full-stack OCR -> Temporal KG -> Multimodal verification
+
+This repository now supports a staged full-stack pipeline aligned with the uploaded architecture notes:
+
+- **Step 1 / OCR + document structure**: PaddleOCR + PP-Structure/PP-StructureV3 ingestion with a richer `ChunkRecord` contract and automatic fallback to GROBID / PyMuPDF.
+- **Step 2 / unified PyTorch contour**: optional PyTorch Geometric TGN memory backend for temporal link prediction, Neo4j temporal KG, Qdrant dense+sparse hybrid retrieval, and Qwen2.5-VL-ready multimodal verification hooks.
+- **Step 3 / Memgraph-centric analytics**: optional Memgraph + MAGE dual-write for temporal events/assertions/chunks, plus best-effort MAGE analytics snapshots.
+
+### Docker stack
+
+By default, `docker-compose.yml` builds the app with the `fullstack` extra and starts:
+
+- Qdrant
+- Neo4j
+- Memgraph (MAGE image)
+- GROBID
+- the application container
+
+Example:
+
+```bash
+docker compose up --build
+```
+
+### Key environment switches
+
+- `OCR_BACKEND=auto|paddleocr|grobid|pymupdf`
+- `GRAPH_BACKEND=dual|neo4j|memgraph|none`
+- `QDRANT_RETRIEVAL_MODE=hybrid|dense`
+- `HYP_TGNN_BACKEND=auto|pyg|heuristic`
+- `VLM_BACKEND=none|qwen2_vl|g4f`
+
+### Product contracts
+
+The main product artifact chain is now explicitly modeled as:
+
+`ChunkRecord -> TemporalEvent -> Hypothesis`
+
+`ChunkRecord` is stored in `chunks.jsonl`, reused for Qdrant payloads, temporal graph provenance, and downstream multimodal verification.

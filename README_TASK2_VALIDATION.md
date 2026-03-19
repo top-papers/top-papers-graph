@@ -30,3 +30,6 @@ Then open the notebook and run it top-to-bottom.
   - добавлять комментарии;
   - корректировать временные параметры (`start_date`, `end_date`, `valid_from`, `valid_to`, `time_source`);
   - сохранять готовые `CSV`, `JSON` и `ZIP` с результатами валидации.
+
+
+По умолчанию Task 2 bundle теперь работает в надёжном offline-first режиме: notebook и CLI не блокируются на сетевом поиске метаданных и PDF. Чтобы включить удалённое обогащение, передайте `--remote-lookup`.

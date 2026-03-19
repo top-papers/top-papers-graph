@@ -171,9 +171,34 @@ gnn_ext = [
   "torch-spline-conv>=1.2.2",
 ]
 
-# Temporal link prediction / TGNN track.
+# Temporal link prediction / TGNN track (PyTorch + optional PyG TGN memory backend).
 tgnn = [
   "torch>=2.2",
+  "torch-geometric>=2.6.0",
+]
+
+# OCR / layout extraction (PaddleOCR full-stack).
+ocr = [
+  "paddleocr>=3.0.0",
+  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
+]
+
+# Convenience extra for the full document -> graph -> retrieval -> VLM stack.
+fullstack = [
+  "sentence-transformers>=2.7",
+  "pymupdf>=1.24",
+  "pillow>=10.0",
+  "open_clip_torch>=2.24",
+  "torch>=2.2",
+  "transformers>=4.44",
+  "accelerate>=0.33",
+  "sentencepiece>=0.2",
+  "qwen-vl-utils>=0.0.10",
+  "python-dateutil>=2.9",
+  "dateparser>=1.2",
+  "torch-geometric>=2.6.0",
+  "paddleocr>=3.0.0",
+  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
 ]
 
 # Neo4j as graph + vector DB, GraphRAG integration.

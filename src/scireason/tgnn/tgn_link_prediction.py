@@ -1,24 +1,33 @@
 from __future__ import annotations
 
-"""Lightweight temporal link prediction with a TGNN/TGN-oriented interface.
+"""Temporal link prediction with an optional real PyG TGN memory backend.
 
-The goal here is pragmatic:
-- prefer event-stream reasoning over static GraphSAGE-style link prediction
-- remain usable in the base installation without heavy temporal-GNN dependencies
-- expose a stable API that can later be swapped for a fuller TGN implementation
-
-The current scorer uses recency-aware node memory, temporal common-neighbor signals, and
-pair recurrence. This is not a full research-grade TGN implementation, but it follows the same
-continuous-time intuition: predictions are derived from the ordered stream of timestamped events.
+Design goals:
+- keep the repo usable in the base installation without heavy temporal-GNN dependencies;
+- expose a stable TGNN/TGN-oriented API for hypothesis generation;
+- prefer a real PyTorch Geometric TGN memory model when available/configured;
+- fall back to a deterministic heuristic scorer when PyG is absent.
 """
 
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 from math import exp
-from typing import DefaultDict, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import DefaultDict, Dict, List, Optional, Sequence, Tuple
 
+from ..config import settings
 from ..temporal.schemas import TemporalEvent
+
+try:  # pragma: no cover
+    import torch
+    import torch.nn.functional as F
+    from torch_geometric.nn.models.tgn import IdentityMessage, LastAggregator, TGNMemory
+except Exception:  # pragma: no cover
+    torch = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
+    IdentityMessage = None  # type: ignore[assignment]
+    LastAggregator = None  # type: ignore[assignment]
+    TGNMemory = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
@@ -30,10 +39,17 @@ class TGNLinkPredConfig:
     node_memory_weight: float = 0.25
     min_candidate_score: float = 0.05
     seed: int = 7
+    memory_dim: int = 64
+    time_dim: int = 16
+    backend: str = "auto"  # auto|heuristic|pyg
+
+
+def pyg_tgn_available() -> bool:
+    return all(x is not None for x in (torch, F, IdentityMessage, LastAggregator, TGNMemory))
 
 
 def tgnn_available() -> bool:
-    """A lightweight TGNN-style predictor is always available in base installation."""
+    """A TGNN-style predictor is always available thanks to the heuristic fallback."""
     return True
 
 
@@ -44,6 +60,20 @@ def _safe_year(ts: Optional[str]) -> int:
         return 0
 
 
+def _safe_time_number(ts: Optional[str], fallback: int) -> int:
+    try:
+        s = str(ts or "")
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            return int(s[:4]) * 372 + int(s[5:7]) * 31 + int(s[8:10])
+        if len(s) >= 7 and s[4] == "-":
+            return int(s[:4]) * 12 + int(s[5:7])
+        if len(s) >= 4:
+            return int(s[:4])
+    except Exception:
+        pass
+    return int(fallback)
+
+
 def _decay(delta_years: int, half_life_years: float) -> float:
     if delta_years <= 0:
         return 1.0
@@ -51,21 +81,16 @@ def _decay(delta_years: int, half_life_years: float) -> float:
     return exp(-0.6931471805599453 * float(delta_years) / hl)
 
 
-def tgn_link_prediction(
+def _heuristic_tgn_prediction(
     events: Sequence[TemporalEvent],
     *,
-    top_k: int = 30,
-    config: Optional[TGNLinkPredConfig] = None,
+    top_k: int,
+    config: TGNLinkPredConfig,
 ) -> List[Tuple[str, str, float]]:
-    """Predict future links from a chronological stream of temporal KG events."""
-
-    cfg = config or TGNLinkPredConfig()
     ordered = sorted(list(events), key=lambda e: e.sort_key())
     if len(ordered) < 2:
         return []
 
-    # --- temporal memories ---
-    pair_last_year: Dict[Tuple[str, str], int] = {}
     pair_count: DefaultDict[Tuple[str, str], int] = defaultdict(int)
     neighbors: DefaultDict[str, Dict[str, int]] = defaultdict(dict)
     node_strength: DefaultDict[str, float] = defaultdict(float)
@@ -79,7 +104,6 @@ def tgn_link_prediction(
         if not u or not v or u == v:
             continue
         a, b = (u, v) if u <= v else (v, u)
-        pair_last_year[(a, b)] = year
         pair_count[(a, b)] += 1
         neighbors[u][v] = year
         neighbors[v][u] = year
@@ -97,27 +121,19 @@ def tgn_link_prediction(
         if pair in pair_count:
             continue
 
-        # recency-aware common neighbors
         common = set(neighbors.get(u, {})).intersection(neighbors.get(v, {}))
         cn_score = 0.0
         for n in common:
             y1 = neighbors[u].get(n, current_year)
             y2 = neighbors[v].get(n, current_year)
             age = current_year - max(y1, y2)
-            cn_score += _decay(age, cfg.recency_half_life_years)
+            cn_score += _decay(age, config.recency_half_life_years)
 
-        # node memory = how active nodes have been recently
-        u_recent = 0.0
-        for _, y in neighbors.get(u, {}).items():
-            u_recent += _decay(current_year - y, cfg.recency_half_life_years)
-        v_recent = 0.0
-        for _, y in neighbors.get(v, {}).items():
-            v_recent += _decay(current_year - y, cfg.recency_half_life_years)
+        u_recent = sum(_decay(current_year - y, config.recency_half_life_years) for y in neighbors.get(u, {}).values())
+        v_recent = sum(_decay(current_year - y, config.recency_half_life_years) for y in neighbors.get(v, {}).values())
         node_memory = (u_recent + v_recent) / 2.0
 
-        # pair recurrence via two-hop motifs: if both nodes repeatedly appear in same recent window,
-        # increase the chance that a direct edge emerges.
-        recent_threshold = current_year - max(1, int(cfg.recent_window_years)) + 1
+        recent_threshold = current_year - max(1, int(config.recent_window_years)) + 1
         repeat_score = 0.0
         for y in neighbors.get(u, {}).values():
             if y >= recent_threshold:
@@ -128,14 +144,137 @@ def tgn_link_prediction(
         repeat_score /= 2.0
 
         raw = (
-            cfg.common_neighbor_weight * cn_score
-            + cfg.node_memory_weight * node_memory
-            + cfg.pair_repeat_weight * repeat_score
+            config.common_neighbor_weight * cn_score
+            + config.node_memory_weight * node_memory
+            + config.pair_repeat_weight * repeat_score
         )
         norm = 1.0 + float(len(common)) + node_strength.get(u, 0.0) + node_strength.get(v, 0.0)
         score = raw / norm
-        if score >= float(cfg.min_candidate_score):
+        if score >= float(config.min_candidate_score):
             scored.append((u, v, float(score)))
 
     scored.sort(key=lambda item: item[2], reverse=True)
     return scored[: int(top_k)]
+
+
+def _pyg_tgn_memory_prediction(
+    events: Sequence[TemporalEvent],
+    *,
+    top_k: int,
+    config: TGNLinkPredConfig,
+) -> List[Tuple[str, str, float]]:
+    if not pyg_tgn_available():  # pragma: no cover
+        raise RuntimeError("PyG TGN backend is not available")
+
+    ordered = sorted(list(events), key=lambda e: e.sort_key())
+    if len(ordered) < 2:
+        return []
+
+    nodes = sorted({str(ev.subject) for ev in ordered if ev.subject} | {str(ev.object) for ev in ordered if ev.object})
+    if len(nodes) < 2:
+        return []
+    node_to_idx = {n: i for i, n in enumerate(nodes)}
+
+    memory_dim = int(config.memory_dim or getattr(settings, 'hyp_tgnn_memory_dim', 64) or 64)
+    time_dim = int(config.time_dim or getattr(settings, 'hyp_tgnn_time_dim', 16) or 16)
+    raw_msg_dim = 2
+
+    device = torch.device('cpu')
+    memory = TGNMemory(
+        num_nodes=len(nodes),
+        raw_msg_dim=raw_msg_dim,
+        memory_dim=memory_dim,
+        time_dim=time_dim,
+        message_module=IdentityMessage(raw_msg_dim, memory_dim, time_dim),
+        aggregator_module=LastAggregator(),
+    ).to(device)
+    memory.reset_state()
+    memory.train()
+
+    existing_pairs = set()
+    last_t = 0
+    for seq, ev in enumerate(ordered, start=1):
+        u = str(ev.subject)
+        v = str(ev.object)
+        if not u or not v or u == v:
+            continue
+        src = torch.tensor([node_to_idx[u]], dtype=torch.long, device=device)
+        dst = torch.tensor([node_to_idx[v]], dtype=torch.long, device=device)
+        ts_num = _safe_time_number(ev.ts_start or ev.ts_end, seq)
+        last_t = max(last_t, ts_num)
+        t = torch.tensor([ts_num], dtype=torch.long, device=device)
+        raw_msg = torch.tensor(
+            [[float(ev.confidence), float(max(ev.weight, 1.0))]],
+            dtype=torch.float32,
+            device=device,
+        )
+        memory.update_state(src, dst, t, raw_msg)
+        existing_pairs.add(tuple(sorted((u, v))))
+
+    memory.eval()  # flush message store into memory
+    n_id = torch.arange(len(nodes), device=device)
+    z, last_update = memory(n_id)
+    z = F.normalize(z, p=2.0, dim=-1)
+
+    sim = torch.sigmoid(z @ z.t())
+    sim.fill_diagonal_(0.0)
+    for a, b in existing_pairs:
+        ia, ib = node_to_idx[a], node_to_idx[b]
+        sim[ia, ib] = 0.0
+        sim[ib, ia] = 0.0
+
+    # Small recency prior from TGN's last update timestamps.
+    if last_t > 0:
+        age = (float(last_t) - last_update.float()).clamp(min=0.0)
+        denom = max(1.0, float(config.recent_window_years))
+        recency = torch.exp(-age / denom)
+        recency_pair = (recency.view(-1, 1) + recency.view(1, -1)) / 2.0
+        sim = 0.85 * sim + 0.15 * recency_pair
+
+    tri = torch.triu_indices(len(nodes), len(nodes), offset=1)
+    tri_scores = sim[tri[0], tri[1]]
+    if tri_scores.numel() == 0:
+        return []
+
+    k = min(int(top_k), int(tri_scores.numel()))
+    vals, best = torch.topk(tri_scores, k=k)
+
+    out: List[Tuple[str, str, float]] = []
+    for score, idx_flat in zip(vals.tolist(), best.tolist()):
+        iu = int(tri[0][idx_flat])
+        iv = int(tri[1][idx_flat])
+        if score < float(config.min_candidate_score):
+            continue
+        out.append((nodes[iu], nodes[iv], float(score)))
+    return out
+
+
+def tgn_link_prediction(
+    events: Sequence[TemporalEvent],
+    *,
+    top_k: int = 30,
+    config: Optional[TGNLinkPredConfig] = None,
+) -> List[Tuple[str, str, float]]:
+    """Predict future links from a chronological stream of temporal KG events.
+
+    Backend policy:
+    - `settings.hyp_tgnn_backend=pyg`  -> require/use PyG TGN memory backend;
+    - `settings.hyp_tgnn_backend=auto` -> prefer PyG TGN, fallback to heuristic;
+    - `settings.hyp_tgnn_backend=heuristic` -> deterministic fallback only.
+    """
+
+    cfg = config or TGNLinkPredConfig(
+        memory_dim=int(getattr(settings, 'hyp_tgnn_memory_dim', 64) or 64),
+        time_dim=int(getattr(settings, 'hyp_tgnn_time_dim', 16) or 16),
+        backend=str(getattr(settings, 'hyp_tgnn_backend', 'auto') or 'auto'),
+    )
+    backend = str(cfg.backend or getattr(settings, 'hyp_tgnn_backend', 'auto') or 'auto').lower()
+
+    if backend in {'auto', 'pyg'} and pyg_tgn_available():
+        try:
+            return _pyg_tgn_memory_prediction(events, top_k=top_k, config=cfg)
+        except Exception:
+            if backend == 'pyg':
+                raise
+
+    return _heuristic_tgn_prediction(events, top_k=top_k, config=cfg)

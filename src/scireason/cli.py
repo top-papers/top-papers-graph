@@ -600,6 +600,11 @@ def prepare_task2_validation(
     suggest_links: bool = typer.Option(True, help="Добавить scout/suggested_links.json для поиска дополнительных ссылок."),
     max_papers: int = typer.Option(0, help="Если >0 — ограничить число статей из trajectory YAML."),
     max_link_queries: int = typer.Option(4, help="Сколько topic/next_question запросов использовать для scout."),
+    remote_lookup: bool = typer.Option(False, help="Разрешить сетевое обогащение метаданных статей и scout-поиск."),
+    g4f_model: str | None = typer.Option(None, "--g4f-model", help="Запустить Task 2 через g4f с указанной моделью."),
+    local_model: str | None = typer.Option(None, "--local-model", help="Запустить Task 2 через локальную Ollama модель."),
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
 ) -> None:
     """Task 2 orchestrator: trajectory YAML -> reference graph + automatic temporal KG + review templates.
 
@@ -614,6 +619,11 @@ def prepare_task2_validation(
         suggest_links=suggest_links,
         max_papers=max_papers,
         max_link_queries=max_link_queries,
+        enable_remote_lookup=remote_lookup,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
 
@@ -628,6 +638,11 @@ def task2_bundle(
     suggest_links: bool = typer.Option(True, help="Добавить scout/suggested_links.json для поиска дополнительных ссылок."),
     max_papers: int = typer.Option(0, help="Если >0 — ограничить число статей из trajectory YAML."),
     max_link_queries: int = typer.Option(4, help="Сколько topic/next_question запросов использовать для scout."),
+    remote_lookup: bool = typer.Option(False, help="Разрешить сетевое обогащение метаданных статей и scout-поиск."),
+    g4f_model: str | None = typer.Option(None, "--g4f-model", help="Запустить Task 2 через g4f с указанной моделью."),
+    local_model: str | None = typer.Option(None, "--local-model", help="Запустить Task 2 через локальную Ollama модель."),
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
 ) -> None:
     """Alias for prepare-task2-validation, kept for notebook and legacy automation compatibility."""
     bundle_dir = prepare_task2_validation_bundle(
@@ -639,6 +654,11 @@ def task2_bundle(
         suggest_links=suggest_links,
         max_papers=max_papers,
         max_link_queries=max_link_queries,
+        enable_remote_lookup=remote_lookup,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
 

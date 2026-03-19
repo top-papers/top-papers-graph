@@ -160,6 +160,11 @@ def build_task2_validation_bundle(
     edge_mode: str = "auto",
     max_papers: int = 0,
     max_link_queries: int = 4,
+    enable_remote_lookup: bool = False,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    g4f_model: str | None = None,
+    local_model: str | None = None,
 ) -> BundleResult:
     trajectory_path = Path(trajectory_path)
     out_dir = Path(out_dir)
@@ -178,6 +183,11 @@ def build_task2_validation_bundle(
             suggest_links=enable_reference_scout,
             max_papers=max_papers,
             max_link_queries=max_link_queries,
+            enable_remote_lookup=enable_remote_lookup,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            g4f_model=g4f_model,
+            local_model=local_model,
         )
     else:
         bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -196,7 +206,12 @@ def build_task2_validation_bundle(
         if enable_reference_scout:
             try:
                 resolved = resolve_papers_from_trajectory(doc)
-                suggestions = suggest_link_candidates(doc, known_papers=resolved, max_queries=max_link_queries)
+                suggestions = suggest_link_candidates(
+                    doc,
+                    known_papers=resolved,
+                    max_queries=max_link_queries,
+                    enable_remote_lookup=enable_remote_lookup,
+                )
             except Exception:
                 suggestions = []
 

@@ -16,7 +16,9 @@ from rich.console import Console
 from ..domain import DomainConfig, load_domain_config
 from ..ingest.acquire import AcquireResult, acquire_pdfs
 from ..ingest.mm_pipeline import ingest_pdf_multimodal_auto
+from ..config import settings
 from ..ingest.pipeline import ingest_pdf_auto
+from ..llm import temporary_llm_selection
 from ..papers.schema import ExternalIds, PaperMetadata, PaperSource
 from ..papers.service import get_paper_by_doi, search_papers
 from ..temporal.temporal_kg_builder import PaperRecord, TemporalKnowledgeGraph, build_temporal_kg, load_papers_from_processed
@@ -227,9 +229,11 @@ def _fallback_paper(entry: Dict[str, Any]) -> PaperMetadata:
     )
 
 
-def _resolve_entry_by_exact_identifier(entry: Dict[str, Any]) -> Optional[PaperMetadata]:
+def _resolve_entry_by_exact_identifier(entry: Dict[str, Any], *, enable_remote_lookup: bool = True) -> Optional[PaperMetadata]:
     raw_id = str(entry.get("id") or "").strip()
     if not raw_id:
+        return None
+    if not enable_remote_lookup:
         return None
 
     doi = _extract_doi(raw_id)
@@ -254,15 +258,20 @@ def _resolve_entry_by_exact_identifier(entry: Dict[str, Any]) -> Optional[PaperM
     return None
 
 
-def resolve_papers_from_trajectory(doc: Dict[str, Any], *, search_limit: int = 8) -> List[PaperMetadata]:
+def resolve_papers_from_trajectory(
+    doc: Dict[str, Any],
+    *,
+    search_limit: int = 8,
+    enable_remote_lookup: bool = False,
+) -> List[PaperMetadata]:
     resolved: List[PaperMetadata] = []
     seen_ids: set[str] = set()
 
     for entry in doc.get("papers", []) or []:
         if not isinstance(entry, dict):
             continue
-        meta = _resolve_entry_by_exact_identifier(entry)
-        if meta is None:
+        meta = _resolve_entry_by_exact_identifier(entry, enable_remote_lookup=enable_remote_lookup)
+        if meta is None and enable_remote_lookup:
             title = str(entry.get("title") or "").strip()
             if title:
                 try:
@@ -681,7 +690,11 @@ def suggest_link_candidates(
     known_papers: Sequence[PaperMetadata],
     max_queries: int = 4,
     per_query: int = 8,
+    enable_remote_lookup: bool = False,
 ) -> List[Dict[str, Any]]:
+    if not enable_remote_lookup:
+        return []
+
     queries: List[str] = []
     topic = str(doc.get("topic") or "").strip()
     if topic:
@@ -753,122 +766,141 @@ def prepare_task2_validation_bundle(
     suggest_links: bool = True,
     max_papers: int = 0,
     max_link_queries: int = 4,
+    enable_remote_lookup: bool = False,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    g4f_model: str | None = None,
+    local_model: str | None = None,
 ) -> Path:
-    doc = yaml.safe_load(trajectory_yaml.read_text(encoding="utf-8")) or {}
-    if not isinstance(doc, dict):
-        raise ValueError("Trajectory YAML must contain a top-level object.")
+    with temporary_llm_selection(
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
+    ):
+        doc = yaml.safe_load(trajectory_yaml.read_text(encoding="utf-8")) or {}
+        if not isinstance(doc, dict):
+            raise ValueError("Trajectory YAML must contain a top-level object.")
 
-    run_name = str(doc.get("submission_id") or _slugify(str(doc.get("topic") or trajectory_yaml.stem)))
-    out = out_dir / run_name
-    out.mkdir(parents=True, exist_ok=True)
+        run_name = str(doc.get("submission_id") or _slugify(str(doc.get("topic") or trajectory_yaml.stem)))
+        out = out_dir / run_name
+        out.mkdir(parents=True, exist_ok=True)
 
-    shutil.copy2(trajectory_yaml, out / trajectory_yaml.name)
+        shutil.copy2(trajectory_yaml, out / trajectory_yaml.name)
 
-    reference_graph = build_reference_graph(doc)
-    (out / "reference_graph.json").write_text(json.dumps(reference_graph, ensure_ascii=False, indent=2), encoding="utf-8")
-    (out / "reference_triplets.json").write_text(json.dumps(reference_graph.get("triplets") or [], ensure_ascii=False, indent=2), encoding="utf-8")
+        reference_graph = build_reference_graph(doc)
+        (out / "reference_graph.json").write_text(json.dumps(reference_graph, ensure_ascii=False, indent=2), encoding="utf-8")
+        (out / "reference_triplets.json").write_text(json.dumps(reference_graph.get("triplets") or [], ensure_ascii=False, indent=2), encoding="utf-8")
 
-    domain_cfg = _load_domain_from_trajectory(doc)
+        domain_cfg = _load_domain_from_trajectory(doc)
 
-    resolved = resolve_papers_from_trajectory(doc)
-    if max_papers and max_papers > 0:
-        resolved = resolved[:max_papers]
+        resolved = resolve_papers_from_trajectory(doc, enable_remote_lookup=enable_remote_lookup)
+        if max_papers and max_papers > 0:
+            resolved = resolved[:max_papers]
 
-    (out / "papers_resolved.json").write_text(
-        json.dumps([p.model_dump(mode="json") for p in resolved], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+        (out / "papers_resolved.json").write_text(
+            json.dumps([p.model_dump(mode="json") for p in resolved], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
-    acquire_dir = out / "automatic_graph"
-    raw_dir = acquire_dir / "raw_pdfs"
-    meta_dir = acquire_dir / "raw_meta"
-    processed_dir = acquire_dir / "processed_papers"
-    processed_dir.mkdir(parents=True, exist_ok=True)
+        acquire_dir = out / "automatic_graph"
+        raw_dir = acquire_dir / "raw_pdfs"
+        meta_dir = acquire_dir / "raw_meta"
+        processed_dir = acquire_dir / "processed_papers"
+        processed_dir.mkdir(parents=True, exist_ok=True)
 
-    acq: List[AcquireResult] = acquire_pdfs(resolved, raw_dir=raw_dir, meta_dir=meta_dir)
-    (out / "acquire_results.json").write_text(
-        json.dumps(
-            [asdict(a) | {"pdf_path": str(a.pdf_path) if a.pdf_path else None, "meta_path": str(a.meta_path)} for a in acq],
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+        acq: List[AcquireResult] = acquire_pdfs(resolved, raw_dir=raw_dir, meta_dir=meta_dir)
+        (out / "acquire_results.json").write_text(
+            json.dumps(
+                [asdict(a) | {"pdf_path": str(a.pdf_path) if a.pdf_path else None, "meta_path": str(a.meta_path)} for a in acq],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
-    ingested_ids: List[str] = []
-    for meta, a in zip(resolved, acq):
-        if not a.pdf_path:
-            continue
-        meta_json = meta.model_dump(mode="json")
-        try:
-            if include_multimodal:
-                ingest_pdf_multimodal_auto(a.pdf_path, meta_json, processed_dir, run_vlm=run_vlm)
+        ingested_ids: List[str] = []
+        for meta, a in zip(resolved, acq):
+            if not a.pdf_path:
+                continue
+            meta_json = meta.model_dump(mode="json")
+            try:
+                if include_multimodal:
+                    ingest_pdf_multimodal_auto(a.pdf_path, meta_json, processed_dir, run_vlm=run_vlm)
+                else:
+                    ingest_pdf_auto(a.pdf_path, meta_json, processed_dir)
+                ingested_ids.append(meta.id)
+            except Exception as e:
+                console.print(f"[yellow]Ingest failed for {meta.id}: {e}[/yellow]")
+
+        processed_records = load_papers_from_processed(processed_dir)
+        processed_by_id = {p.paper_id: p for p in processed_records}
+        paper_records: List[PaperRecord] = []
+        for meta in resolved:
+            if meta.id in processed_by_id:
+                paper_records.append(processed_by_id[meta.id])
             else:
-                ingest_pdf_auto(a.pdf_path, meta_json, processed_dir)
-            ingested_ids.append(meta.id)
-        except Exception as e:
-            console.print(f"[yellow]Ingest failed for {meta.id}: {e}[/yellow]")
+                paper_records.append(_paperrecord_from_metadata(meta))
 
-    processed_records = load_papers_from_processed(processed_dir)
-    processed_by_id = {p.paper_id: p for p in processed_records}
-    paper_records: List[PaperRecord] = []
-    for meta in resolved:
-        if meta.id in processed_by_id:
-            paper_records.append(processed_by_id[meta.id])
-        else:
-            paper_records.append(_paperrecord_from_metadata(meta))
+        (out / "paper_records.json").write_text(
+            json.dumps([asdict(r) for r in paper_records], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
-    (out / "paper_records.json").write_text(
-        json.dumps([asdict(r) for r in paper_records], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+        kg = build_temporal_kg(
+            paper_records,
+            domain=domain_cfg,
+            query=str(doc.get("topic") or ""),
+            edge_mode=edge_mode,  # type: ignore[arg-type]
+            expert_overrides_path=None,
+        )
+        kg.dump_json(out / "automatic_graph" / "temporal_kg.json")
 
-    kg = build_temporal_kg(
-        paper_records,
-        domain=domain_cfg,
-        query=str(doc.get("topic") or ""),
-        edge_mode=edge_mode,  # type: ignore[arg-type]
-        expert_overrides_path=None,
-    )
-    kg.dump_json(out / "automatic_graph" / "temporal_kg.json")
+        automatic_rows = _flatten_automatic_graph(kg)
+        (out / "automatic_triplets.json").write_text(json.dumps(automatic_rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    automatic_rows = _flatten_automatic_graph(kg)
-    (out / "automatic_triplets.json").write_text(json.dumps(automatic_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        prefill_review = _prefill_graph_review(doc, automatic_rows)
+        review_dir = out / "review_templates"
+        review_dir.mkdir(parents=True, exist_ok=True)
+        (review_dir / "graph_review_prefill.json").write_text(json.dumps(prefill_review, ensure_ascii=False, indent=2), encoding="utf-8")
+        (review_dir / "temporal_corrections_template.json").write_text(json.dumps(_empty_temporal_corrections(doc), ensure_ascii=False, indent=2), encoding="utf-8")
 
-    prefill_review = _prefill_graph_review(doc, automatic_rows)
-    review_dir = out / "review_templates"
-    review_dir.mkdir(parents=True, exist_ok=True)
-    (review_dir / "graph_review_prefill.json").write_text(json.dumps(prefill_review, ensure_ascii=False, indent=2), encoding="utf-8")
-    (review_dir / "temporal_corrections_template.json").write_text(json.dumps(_empty_temporal_corrections(doc), ensure_ascii=False, indent=2), encoding="utf-8")
+        comparison = _compare_graphs(reference_graph, automatic_rows, resolved)
+        (out / "comparison_summary.json").write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    comparison = _compare_graphs(reference_graph, automatic_rows, resolved)
-    (out / "comparison_summary.json").write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding="utf-8")
+        if suggest_links:
+            suggestions = suggest_link_candidates(
+                doc,
+                known_papers=resolved,
+                max_queries=max_link_queries,
+                enable_remote_lookup=enable_remote_lookup,
+            )
+            scout_dir = out / "scout"
+            scout_dir.mkdir(parents=True, exist_ok=True)
+            (scout_dir / "suggested_links.json").write_text(json.dumps(suggestions, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    if suggest_links:
-        suggestions = suggest_link_candidates(doc, known_papers=resolved, max_queries=max_link_queries)
-        scout_dir = out / "scout"
-        scout_dir.mkdir(parents=True, exist_ok=True)
-        (scout_dir / "suggested_links.json").write_text(json.dumps(suggestions, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    manifest = {
-        "generated_at": _utc_now(),
-        "trajectory_file": trajectory_yaml.name,
-        "submission_id": str(doc.get("submission_id") or ""),
-        "topic": str(doc.get("topic") or ""),
-        "domain": str(doc.get("domain") or ""),
-        "resolved_papers": len(resolved),
-        "ingested_pdfs": len(ingested_ids),
-        "automatic_edges": len(automatic_rows),
-        "reference_steps": len([n for n in reference_graph.get("nodes", []) if n.get("type") == "trajectory_step"]),
-        "artifacts": {
-            "reference_graph": "reference_graph.json",
-            "reference_triplets": "reference_triplets.json",
-            "automatic_graph": "automatic_graph/temporal_kg.json",
-            "automatic_triplets": "automatic_triplets.json",
-            "papers_resolved": "papers_resolved.json",
-            "comparison_summary": "comparison_summary.json",
-            "review_prefill": "review_templates/graph_review_prefill.json",
-        },
-    }
-    (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        manifest = {
+            "generated_at": _utc_now(),
+            "trajectory_file": trajectory_yaml.name,
+            "submission_id": str(doc.get("submission_id") or ""),
+            "topic": str(doc.get("topic") or ""),
+            "domain": str(doc.get("domain") or ""),
+            "resolved_papers": len(resolved),
+            "ingested_pdfs": len(ingested_ids),
+            "automatic_edges": len(automatic_rows),
+            "reference_steps": len([n for n in reference_graph.get("nodes", []) if n.get("type") == "trajectory_step"]),
+            "remote_lookup_enabled": bool(enable_remote_lookup),
+            "llm_effective_provider": str(settings.llm_provider or ""),
+            "llm_effective_model": str(settings.llm_model or ""),
+            "artifacts": {
+                "reference_graph": "reference_graph.json",
+                "reference_triplets": "reference_triplets.json",
+                "automatic_graph": "automatic_graph/temporal_kg.json",
+                "automatic_triplets": "automatic_triplets.json",
+                "papers_resolved": "papers_resolved.json",
+                "comparison_summary": "comparison_summary.json",
+                "review_prefill": "review_templates/graph_review_prefill.json",
+            },
+        }
+        (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return out

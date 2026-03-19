@@ -40,6 +40,29 @@
 ## Дополнительный scouting
 CLI также создаёт `scout/suggested_links.json` — список дополнительных статей-кандидатов, найденных по `topic` и `next_question` из trajectory. Это отдельный слой поддержки эксперта: ссылки предлагает система, а решение об их использовании принимает эксперт.
 
+## Выбор LLM для автоматического графа
+Для Task 2 теперь можно явно выбрать LLM-контур при запуске bundle:
+
+- `--g4f-model <model>` — использовать конкретную модель из установленного реестра g4f.
+- `--local-model <name>` — использовать локальную модель Ollama по имени.
+- `--llm-provider ... --llm-model ...` — универсальный ручной override.
+
+Примеры:
+
+```bash
+top-papers-graph prepare-task2-validation \
+  --trajectory runs/task1/example.yaml \
+  --out-dir runs/task2_validation \
+  --g4f-model deepseek-r1
+
+top-papers-graph prepare-task2-validation \
+  --trajectory runs/task1/example.yaml \
+  --out-dir runs/task2_validation \
+  --local-model llama3.2
+```
+
+В notebook `task2_temporal_graph_validation_colab.ipynb` эти же настройки доступны через отдельные поля `LLM`, `g4f model` и `Local model`.
+
 ## Где смотреть результаты
 После запуска `prepare-task2-validation` в bundle появляются:
 
