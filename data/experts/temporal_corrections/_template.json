@@ -1,0 +1,12 @@
+{
+  "corrections": [
+    {
+      "assertion_id": "assertion-1",
+      "rationale": "Template placeholder temporal correction.",
+      "corrected_time": {
+        "granularity": "year",
+        "start": "2024"
+      }
+    }
+  ]
+}

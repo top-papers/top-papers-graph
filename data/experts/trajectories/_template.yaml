@@ -1,0 +1,19 @@
+artifact_version: 2
+domain: science
+topic: Template reasoning trajectory
+submission_id: template-trajectory
+papers:
+  - id: doi:10.0000/example
+    title: Example paper
+    year: 2024
+steps:
+  - claim: Example grounded claim from the paper corpus.
+    conditions:
+      context: Template placeholder condition.
+    sources:
+      - type: text
+        source: doi:10.0000/example
+        snippet_or_summary: Example supporting evidence snippet.
+    inference: Example inference that links the evidence to the claim.
+    next_question: What evidence should be checked next?
+edges: []

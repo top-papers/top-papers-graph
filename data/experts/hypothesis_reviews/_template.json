@@ -1,0 +1,15 @@
+{
+  "time_scope": "Template scope: validate under the stated experimental conditions.",
+  "scores": {
+    "novelty": 3,
+    "soundness": 3,
+    "testability": 3
+  },
+  "accept": false,
+  "major_issues": [
+    "Replace template placeholders with domain-specific concerns."
+  ],
+  "required_experiments": [
+    "Describe the decisive experiment needed to validate the hypothesis."
+  ]
+}

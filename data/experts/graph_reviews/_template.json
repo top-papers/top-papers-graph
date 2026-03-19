@@ -1,0 +1,18 @@
+{
+  "assertions": [
+    {
+      "subject": "example_subject",
+      "predicate": "supports",
+      "object": "example_object",
+      "start_date": "unknown",
+      "end_date": "unknown",
+      "evidence": {
+        "source": "doi:10.0000/example",
+        "paper_id": "doi:10.0000/example",
+        "snippet_or_summary": "Example evidence snippet for graph review template."
+      },
+      "verdict": "accepted",
+      "rationale": "Template assertion kept as a minimal valid example."
+    }
+  ]
+}
