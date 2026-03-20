@@ -12,6 +12,7 @@ class ReviewStats:
     rejected: int = 0
     needs_fix: int = 0
     added: int = 0
+    uncertain: int = 0
 
 
 def _iter_review_files(graph_reviews_dir: Path) -> Iterable[Path]:
@@ -27,6 +28,8 @@ def _weight_for(verdict: str) -> float:
         return -0.25
     if verdict == "added":
         return 0.75
+    if verdict == "uncertain":
+        return 0.0
     return 0.0
 
 
@@ -175,5 +178,7 @@ def compile_overrides(graph_reviews_dir: Path, out_path: Path) -> ReviewStats:
                     stats.needs_fix += 1
                 elif verdict == "added":
                     stats.added += 1
+                elif verdict == "uncertain":
+                    stats.uncertain += 1
 
     return stats

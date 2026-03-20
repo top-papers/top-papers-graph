@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MultimodalPreferenceRecord",
+  "type": "object",
+  "required": ["id", "task_type", "prompt", "chosen", "rejected"],
+  "properties": {
+    "id": {"type": "string"},
+    "task_type": {"type": "string"},
+    "images": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "prompt": {},
+    "chosen": {},
+    "rejected": {},
+    "metadata": {"type": "object"}
+  }
+}

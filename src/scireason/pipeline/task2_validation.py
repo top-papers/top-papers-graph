@@ -631,18 +631,43 @@ def _prefill_graph_review(doc: Dict[str, Any], automatic_rows: Sequence[Dict[str
         reviewer_id = str(expert.get("latin_slug") or expert.get("full_name") or "")
 
     assertions = []
+    cutoff_year = str(doc.get("cutoff_year") or "")
     for row in automatic_rows:
         item = dict(row)
-        item["verdict"] = ""
-        item["rationale"] = ""
-        item["time_source_note"] = ""
+        item.update({
+            "verdict": "",
+            "rationale": "",
+            "time_source_note": "",
+            "semantic_correctness": "",
+            "evidence_sufficiency": "",
+            "scope_match": "",
+            "system_match": "",
+            "environment_match": "",
+            "protocol_match": "",
+            "scope_overgeneralized": False,
+            "corrected_scope_note": "",
+            "hypothesis_role": "background",
+            "hypothesis_relevance": "1",
+            "testability_signal": "1",
+            "causal_status": "descriptive",
+            "severity": "warning",
+            "evidence_before_cutoff": "",
+            "leakage_risk": "possible",
+            "time_type": "publication_time",
+            "time_granularity": "unknown",
+            "time_confidence": "medium",
+            "mm_verdict": "",
+            "mm_rationale": "",
+            "cutoff_year": cutoff_year,
+        })
         assertions.append(item)
 
     return {
-        "artifact_version": 3,
+        "artifact_version": 5,
         "domain": str(doc.get("domain") or ""),
         "topic": str(doc.get("topic") or ""),
         "trajectory_submission_id": str(doc.get("submission_id") or ""),
+        "cutoff_year": cutoff_year,
         "reviewer_id": reviewer_id,
         "timestamp": _utc_now(),
         "assertions": assertions,
@@ -682,6 +707,8 @@ def _compare_graphs(reference_graph: Dict[str, Any], automatic_rows: Sequence[Di
         "papers_reaching_automatic_graph": len(auto_papers & paper_ids),
         "trajectory_claim_examples": sorted(list(ref_step_labels))[:10],
         "automatic_term_examples": sorted(list(auto_terms))[:20],
+        "cutoff_year": str(reference_graph.get("metadata", {}).get("cutoff_year") or ""),
+        "review_focus": "Prefer edges that can seed temporally valid, condition-aware hypotheses.",
     }
 
 
@@ -906,6 +933,7 @@ def prepare_task2_validation_bundle(
                     "papers_resolved": "papers_resolved.json",
                     "comparison_summary": "comparison_summary.json",
                     "review_prefill": "review_templates/graph_review_prefill.json",
+                "review_design_note": "Task 2 review now captures semantic, evidence, temporal, scope and hypothesis-readiness signals.",
                 },
             }
             (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

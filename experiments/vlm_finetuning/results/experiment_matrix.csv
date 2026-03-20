@@ -1,0 +1,8 @@
+scenario,stage,model,datasphere_config,gpu_count,hours_min,hours_max,cost_min_usd,cost_max_usd,storage_gb
+sft_smoke_qwen25vl_3b_qlora,sft,Qwen/Qwen2.5-VL-3B-Instruct,g2.1,1,1.0,2.0,4.51,9.02,80
+sft_pilot_qwen3vl_4b_lora,sft,Qwen/Qwen3-VL-4B-Instruct,g2.2,2,6.0,12.0,54.12,108.24,160
+dpo_pilot_qwen3vl_4b_lora,dpo,Qwen/Qwen3-VL-4B-Instruct,g2.2,2,6.0,10.0,54.12,90.20,180
+grpo_optional_qwen3vl_4b_lora,grpo,Qwen/Qwen3-VL-4B-Instruct,g2.4,4,8.0,16.0,144.32,288.64,220
+teacher_sft_qwen3vl_30b_a3b_lora,sft,Qwen/Qwen3-VL-30B-A3B-Instruct,g2.4,4,10.0,18.0,180.40,324.72,280
+student_distill_qwen3vl_4b,sft_distill,Qwen/Qwen3-VL-4B-Instruct,g2.2,2,8.0,14.0,72.16,126.28,220
+student_distill_qwen3vl_2b,sft_distill,Qwen/Qwen3-VL-2B-Instruct,g2.1,1,6.0,10.0,27.06,45.10,160

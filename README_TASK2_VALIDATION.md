@@ -33,3 +33,8 @@ Then open the notebook and run it top-to-bottom.
 
 
 По умолчанию Task 2 bundle теперь работает в надёжном offline-first режиме: notebook и CLI не блокируются на сетевом поиске метаданных и PDF. Чтобы включить удалённое обогащение, передайте `--remote-lookup`.
+
+
+## Обновление Task 2 v2
+
+Теперь эксперт во втором задании валидирует не только верность ребра, но и его пригодность для downstream-конвейера генерации проверяемых гипотез. Рекомендуется заполнять дополнительные поля: `semantic_correctness`, `evidence_sufficiency`, `scope_match`, `hypothesis_role`, `hypothesis_relevance`, `testability_signal`, `causal_status`, `severity`, `evidence_before_cutoff`, `leakage_risk`, `time_type`, `time_granularity`, `time_confidence`, а для визуальных evidence — `mm_verdict` и `mm_rationale`.

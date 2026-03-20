@@ -74,3 +74,8 @@ top-papers-graph prepare-task2-validation \
 - `review_templates/graph_review_prefill.json`
 - `review_templates/temporal_corrections_template.json`
 - `scout/suggested_links.json`
+
+
+## Обновление Task 2 v2
+
+Теперь эксперт во втором задании валидирует не только верность ребра, но и его пригодность для downstream-конвейера генерации проверяемых гипотез. Рекомендуется заполнять дополнительные поля: `semantic_correctness`, `evidence_sufficiency`, `scope_match`, `hypothesis_role`, `hypothesis_relevance`, `testability_signal`, `causal_status`, `severity`, `evidence_before_cutoff`, `leakage_risk`, `time_type`, `time_granularity`, `time_confidence`, а для визуальных evidence — `mm_verdict` и `mm_rationale`.

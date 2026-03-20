@@ -290,8 +290,17 @@ def validate_graph_review(path: Path) -> List[str]:
                 errs.append(f"assertion {i}: evidence should include page, figure_or_table, paper_id, or source")
 
         verdict = str(a.get("verdict", "")).strip()
-        if verdict not in {"accepted", "rejected", "needs_time_fix", "needs_evidence_fix", "added"}:
+        if verdict not in {"accepted", "rejected", "needs_time_fix", "needs_evidence_fix", "added", "uncertain"}:
             errs.append(f"assertion {i}: invalid verdict '{verdict}'")
+
+        if str(a.get("expert_verdict") or a.get("verdict") or "").strip() == "needs_time_fix":
+            if _is_empty(a.get("corrected_start_date")) and _is_empty(a.get("corrected_end_date")) and _is_empty(a.get("corrected_valid_from")) and _is_empty(a.get("corrected_valid_to")) and _is_empty(a.get("corrected_time_source")):
+                errs.append(f"assertion {i}: needs_time_fix requires at least one corrected temporal field")
+
+        if not _is_empty(a.get("hypothesis_relevance")) and str(a.get("hypothesis_relevance")) not in {"0", "1", "2"}:
+            errs.append(f"assertion {i}: hypothesis_relevance must be 0/1/2")
+        if not _is_empty(a.get("testability_signal")) and str(a.get("testability_signal")) not in {"0", "1", "2"}:
+            errs.append(f"assertion {i}: testability_signal must be 0/1/2")
 
         if _is_empty(a.get("rationale")):
             errs.append(f"assertion {i}: missing rationale")
