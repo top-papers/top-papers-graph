@@ -26,7 +26,19 @@ from typing import Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential
+except Exception:  # pragma: no cover
+    def retry(*args, **kwargs):
+        def _decorator(fn):
+            return fn
+        return _decorator
+
+    def stop_after_attempt(*args, **kwargs):
+        return None
+
+    def wait_exponential(*args, **kwargs):
+        return None
 
 from ..config import settings
 from ..net.http import build_user_agent

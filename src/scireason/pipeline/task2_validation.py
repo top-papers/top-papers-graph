@@ -1,0 +1,912 @@
+from __future__ import annotations
+
+import json
+import re
+import shutil
+from dataclasses import asdict
+from datetime import datetime
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import urlparse, unquote
+
+import yaml  # type: ignore
+from rich.console import Console
+
+from ..domain import DomainConfig, load_domain_config
+from ..ingest.acquire import AcquireResult, acquire_pdfs
+from ..ingest.mm_pipeline import ingest_pdf_multimodal_auto
+from ..config import settings
+from ..ingest.pipeline import ingest_pdf_auto
+from ..llm import temporary_llm_selection
+from ..mm.vlm import temporary_vlm_selection
+from ..papers.schema import ExternalIds, PaperMetadata, PaperSource
+from ..papers.service import get_paper_by_doi, search_papers
+from ..temporal.temporal_kg_builder import PaperRecord, TemporalKnowledgeGraph, build_temporal_kg, load_papers_from_processed
+
+
+console = Console()
+
+
+DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
+ARXIV_RE = re.compile(r"(?:arxiv\.org/(?:abs|pdf)/|arxiv:)?([a-z\-]+/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?", re.IGNORECASE)
+OPENALEX_RE = re.compile(r"(?:openalex\.org/)?(W\d+)", re.IGNORECASE)
+PMID_RE = re.compile(r"(?:pubmed(?:\.ncbi\.nlm\.nih\.gov)?/)?(\d{5,10})", re.IGNORECASE)
+PMCID_RE = re.compile(r"(PMC\d+)", re.IGNORECASE)
+DATE_TOKEN_RE = re.compile(r"^(?:\d{4}|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}|unknown|\+inf|-inf)$")
+
+
+DEFAULT_SEARCH_SOURCES = [
+    PaperSource.semantic_scholar,
+    PaperSource.openalex,
+    PaperSource.crossref,
+    PaperSource.pubmed,
+    PaperSource.europe_pmc,
+    PaperSource.arxiv,
+    PaperSource.biorxiv,
+]
+
+
+def _slugify(text: str) -> str:
+    s = re.sub(r"[^a-z0-9\-\s_]+", "", (text or "").strip().lower())
+    s = re.sub(r"\s+", "-", s).strip("-")
+    return s[:80] or "task2"
+
+
+def _utc_now() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _norm_ws(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def _norm_title(text: str) -> str:
+    s = _norm_ws(text).lower()
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"[^\w\s]+", "", s, flags=re.UNICODE)
+    return s.strip()
+
+
+def _looks_like_url(text: str) -> bool:
+    try:
+        u = urlparse((text or "").strip())
+    except Exception:
+        return False
+    return bool(u.scheme and u.netloc)
+
+
+def _extract_doi(text: str) -> Optional[str]:
+    s = unquote((text or "").strip())
+    m = DOI_RE.search(s)
+    if not m:
+        return None
+    doi = m.group(0).rstrip(").,;]")
+    return doi
+
+
+def _extract_arxiv(text: str) -> Optional[str]:
+    s = unquote((text or "").strip())
+    m = ARXIV_RE.search(s)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _extract_openalex(text: str) -> Optional[str]:
+    s = unquote((text or "").strip())
+    m = OPENALEX_RE.search(s)
+    if not m:
+        return None
+    return m.group(1).upper()
+
+
+def _extract_pmid(text: str) -> Optional[str]:
+    s = unquote((text or "").strip())
+    m = PMID_RE.search(s)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _extract_pmcid(text: str) -> Optional[str]:
+    s = unquote((text or "").strip())
+    m = PMCID_RE.search(s)
+    if not m:
+        return None
+    return m.group(1).upper()
+
+
+def _paper_year(meta: PaperMetadata) -> Optional[int]:
+    if meta.year is not None:
+        try:
+            return int(meta.year)
+        except Exception:
+            return None
+    if meta.published_date is not None:
+        try:
+            return int(meta.published_date.year)
+        except Exception:
+            return None
+    return None
+
+
+def _score_title_match(a: str, b: str) -> float:
+    na = _norm_title(a)
+    nb = _norm_title(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+
+def _pick_best_candidate(entry: Dict[str, Any], candidates: Sequence[PaperMetadata]) -> Optional[PaperMetadata]:
+    title = str(entry.get("title") or "")
+    year_raw = entry.get("year")
+    try:
+        entry_year = int(year_raw) if year_raw not in (None, "") else None
+    except Exception:
+        entry_year = None
+    raw_id = str(entry.get("id") or "")
+    doi_hint = _extract_doi(raw_id)
+    arxiv_hint = _extract_arxiv(raw_id)
+    openalex_hint = _extract_openalex(raw_id)
+
+    scored: List[Tuple[float, PaperMetadata]] = []
+    for cand in candidates:
+        score = 0.0
+        if title:
+            score += 4.0 * _score_title_match(title, cand.title)
+        cy = _paper_year(cand)
+        if entry_year is not None and cy is not None:
+            score += max(0.0, 1.0 - 0.25 * abs(entry_year - cy))
+        if doi_hint and cand.ids and cand.ids.doi and cand.ids.doi.lower() == doi_hint.lower():
+            score += 5.0
+        if arxiv_hint and cand.ids and cand.ids.arxiv and cand.ids.arxiv.lower() == arxiv_hint.lower():
+            score += 4.0
+        if openalex_hint and cand.ids and cand.ids.openalex and cand.ids.openalex.upper() == openalex_hint.upper():
+            score += 4.0
+        if raw_id and cand.id.lower() == raw_id.lower():
+            score += 5.0
+        if cand.pdf_url:
+            score += 0.25
+        if cand.abstract:
+            score += 0.1
+        scored.append((score, cand))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score, best = scored[0]
+    if best_score < 1.75:
+        return None
+    return best
+
+
+def _fallback_paper(entry: Dict[str, Any]) -> PaperMetadata:
+    raw_id = str(entry.get("id") or "").strip()
+    title = str(entry.get("title") or raw_id or "Untitled paper").strip()
+    try:
+        year = int(entry.get("year")) if entry.get("year") not in (None, "") else None
+    except Exception:
+        year = None
+
+    canonical_id = raw_id
+    if not canonical_id:
+        canonical_id = f"manual:{_slugify(title)}"
+    elif _extract_doi(canonical_id):
+        canonical_id = f"doi:{_extract_doi(canonical_id)}"
+    elif _extract_arxiv(canonical_id):
+        canonical_id = f"arxiv:{_extract_arxiv(canonical_id)}"
+    elif _extract_openalex(canonical_id):
+        canonical_id = f"openalex:{_extract_openalex(canonical_id)}"
+    elif _extract_pmcid(canonical_id):
+        canonical_id = f"pmc:{_extract_pmcid(canonical_id)}"
+    elif _extract_pmid(canonical_id) and not _looks_like_url(canonical_id):
+        canonical_id = f"pmid:{_extract_pmid(canonical_id)}"
+    elif _looks_like_url(canonical_id):
+        canonical_id = canonical_id
+    else:
+        canonical_id = f"manual:{_slugify(canonical_id)}"
+
+    ids = ExternalIds(
+        doi=_extract_doi(raw_id),
+        arxiv=_extract_arxiv(raw_id),
+        openalex=_extract_openalex(raw_id),
+        pmid=_extract_pmid(raw_id) if not _looks_like_url(raw_id) else None,
+        pmcid=_extract_pmcid(raw_id),
+    )
+
+    return PaperMetadata(
+        id=canonical_id,
+        source=PaperSource.unknown,
+        title=title,
+        abstract=None,
+        year=year,
+        url=raw_id if _looks_like_url(raw_id) else None,
+        pdf_url=None,
+        ids=ids,
+    )
+
+
+def _resolve_entry_by_exact_identifier(entry: Dict[str, Any], *, enable_remote_lookup: bool = True) -> Optional[PaperMetadata]:
+    raw_id = str(entry.get("id") or "").strip()
+    if not raw_id:
+        return None
+    if not enable_remote_lookup:
+        return None
+
+    doi = _extract_doi(raw_id)
+    if doi:
+        try:
+            meta = get_paper_by_doi(doi)
+            if meta is not None:
+                return meta
+        except Exception:
+            pass
+
+    title = str(entry.get("title") or "").strip()
+    try:
+        candidates = search_papers(title or raw_id, limit=8, sources=DEFAULT_SEARCH_SOURCES)
+    except Exception:
+        candidates = []
+
+    best = _pick_best_candidate(entry, candidates)
+    if best is not None:
+        return best
+
+    return None
+
+
+def resolve_papers_from_trajectory(
+    doc: Dict[str, Any],
+    *,
+    search_limit: int = 8,
+    enable_remote_lookup: bool = False,
+) -> List[PaperMetadata]:
+    resolved: List[PaperMetadata] = []
+    seen_ids: set[str] = set()
+
+    for entry in doc.get("papers", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        meta = _resolve_entry_by_exact_identifier(entry, enable_remote_lookup=enable_remote_lookup)
+        if meta is None and enable_remote_lookup:
+            title = str(entry.get("title") or "").strip()
+            if title:
+                try:
+                    candidates = search_papers(title, limit=search_limit, sources=DEFAULT_SEARCH_SOURCES)
+                except Exception:
+                    candidates = []
+                meta = _pick_best_candidate(entry, candidates)
+        if meta is None:
+            meta = _fallback_paper(entry)
+
+        # Fill missing fields from YAML entry when resolver found only partial metadata.
+        if not meta.title and entry.get("title"):
+            meta.title = str(entry.get("title") or "")
+        if meta.year is None and entry.get("year") not in (None, ""):
+            try:
+                meta.year = int(entry.get("year"))
+            except Exception:
+                pass
+        if not meta.url and _looks_like_url(str(entry.get("id") or "")):
+            meta.url = str(entry.get("id") or "")
+
+        if meta.id in seen_ids:
+            continue
+        seen_ids.add(meta.id)
+        resolved.append(meta)
+
+    return resolved
+
+
+def _source_label(src: Dict[str, Any], idx: int) -> str:
+    s = str(src.get("source") or f"source_{idx}")
+    loc = str(src.get("locator") or src.get("page") or "").strip()
+    return f"{s} {loc}".strip()
+
+
+def _paper_lookup(doc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for p in doc.get("papers", []) or []:
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("id") or "").strip()
+        if pid:
+            out[pid] = p
+            doi = _extract_doi(pid)
+            if doi:
+                out[doi] = p
+                out[f"doi:{doi}"] = p
+        title = str(p.get("title") or "").strip()
+        if title:
+            out[_norm_title(title)] = p
+    return out
+
+
+def _year_from_source(source_ref: str, papers_by_key: Dict[str, Dict[str, Any]]) -> Optional[int]:
+    ref = (source_ref or "").strip()
+    candidates = [ref]
+    doi = _extract_doi(ref)
+    if doi:
+        candidates.extend([doi, f"doi:{doi}"])
+    arxiv = _extract_arxiv(ref)
+    if arxiv:
+        candidates.extend([arxiv, f"arxiv:{arxiv}"])
+    oa = _extract_openalex(ref)
+    if oa:
+        candidates.extend([oa, f"openalex:{oa}"])
+    if _norm_title(ref):
+        candidates.append(_norm_title(ref))
+
+    for key in candidates:
+        paper = papers_by_key.get(key)
+        if not isinstance(paper, dict):
+            continue
+        try:
+            y = int(paper.get("year")) if paper.get("year") not in (None, "") else None
+        except Exception:
+            y = None
+        if y is not None:
+            return y
+    return None
+
+
+def _step_time_window(step: Dict[str, Any], papers_by_key: Dict[str, Dict[str, Any]]) -> Tuple[str, str]:
+    years: List[int] = []
+    for src in step.get("sources", []) or []:
+        if not isinstance(src, dict):
+            continue
+        y = _year_from_source(str(src.get("source") or ""), papers_by_key)
+        if y is not None:
+            years.append(y)
+    if not years:
+        return ("unknown", "unknown")
+    return (str(min(years)), str(max(years)))
+
+
+def _coerce_time_token(value: Any, *, default: str = "unknown") -> str:
+    if value is None:
+        return default
+    s = str(value).strip()
+    if not s:
+        return default
+    if DATE_TOKEN_RE.match(s):
+        return s
+    return default
+
+
+def _canonical_time_interval(rec: Dict[str, Any]) -> str:
+    start = _coerce_time_token(rec.get("start_date"), default="unknown")
+    end = _coerce_time_token(rec.get("end_date"), default="unknown")
+    valid_from = _coerce_time_token(rec.get("valid_from"), default=start)
+    valid_to = _coerce_time_token(rec.get("valid_to"), default="+inf")
+    legacy = str(rec.get("time_interval") or "").strip()
+    if legacy:
+        return legacy
+    return f"evidence:{start}..{end}|valid:{valid_from}..{valid_to}"
+
+
+def build_reference_graph(doc: Dict[str, Any]) -> Dict[str, Any]:
+    papers_by_key = _paper_lookup(doc)
+    steps = [s for s in (doc.get("steps") or []) if isinstance(s, dict)]
+    manual_nodes: List[Dict[str, Any]] = []
+    manual_edges: List[Dict[str, Any]] = []
+    manual_triplets: List[Dict[str, Any]] = []
+
+    step_ids: List[int] = []
+    for idx, step in enumerate(steps, start=1):
+        sid = int(step.get("step_id") or idx)
+        step_ids.append(sid)
+        start_date, end_date = _step_time_window(step, papers_by_key)
+        node_id = f"step:{sid}"
+        conditions = step.get("conditions") if isinstance(step.get("conditions"), dict) else {}
+        manual_nodes.append(
+            {
+                "id": node_id,
+                "type": "trajectory_step",
+                "label": str(step.get("claim") or f"Шаг {sid}"),
+                "step_id": sid,
+                "claim": str(step.get("claim") or ""),
+                "inference": str(step.get("inference") or ""),
+                "next_question": str(step.get("next_question") or ""),
+                "conditions": conditions,
+                "start_date": start_date,
+                "end_date": end_date,
+                "valid_from": start_date,
+                "valid_to": "+inf" if start_date != "unknown" else "unknown",
+                "time_source": "metadata",
+            }
+        )
+        manual_triplets.append(
+            {
+                "assertion_id": f"manual-step-{sid}",
+                "subject": node_id,
+                "predicate": "states",
+                "object": str(step.get("claim") or ""),
+                "start_date": start_date,
+                "end_date": end_date,
+                "valid_from": start_date,
+                "valid_to": "+inf" if start_date != "unknown" else "unknown",
+                "time_source": "metadata",
+                "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{'+inf' if start_date != 'unknown' else 'unknown'}",
+                "evidence": {
+                    "page": None,
+                    "figure_or_table": None,
+                    "snippet_or_summary": str(step.get("inference") or step.get("claim") or ""),
+                },
+                "verdict": "accepted",
+                "rationale": "Reference step reconstructed from Task 1 trajectory YAML.",
+            }
+        )
+
+        for src_idx, src in enumerate(step.get("sources", []) or [], start=1):
+            if not isinstance(src, dict):
+                continue
+            source_id = f"step:{sid}:source:{src_idx:02d}"
+            stype = str(src.get("type") or "text")
+            source_label = _source_label(src, src_idx)
+            page_value = src.get("page")
+            try:
+                page_value = int(page_value) if page_value not in (None, "") else None
+            except Exception:
+                page_value = None
+            manual_nodes.append(
+                {
+                    "id": source_id,
+                    "type": "evidence_source",
+                    "label": source_label,
+                    "source_type": stype,
+                    "source_ref": str(src.get("source") or ""),
+                    "locator": str(src.get("locator") or ""),
+                    "page": page_value,
+                    "snippet_or_summary": str(src.get("snippet_or_summary") or ""),
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "valid_from": start_date,
+                    "valid_to": end_date,
+                    "time_source": "metadata",
+                }
+            )
+            manual_edges.append(
+                {
+                    "source": source_id,
+                    "target": node_id,
+                    "predicate": "supports",
+                    "type": "evidence_support",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
+            manual_triplets.append(
+                {
+                    "assertion_id": f"manual-source-{sid}-{src_idx}",
+                    "subject": str(src.get("source") or source_id),
+                    "predicate": "supports_step",
+                    "object": node_id,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "valid_from": start_date,
+                    "valid_to": end_date,
+                    "time_source": "metadata",
+                    "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{end_date}",
+                    "evidence": {
+                        "page": page_value,
+                        "figure_or_table": str(src.get("locator") or "") or None,
+                        "snippet_or_summary": str(src.get("snippet_or_summary") or ""),
+                    },
+                    "verdict": "accepted",
+                    "rationale": "Evidence link reconstructed from Task 1 trajectory YAML.",
+                }
+            )
+
+    raw_edges = doc.get("edges") or []
+    if not raw_edges and len(step_ids) > 1:
+        raw_edges = [[step_ids[i], step_ids[i + 1]] for i in range(len(step_ids) - 1)]
+
+    step_map = {int(step.get("step_id") or idx): step for idx, step in enumerate(steps, start=1)}
+    for edge_idx, edge in enumerate(raw_edges, start=1):
+        if not isinstance(edge, (list, tuple)) or len(edge) != 2:
+            continue
+        try:
+            src_step = int(edge[0])
+            dst_step = int(edge[1])
+        except Exception:
+            continue
+        src_node = f"step:{src_step}"
+        dst_node = f"step:{dst_step}"
+        src_step_obj = step_map.get(src_step, {})
+        start_date, end_date = _step_time_window(src_step_obj, papers_by_key) if src_step_obj else ("unknown", "unknown")
+        manual_edges.append(
+            {
+                "source": src_node,
+                "target": dst_node,
+                "predicate": "leads_to",
+                "type": "reasoning_transition",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        )
+        manual_triplets.append(
+            {
+                "assertion_id": f"manual-edge-{edge_idx}",
+                "subject": src_node,
+                "predicate": "leads_to",
+                "object": dst_node,
+                "start_date": start_date,
+                "end_date": end_date,
+                "valid_from": start_date,
+                "valid_to": "+inf" if start_date != "unknown" else "unknown",
+                "time_source": "metadata",
+                "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{'+inf' if start_date != 'unknown' else 'unknown'}",
+                "evidence": {
+                    "page": None,
+                    "figure_or_table": None,
+                    "snippet_or_summary": str(src_step_obj.get("next_question") or src_step_obj.get("inference") or ""),
+                },
+                "verdict": "accepted",
+                "rationale": "Reasoning transition reconstructed from Task 1 trajectory YAML.",
+            }
+        )
+
+    return {
+        "meta": {
+            "kind": "reference_reasoning_graph",
+            "artifact_version": int(doc.get("artifact_version") or 1),
+            "topic": str(doc.get("topic") or ""),
+            "domain": str(doc.get("domain") or ""),
+            "submission_id": str(doc.get("submission_id") or ""),
+            "generated_at": _utc_now(),
+            "n_steps": len(steps),
+            "n_papers": len(doc.get("papers") or []),
+        },
+        "nodes": manual_nodes,
+        "edges": manual_edges,
+        "triplets": manual_triplets,
+    }
+
+
+def _paperrecord_from_metadata(meta: PaperMetadata) -> PaperRecord:
+    text = (meta.abstract or "").strip() or meta.title
+    return PaperRecord(
+        paper_id=meta.id,
+        title=meta.title,
+        year=_paper_year(meta),
+        text=text,
+        url=meta.url or "",
+        source=str(meta.source.value if hasattr(meta.source, "value") else meta.source),
+    )
+
+
+def _load_domain_from_trajectory(doc: Dict[str, Any]) -> DomainConfig:
+    value = str(doc.get("domain") or "science").strip()
+    return load_domain_config(value or None)
+
+
+def _flatten_automatic_graph(kg: TemporalKnowledgeGraph) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    kg_json = kg.to_json_dict()
+    for idx, edge in enumerate(kg_json.get("edges", []) or [], start=1):
+        years = []
+        try:
+            years = sorted(int(y) for y in (edge.get("yearly_count") or {}).keys())
+        except Exception:
+            years = []
+        start_date = str(years[0]) if years else "unknown"
+        end_date = str(years[-1]) if years else "unknown"
+        quotes = edge.get("evidence_quotes") or []
+        first_quote = quotes[0] if quotes else {}
+        rows.append(
+            {
+                "assertion_id": f"auto-{idx:05d}",
+                "subject": str(edge.get("source") or ""),
+                "predicate": str(edge.get("predicate") or ""),
+                "object": str(edge.get("target") or ""),
+                "start_date": start_date,
+                "end_date": end_date,
+                "valid_from": start_date,
+                "valid_to": "+inf" if start_date != "unknown" else "unknown",
+                "time_source": "metadata",
+                "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{'+inf' if start_date != 'unknown' else 'unknown'}",
+                "score": edge.get("score"),
+                "mean_confidence": edge.get("mean_confidence"),
+                "papers": edge.get("papers") or [],
+                "evidence": {
+                    "page": None,
+                    "figure_or_table": None,
+                    "snippet_or_summary": str(first_quote.get("quote") or ""),
+                    "paper_id": str(first_quote.get("paper_id") or ""),
+                },
+            }
+        )
+    return rows
+
+
+def _prefill_graph_review(doc: Dict[str, Any], automatic_rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    reviewer_id = ""
+    expert = doc.get("expert") if isinstance(doc.get("expert"), dict) else {}
+    if expert:
+        reviewer_id = str(expert.get("latin_slug") or expert.get("full_name") or "")
+
+    assertions = []
+    for row in automatic_rows:
+        item = dict(row)
+        item["verdict"] = ""
+        item["rationale"] = ""
+        item["time_source_note"] = ""
+        assertions.append(item)
+
+    return {
+        "artifact_version": 3,
+        "domain": str(doc.get("domain") or ""),
+        "topic": str(doc.get("topic") or ""),
+        "trajectory_submission_id": str(doc.get("submission_id") or ""),
+        "reviewer_id": reviewer_id,
+        "timestamp": _utc_now(),
+        "assertions": assertions,
+    }
+
+
+def _empty_temporal_corrections(doc: Dict[str, Any]) -> Dict[str, Any]:
+    reviewer_id = ""
+    expert = doc.get("expert") if isinstance(doc.get("expert"), dict) else {}
+    if expert:
+        reviewer_id = str(expert.get("latin_slug") or expert.get("full_name") or "")
+
+    return {
+        "artifact_version": 2,
+        "domain": str(doc.get("domain") or ""),
+        "paper_id": "",
+        "reviewer_id": reviewer_id,
+        "trajectory_submission_id": str(doc.get("submission_id") or ""),
+        "corrections": [],
+    }
+
+
+def _compare_graphs(reference_graph: Dict[str, Any], automatic_rows: Sequence[Dict[str, Any]], resolved_papers: Sequence[PaperMetadata]) -> Dict[str, Any]:
+    ref_step_labels = {str(n.get("label") or "") for n in reference_graph.get("nodes", []) if n.get("type") == "trajectory_step"}
+    auto_terms = {str(r.get("subject") or "") for r in automatic_rows} | {str(r.get("object") or "") for r in automatic_rows}
+    paper_ids = {p.id for p in resolved_papers}
+    auto_papers = set()
+    for row in automatic_rows:
+        auto_papers.update(str(x) for x in (row.get("papers") or []))
+
+    return {
+        "reference_steps": len([n for n in reference_graph.get("nodes", []) if n.get("type") == "trajectory_step"]),
+        "reference_edges": len([e for e in reference_graph.get("edges", []) if e.get("predicate") == "leads_to"]),
+        "automatic_edges": len(list(automatic_rows)),
+        "automatic_unique_terms": len(auto_terms),
+        "resolved_papers": len(list(resolved_papers)),
+        "papers_reaching_automatic_graph": len(auto_papers & paper_ids),
+        "trajectory_claim_examples": sorted(list(ref_step_labels))[:10],
+        "automatic_term_examples": sorted(list(auto_terms))[:20],
+    }
+
+
+def suggest_link_candidates(
+    doc: Dict[str, Any],
+    *,
+    known_papers: Sequence[PaperMetadata],
+    max_queries: int = 4,
+    per_query: int = 8,
+    enable_remote_lookup: bool = False,
+) -> List[Dict[str, Any]]:
+    if not enable_remote_lookup:
+        return []
+
+    queries: List[str] = []
+    topic = str(doc.get("topic") or "").strip()
+    if topic:
+        queries.append(topic)
+
+    for step in doc.get("steps", []) or []:
+        if not isinstance(step, dict):
+            continue
+        nq = str(step.get("next_question") or "").strip()
+        if nq and nq not in queries:
+            queries.append(nq)
+        inf = str(step.get("inference") or "").strip()
+        if inf and len(queries) < max_queries and inf not in queries:
+            queries.append(inf)
+        if len(queries) >= max_queries:
+            break
+
+    queries = queries[:max_queries]
+    known_titles = {_norm_title(p.title) for p in known_papers}
+    known_ids = {p.id for p in known_papers}
+    suggestions: Dict[str, Dict[str, Any]] = {}
+
+    for q in queries:
+        try:
+            found = search_papers(q, limit=per_query, sources=DEFAULT_SEARCH_SOURCES)
+        except Exception:
+            found = []
+        for cand in found:
+            if cand.id in known_ids or _norm_title(cand.title) in known_titles:
+                continue
+            score = 2.0 * _score_title_match(q, cand.title)
+            if cand.abstract:
+                score += 0.25
+            if cand.pdf_url:
+                score += 0.25
+            if cand.citation_count:
+                score += min(float(cand.citation_count) / 500.0, 0.5)
+            existing = suggestions.get(cand.id)
+            payload = {
+                "paper_id": cand.id,
+                "title": cand.title,
+                "year": _paper_year(cand),
+                "url": cand.url,
+                "pdf_url": cand.pdf_url,
+                "source": str(cand.source.value if hasattr(cand.source, "value") else cand.source),
+                "trigger_queries": [q],
+                "score": round(score, 4),
+            }
+            if existing is None:
+                suggestions[cand.id] = payload
+            else:
+                existing["score"] = max(float(existing.get("score") or 0.0), payload["score"])
+                tq = list(existing.get("trigger_queries") or [])
+                if q not in tq:
+                    tq.append(q)
+                existing["trigger_queries"] = tq
+
+    ranked = sorted(suggestions.values(), key=lambda x: float(x.get("score") or 0.0), reverse=True)
+    return ranked[:20]
+
+
+def prepare_task2_validation_bundle(
+    trajectory_yaml: Path,
+    *,
+    out_dir: Path,
+    include_multimodal: bool = True,
+    run_vlm: bool = True,
+    edge_mode: str = "auto",
+    suggest_links: bool = True,
+    max_papers: int = 0,
+    max_link_queries: int = 4,
+    enable_remote_lookup: bool = False,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    g4f_model: str | None = None,
+    local_model: str | None = None,
+    vlm_backend: str | None = None,
+    vlm_model_id: str | None = None,
+) -> Path:
+    with temporary_llm_selection(
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
+    ):
+        with temporary_vlm_selection(vlm_backend=vlm_backend, vlm_model_id=vlm_model_id):
+            doc = yaml.safe_load(trajectory_yaml.read_text(encoding="utf-8")) or {}
+            if not isinstance(doc, dict):
+                raise ValueError("Trajectory YAML must contain a top-level object.")
+
+            run_name = str(doc.get("submission_id") or _slugify(str(doc.get("topic") or trajectory_yaml.stem)))
+            out = out_dir / run_name
+            out.mkdir(parents=True, exist_ok=True)
+
+            shutil.copy2(trajectory_yaml, out / trajectory_yaml.name)
+
+            reference_graph = build_reference_graph(doc)
+            (out / "reference_graph.json").write_text(json.dumps(reference_graph, ensure_ascii=False, indent=2), encoding="utf-8")
+            (out / "reference_triplets.json").write_text(json.dumps(reference_graph.get("triplets") or [], ensure_ascii=False, indent=2), encoding="utf-8")
+
+            domain_cfg = _load_domain_from_trajectory(doc)
+
+            resolved = resolve_papers_from_trajectory(doc, enable_remote_lookup=enable_remote_lookup)
+            if max_papers and max_papers > 0:
+                resolved = resolved[:max_papers]
+
+            (out / "papers_resolved.json").write_text(
+                json.dumps([p.model_dump(mode="json") for p in resolved], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            acquire_dir = out / "automatic_graph"
+            raw_dir = acquire_dir / "raw_pdfs"
+            meta_dir = acquire_dir / "raw_meta"
+            processed_dir = acquire_dir / "processed_papers"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+
+            acq: List[AcquireResult] = acquire_pdfs(resolved, raw_dir=raw_dir, meta_dir=meta_dir)
+            (out / "acquire_results.json").write_text(
+                json.dumps(
+                    [asdict(a) | {"pdf_path": str(a.pdf_path) if a.pdf_path else None, "meta_path": str(a.meta_path)} for a in acq],
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            ingested_ids: List[str] = []
+            for meta, a in zip(resolved, acq):
+                if not a.pdf_path:
+                    continue
+                meta_json = meta.model_dump(mode="json")
+                try:
+                    if include_multimodal:
+                        ingest_pdf_multimodal_auto(a.pdf_path, meta_json, processed_dir, run_vlm=run_vlm)
+                    else:
+                        ingest_pdf_auto(a.pdf_path, meta_json, processed_dir)
+                    ingested_ids.append(meta.id)
+                except Exception as e:
+                    console.print(f"[yellow]Ingest failed for {meta.id}: {e}[/yellow]")
+
+            processed_records = load_papers_from_processed(processed_dir)
+            processed_by_id = {p.paper_id: p for p in processed_records}
+            paper_records: List[PaperRecord] = []
+            for meta in resolved:
+                if meta.id in processed_by_id:
+                    paper_records.append(processed_by_id[meta.id])
+                else:
+                    paper_records.append(_paperrecord_from_metadata(meta))
+
+            (out / "paper_records.json").write_text(
+                json.dumps([asdict(r) for r in paper_records], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            kg = build_temporal_kg(
+                paper_records,
+                domain=domain_cfg,
+                query=str(doc.get("topic") or ""),
+                edge_mode=edge_mode,  # type: ignore[arg-type]
+                expert_overrides_path=None,
+            )
+            kg.dump_json(out / "automatic_graph" / "temporal_kg.json")
+
+            automatic_rows = _flatten_automatic_graph(kg)
+            (out / "automatic_triplets.json").write_text(json.dumps(automatic_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            prefill_review = _prefill_graph_review(doc, automatic_rows)
+            review_dir = out / "review_templates"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            (review_dir / "graph_review_prefill.json").write_text(json.dumps(prefill_review, ensure_ascii=False, indent=2), encoding="utf-8")
+            (review_dir / "temporal_corrections_template.json").write_text(json.dumps(_empty_temporal_corrections(doc), ensure_ascii=False, indent=2), encoding="utf-8")
+
+            comparison = _compare_graphs(reference_graph, automatic_rows, resolved)
+            (out / "comparison_summary.json").write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            if suggest_links:
+                suggestions = suggest_link_candidates(
+                    doc,
+                    known_papers=resolved,
+                    max_queries=max_link_queries,
+                    enable_remote_lookup=enable_remote_lookup,
+                )
+                scout_dir = out / "scout"
+                scout_dir.mkdir(parents=True, exist_ok=True)
+                (scout_dir / "suggested_links.json").write_text(json.dumps(suggestions, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            manifest = {
+                "generated_at": _utc_now(),
+                "trajectory_file": trajectory_yaml.name,
+                "submission_id": str(doc.get("submission_id") or ""),
+                "topic": str(doc.get("topic") or ""),
+                "domain": str(doc.get("domain") or ""),
+                "resolved_papers": len(resolved),
+                "ingested_pdfs": len(ingested_ids),
+                "automatic_edges": len(automatic_rows),
+                "reference_steps": len([n for n in reference_graph.get("nodes", []) if n.get("type") == "trajectory_step"]),
+                "remote_lookup_enabled": bool(enable_remote_lookup),
+                "llm_effective_provider": str(settings.llm_provider or ""),
+                "llm_effective_model": str(settings.llm_model or ""),
+                "vlm_effective_backend": str(getattr(settings, "vlm_backend", "") or ""),
+                "vlm_effective_model": str(getattr(settings, "vlm_model_id", "") or ""),
+                "artifacts": {
+                    "reference_graph": "reference_graph.json",
+                    "reference_triplets": "reference_triplets.json",
+                    "automatic_graph": "automatic_graph/temporal_kg.json",
+                    "automatic_triplets": "automatic_triplets.json",
+                    "papers_resolved": "papers_resolved.json",
+                    "comparison_summary": "comparison_summary.json",
+                    "review_prefill": "review_templates/graph_review_prefill.json",
+                },
+            }
+            (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+            return out

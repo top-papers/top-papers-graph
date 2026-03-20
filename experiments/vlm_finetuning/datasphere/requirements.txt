@@ -1,0 +1,14 @@
+pyyaml>=6.0
+pillow>=10.0
+numpy>=1.26,<2
+datasets>=2.20.0
+accelerate>=0.33.0
+transformers>=4.57.0
+trl>=0.11.0
+peft>=0.11.0
+bitsandbytes>=0.48.1
+sentencepiece>=0.2.0
+qwen-vl-utils>=0.0.14
+evaluate>=0.4.2
+safetensors>=0.4.3
+wandb>=0.18.0

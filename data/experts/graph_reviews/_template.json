@@ -1,22 +1,18 @@
 {
-  "domain": "example_domain",
-  "paper_id": "doi:...",
-  "reviewer_id": "expert_001",
-  "timestamp": "2026-02-01T12:00:00Z",
   "assertions": [
     {
-      "assertion_id": "A-000123",
-      "subject": "Method X",
-      "predicate": "improves",
-      "object": "Outcome Y",
-      "time_interval": "If applicable: year range / before-after / condition window",
+      "subject": "example_subject",
+      "predicate": "supports",
+      "object": "example_object",
+      "start_date": "unknown",
+      "end_date": "unknown",
       "evidence": {
-        "page": 6,
-        "figure_or_table": "Figure 5",
-        "snippet_or_summary": "Коротко: что именно утверждается источником"
+        "source": "doi:10.0000/example",
+        "paper_id": "doi:10.0000/example",
+        "snippet_or_summary": "Example evidence snippet for graph review template."
       },
-      "verdict": "accepted|rejected|needs_time_fix",
-      "rationale": "Почему так (границы применимости, альтернативы, риски)"
+      "verdict": "accepted",
+      "rationale": "Template assertion kept as a minimal valid example."
     }
   ]
 }

@@ -1,0 +1,9 @@
+teacher_model_id: Qwen/Qwen3-VL-30B-A3B-Instruct
+student_model_id: Qwen/Qwen3-VL-4B-Instruct
+trainer: sft_distill
+adapter: lora
+blend:
+  gold_weight: 1.0
+  silver_weight: 0.35
+  disagreement_drop_threshold: 0.25
+notes: Sequence-level distillation from large teacher into smaller deployable student.

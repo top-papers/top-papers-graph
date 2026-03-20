@@ -41,6 +41,7 @@ from .agents.hypothesis_tester import load_hypothesis_from_json, test_hypothesis
 
 from .pipeline.e2e import run_pipeline
 from .pipeline.demo import run_demo_pipeline
+from .pipeline.task2_validation import prepare_task2_validation_bundle
 
 
 app = typer.Typer(help="top-papers-graph CLI (ex SciReason)", add_completion=False)
@@ -498,6 +499,11 @@ def apply_graph_reviews(
                 verdict=str(rec.get("verdict")),
                 weight=float(rec.get("weight", 0.0)),
                 time_interval=str(rec.get("time_interval", "unknown")),
+                start_date=str(rec.get("start_date", "unknown")),
+                end_date=str(rec.get("end_date", "unknown")),
+                valid_from=str(rec.get("valid_from", rec.get("start_date", "unknown"))),
+                valid_to=str(rec.get("valid_to", "+inf")),
+                time_source=str(rec.get("time_source", "unknown")),
             )
             count += 1
         tneo.close()
@@ -584,6 +590,87 @@ def apply_temporal_corrections(
     )
 
 
+@app.command("prepare-task2-validation")
+def prepare_task2_validation(
+    trajectory: Path = typer.Option(..., help="Путь к YAML артефакту Task 1 (trajectory)."),
+    out_dir: Path = typer.Option(Path("runs/task2_validation"), help="Куда сохранить bundle для эксперта."),
+    multimodal: bool = typer.Option(True, help="Пробовать мультимодальный ingest PDF (страницы + VLM при наличии)."),
+    vlm: bool = typer.Option(True, help="Запускать VLM на страницах PDF, если VLM backend настроен."),
+    edge_mode: str = typer.Option("auto", help="auto|llm_triplets|cooccurrence"),
+    suggest_links: bool = typer.Option(True, help="Добавить scout/suggested_links.json для поиска дополнительных ссылок."),
+    max_papers: int = typer.Option(0, help="Если >0 — ограничить число статей из trajectory YAML."),
+    max_link_queries: int = typer.Option(4, help="Сколько topic/next_question запросов использовать для scout."),
+    remote_lookup: bool = typer.Option(False, help="Разрешить сетевое обогащение метаданных статей и scout-поиск."),
+    g4f_model: str | None = typer.Option(None, "--g4f-model", help="Запустить Task 2 через g4f с указанной моделью."),
+    local_model: str | None = typer.Option(None, "--local-model", help="Запустить Task 2 через локальную Ollama модель."),
+    vlm_backend: str | None = typer.Option(None, "--vlm-backend", help="Переопределить VLM backend для мультимодального шага (например g4f или qwen3_vl)."),
+    vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
+) -> None:
+    """Task 2 orchestrator: trajectory YAML -> reference graph + automatic temporal KG + review templates.
+
+    Command is designed for Google Colab / notebook usage and does not require Neo4j/Qdrant.
+    """
+    bundle_dir = prepare_task2_validation_bundle(
+        trajectory,
+        out_dir=out_dir,
+        include_multimodal=multimodal,
+        run_vlm=vlm,
+        edge_mode=edge_mode,
+        suggest_links=suggest_links,
+        max_papers=max_papers,
+        max_link_queries=max_link_queries,
+        enable_remote_lookup=remote_lookup,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
+        vlm_backend=vlm_backend,
+        vlm_model_id=vlm_model_id,
+    )
+    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
+
+
+@app.command("task2-bundle")
+def task2_bundle(
+    trajectory: Path = typer.Option(..., help="Путь к YAML артефакту Task 1 (trajectory)."),
+    out_dir: Path = typer.Option(Path("runs/task2_validation"), help="Куда сохранить bundle для эксперта."),
+    multimodal: bool = typer.Option(True, help="Пробовать мультимодальный ingest PDF (страницы + VLM при наличии)."),
+    vlm: bool = typer.Option(True, help="Запускать VLM на страницах PDF, если VLM backend настроен."),
+    edge_mode: str = typer.Option("auto", help="auto|llm_triplets|cooccurrence"),
+    suggest_links: bool = typer.Option(True, help="Добавить scout/suggested_links.json для поиска дополнительных ссылок."),
+    max_papers: int = typer.Option(0, help="Если >0 — ограничить число статей из trajectory YAML."),
+    max_link_queries: int = typer.Option(4, help="Сколько topic/next_question запросов использовать для scout."),
+    remote_lookup: bool = typer.Option(False, help="Разрешить сетевое обогащение метаданных статей и scout-поиск."),
+    g4f_model: str | None = typer.Option(None, "--g4f-model", help="Запустить Task 2 через g4f с указанной моделью."),
+    local_model: str | None = typer.Option(None, "--local-model", help="Запустить Task 2 через локальную Ollama модель."),
+    vlm_backend: str | None = typer.Option(None, "--vlm-backend", help="Переопределить VLM backend для мультимодального шага (например g4f или qwen3_vl)."),
+    vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
+) -> None:
+    """Alias for prepare-task2-validation, kept for notebook and legacy automation compatibility."""
+    bundle_dir = prepare_task2_validation_bundle(
+        trajectory,
+        out_dir=out_dir,
+        include_multimodal=multimodal,
+        run_vlm=vlm,
+        edge_mode=edge_mode,
+        suggest_links=suggest_links,
+        max_papers=max_papers,
+        max_link_queries=max_link_queries,
+        enable_remote_lookup=remote_lookup,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
+        vlm_backend=vlm_backend,
+        vlm_model_id=vlm_model_id,
+    )
+    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
+
+
 @app.command("pybamm-fastcharge")
 def pybamm_fastcharge(
     profile: str = typer.Option("baseline_cc", help="baseline_cc|proposed_two_stage|..."),
@@ -660,16 +747,16 @@ def run_cmd(
         "--llm-model",
         help="Явно задать имя модели провайдера.",
     ),
-smol_model_backend: Optional[str] = typer.Option(
-    None,
-    "--smol-model-backend",
-    help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
-),
-smol_model_id: Optional[str] = typer.Option(
-    None,
-    "--smol-model-id",
-    help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
-),
+    smol_model_backend: Optional[str] = typer.Option(
+        None,
+        "--smol-model-backend",
+        help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
+    ),
+    smol_model_id: Optional[str] = typer.Option(
+        None,
+        "--smol-model-id",
+        help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
+    ),
 ) -> None:
     """Полностью автоматический пайплайн: query → papers → temporal KG → hypotheses."""
     # ---- Apply LLM overrides ----
@@ -719,13 +806,14 @@ smol_model_id: Optional[str] = typer.Option(
         if llm_model:
             settings.llm_model = llm_model.strip()
 
+    # Apply overrides (CLI > env/config defaults)
+    _apply_llm_overrides()
 
-
-# smolagents model overrides (CLI > env)
-if smol_model_backend:
-    settings.smol_model_backend = smol_model_backend.strip()
-if smol_model_id:
-    settings.smol_model_id = smol_model_id.strip()
+    # smolagents model overrides (CLI > env)
+    if smol_model_backend:
+        settings.smol_model_backend = smol_model_backend.strip()
+    if smol_model_id:
+        settings.smol_model_id = smol_model_id.strip()
 
     console.print(
         f"[bold]LLM:[/bold] {settings.llm_provider}/{settings.llm_model}  |  "
@@ -750,6 +838,86 @@ if smol_model_id:
     console.print(f"[bold green]Artifacts saved:[/bold green] {run_path}")
 
 
+@app.command("export-temporal-events")
+def export_temporal_events(
+    out: Path = typer.Option(Path("runs/temporal_events.json"), help="Where to save the exported event stream JSON."),
+    limit: int = typer.Option(5000, help="Maximum number of Neo4j events to export."),
+) -> None:
+    """Export the Event layer from Neo4j for temporal model training/evaluation."""
+    store = Neo4jTemporalStore()
+    try:
+        rows = store.export_event_stream(limit=limit)
+    finally:
+        store.close()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    console.print(f"[green]Exported events:[/green] {out} (n={len(rows)})")
+
+
+@app.command("train-tgn")
+def train_tgn(
+    temporal_kg_json: Path = typer.Option(..., help="Path to temporal_kg.json produced by the pipeline."),
+    out: Path = typer.Option(Path("runs/tgn_predictions.json"), help="Where to save top temporal link predictions."),
+    top_k: int = typer.Option(20, help="Number of temporal link predictions to keep."),
+) -> None:
+    """Train/evaluate the lightweight TGNN-style predictor on a temporal KG artifact."""
+    from .temporal.temporal_kg_builder import TemporalKnowledgeGraph, EdgeStats, NodeStats
+    from .tgnn.event_dataset import build_event_stream, chronological_split, event_stats
+    from .tgnn.tgn_link_prediction import TGNLinkPredConfig, tgn_link_prediction
+
+    raw = json.loads(temporal_kg_json.read_text(encoding="utf-8"))
+    kg = TemporalKnowledgeGraph(meta=dict(raw.get("meta") or {}))
+    for n in raw.get("nodes", []):
+        term = str(n.get("term") or "")
+        if not term:
+            continue
+        kg.nodes[term] = NodeStats(term=term, doc_freq=int(n.get("doc_freq") or 0), yearly_doc_freq=dict(n.get("yearly_doc_freq") or {}))
+    for e in raw.get("edges", []):
+        edge = EdgeStats(
+            source=str(e.get("source") or ""),
+            target=str(e.get("target") or ""),
+            predicate=str(e.get("predicate") or "may_relate_to"),
+            directed=bool(e.get("directed", True)),
+            total_count=int(e.get("total_count") or 0),
+            yearly_count={int(k): int(v) for k, v in dict(e.get("yearly_count") or {}).items()},
+            confidence_sum=float(e.get("mean_confidence") or 0.0) * max(1, int(e.get("total_count") or 1)),
+            confidence_n=max(1, int(e.get("total_count") or 1)),
+            polarity_counts=dict(e.get("polarity_counts") or {"supports": 0, "contradicts": 0, "unknown": 0}),
+            papers=set(e.get("papers") or []),
+            evidence_quotes=list(e.get("evidence_quotes") or []),
+            features=dict(e.get("features") or {}),
+            score=float(e.get("score") or 0.0),
+        )
+        kg.edges.append(edge)
+
+    events = build_event_stream(kg)
+    train_events, valid_events, test_events = chronological_split(events)
+    preds = tgn_link_prediction(
+        train_events + valid_events,
+        top_k=top_k,
+        config=TGNLinkPredConfig(
+            recent_window_years=int(getattr(settings, "hyp_tgnn_recent_window_years", 3) or 3),
+            recency_half_life_years=float(getattr(settings, "hyp_tgnn_half_life_years", 2.0) or 2.0),
+            min_candidate_score=float(getattr(settings, "hyp_tgnn_min_candidate_score", 0.05) or 0.05),
+        ),
+    )
+    payload = {
+        "stats": {
+            **event_stats(events),
+            "train_events": len(train_events),
+            "valid_events": len(valid_events),
+            "test_events": len(test_events),
+        },
+        "predictions": [
+            {"source": u, "target": v, "score": score}
+            for u, v, score in preds
+        ],
+    }
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    console.print(f"[green]Saved TGNN predictions:[/green] {out}")
+
+
 @app.command("demo-run")
 def demo_run_cmd(
     query: str = typer.Option("temporal knowledge graph hypothesis", help="Demo query (offline)."),
@@ -757,23 +925,24 @@ def demo_run_cmd(
     out_dir: Path = typer.Option(Path("runs"), help="Where to write demo artifacts."),
     domain_id: str = typer.Option(None, help="Domain config id (defaults to env DOMAIN_ID or science)."),
     no_llm_hypotheses: bool = typer.Option(False, help="Disable LLM rewriting for hypotheses."),
-    gnn: bool = typer.Option(False, help="Enable optional GNN link prediction (requires '.[gnn]')."),
+    tgnn: bool = typer.Option(True, help="Enable TGNN/TGN-style temporal link prediction (default on)."),
+    gnn: bool = typer.Option(False, help="Enable optional static GNN baseline (requires '.[gnn]')."),
     agent_backend: Optional[str] = typer.Option(
         None,
         help="Override HYP_AGENT_BACKEND for this run (internal|smolagents).",
     ),
     llm_provider: Optional[str] = typer.Option(None, help="Override LLM_PROVIDER for this run (e.g. mock)."),
     llm_model: Optional[str] = typer.Option(None, help="Override LLM_MODEL for this run."),
-smol_model_backend: Optional[str] = typer.Option(
-    None,
-    "--smol-model-backend",
-    help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
-),
-smol_model_id: Optional[str] = typer.Option(
-    None,
-    "--smol-model-id",
-    help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
-),
+    smol_model_backend: Optional[str] = typer.Option(
+        None,
+        "--smol-model-backend",
+        help="smolagents model backend (scireason|transformers|g4f). Overrides SMOL_MODEL_BACKEND.",
+    ),
+    smol_model_id: Optional[str] = typer.Option(
+        None,
+        "--smol-model-id",
+        help="HF model id/path for smolagents TransformersModel. Overrides SMOL_MODEL_ID.",
+    ),
 ) -> None:
     """Offline demo pipeline: build temporal KG + hypotheses from a tiny built-in corpus.
 
@@ -784,7 +953,12 @@ smol_model_id: Optional[str] = typer.Option(
         settings.llm_provider = llm_provider.strip()
     if llm_model:
         settings.llm_model = llm_model.strip()
+    if smol_model_backend:
+        settings.smol_model_backend = smol_model_backend.strip()
+    if smol_model_id:
+        settings.smol_model_id = smol_model_id.strip()
 
+    settings.hyp_tgnn_enabled = bool(tgnn)
     if gnn:
         settings.hyp_gnn_enabled = True
 
@@ -809,16 +983,16 @@ def smoke_all(
         False,
         help="Also run smoke with LLM_PROVIDER=g4f (requires '.[g4f]' and internet; can be unstable).",
     ),
-smol_model_backend: Optional[str] = typer.Option(
-    None,
-    "--smol-model-backend",
-    help="smolagents model backend for smolagents runs (scireason|transformers|g4f).",
-),
-smol_model_id: Optional[str] = typer.Option(
-    None,
-    "--smol-model-id",
-    help="HF model id/path for smolagents TransformersModel.",
-),
+    smol_model_backend: Optional[str] = typer.Option(
+        None,
+        "--smol-model-backend",
+        help="smolagents model backend for smolagents runs (scireason|transformers|g4f).",
+    ),
+    smol_model_id: Optional[str] = typer.Option(
+        None,
+        "--smol-model-id",
+        help="HF model id/path for smolagents TransformersModel.",
+    ),
 ) -> None:
     """Run an offline smoke matrix for key pipeline branches."""
 
@@ -834,11 +1008,11 @@ smol_model_id: Optional[str] = typer.Option(
     if importlib.util.find_spec("smolagents") is not None:
         agent_backends.append("smolagents")
 
-# smolagents model overrides (CLI > env)
-if smol_model_backend:
-    settings.smol_model_backend = smol_model_backend.strip()
-if smol_model_id:
-    settings.smol_model_id = smol_model_id.strip()
+    # smolagents model overrides (CLI > env)
+    if smol_model_backend:
+        settings.smol_model_backend = smol_model_backend.strip()
+    if smol_model_id:
+        settings.smol_model_id = smol_model_id.strip()
 
     combos = [
         ("cooccurrence", True, False),

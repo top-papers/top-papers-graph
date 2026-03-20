@@ -6,9 +6,22 @@ import math
 import os
 import random
 import re
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential
+except Exception:  # pragma: no cover
+    def retry(*args, **kwargs):
+        def _decorator(fn):
+            return fn
+        return _decorator
+
+    def stop_after_attempt(*args, **kwargs):
+        return None
+
+    def wait_exponential(*args, **kwargs):
+        return None
 from rich.console import Console
 
 from .config import settings
@@ -52,6 +65,34 @@ def _resolve_auto_provider() -> str:
         return "g4f"
 
     return "mock"
+
+
+def list_local_ollama_models(base_url: str | None = None) -> list[str]:
+    """Return currently available local Ollama model names via `/api/tags`.
+
+    The official Ollama API exposes installed models at GET `/api/tags`,
+    which is the safest source for notebook dropdowns and CLI validation.
+    """
+
+    try:
+        import httpx
+
+        base = (base_url or getattr(settings, "ollama_base_url", "http://localhost:11434") or "http://localhost:11434").rstrip("/")
+        url = base + "/api/tags"
+        r = httpx.get(url, timeout=2.5)
+        r.raise_for_status()
+        data = r.json()
+        models = data.get("models") or []
+        out: list[str] = []
+        for item in models:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("model")
+            if name:
+                out.append(str(name))
+        return _dedup_keep_order(out)
+    except Exception:
+        return []
 
 
 def _resolve_model_for_ollama(model_req: str) -> str:
@@ -653,6 +694,51 @@ def _dedup_keep_order(items: list[str]) -> list[str]:
             seen.add(x)
             out.append(x)
     return out
+
+
+def list_available_g4f_models(include_auto: bool = True) -> list[str]:
+    """Return g4f text-capable model names from the installed g4f registry."""
+
+    names = _g4f_model_candidates()
+    if include_auto:
+        return ["auto", *names] if names else ["auto"]
+    return names
+
+
+@contextmanager
+def temporary_llm_selection(
+    *,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    g4f_model: str | None = None,
+    local_model: str | None = None,
+):
+    """Temporarily override LLM routing for notebook/CLI execution.
+
+    Precedence:
+    1) local_model -> provider=ollama
+    2) g4f_model -> provider=g4f
+    3) explicit llm_provider / llm_model
+    """
+
+    prev_provider = settings.llm_provider
+    prev_model = settings.llm_model
+    try:
+        if local_model and str(local_model).strip():
+            settings.llm_provider = "ollama"
+            settings.llm_model = str(local_model).strip()
+        elif g4f_model and str(g4f_model).strip():
+            settings.llm_provider = "g4f"
+            settings.llm_model = str(g4f_model).strip()
+        else:
+            if llm_provider and str(llm_provider).strip():
+                settings.llm_provider = str(llm_provider).strip()
+            if llm_model and str(llm_model).strip():
+                settings.llm_model = str(llm_model).strip()
+        yield
+    finally:
+        settings.llm_provider = prev_provider
+        settings.llm_model = prev_model
 
 
 @lru_cache(maxsize=1)

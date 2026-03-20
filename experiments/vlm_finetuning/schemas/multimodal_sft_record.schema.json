@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MultimodalSFTRecord",
+  "type": "object",
+  "required": ["id", "task_type", "messages"],
+  "properties": {
+    "id": {"type": "string"},
+    "task_type": {"type": "string"},
+    "topic": {"type": "string"},
+    "domain": {"type": "string"},
+    "source_file": {"type": "string"},
+    "images": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "role": {"type": "string"},
+          "content": {}
+        }
+      }
+    },
+    "metadata": {"type": "object"}
+  }
+}

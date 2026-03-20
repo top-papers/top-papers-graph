@@ -1,20 +1,10 @@
 {
-  "artifact_version": 1,
-  "domain": "example_domain",
-  "paper_id": "arxiv:2401.01234",
-  "reviewer_id": "anon",
   "items": [
     {
-      "page": 5,
-      "image_path": "data/processed/papers/arxiv:2401.01234/mm/images/page_005.png",
-      "vlm_caption": "(auto) ...",
-      "tables_md": "(auto) ...",
-      "equations_md": "(auto) ...",
+      "page": 1,
       "verdict": "needs_fix",
-      "corrected_caption": "(fix) ...",
-      "corrected_tables_md": null,
-      "corrected_equations_md": null,
-      "rationale": "Почему авто-извлечение неверно и что исправлено"
+      "rationale": "Template placeholder for multimodal review.",
+      "vlm_caption": "Replace this placeholder caption with an expert-reviewed description."
     }
   ]
 }

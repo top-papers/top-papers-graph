@@ -8,7 +8,22 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlencode, urlparse
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+try:
+    from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+except Exception:  # pragma: no cover
+    def retry(*args, **kwargs):
+        def _decorator(fn):
+            return fn
+        return _decorator
+
+    def retry_if_exception_type(*args, **kwargs):
+        return None
+
+    def stop_after_attempt(*args, **kwargs):
+        return None
+
+    def wait_exponential(*args, **kwargs):
+        return None
 
 from .cache import DiskJSONCache
 from .ratelimit import HostRateLimiter, RateLimitPolicy

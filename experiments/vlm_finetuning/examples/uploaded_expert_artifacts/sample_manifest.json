@@ -1,0 +1,44 @@
+[
+  {
+    "file": "kubrakova_ekaterina_aleksandrovna__fd546d60da0c - Екатерина Кубракова.yaml",
+    "topic": "Использование агентов на больших языковых моделях (LLM) для моделирования влияния поведенческих предубеждений (bias) на динамику фондового рынка.",
+    "steps": 9,
+    "papers": 4,
+    "edges": 10,
+    "source_types": [
+      "text"
+    ]
+  },
+  {
+    "file": "nosyrev_andrei_nikolaevich__e5b216debb5c - Андрей Носырев.yaml",
+    "topic": "Наблюдается глобальная тенденция к снижению температуры и плотности термосферы Земли начиная с 1960-х годов",
+    "steps": 3,
+    "papers": 2,
+    "edges": 3,
+    "source_types": [
+      "text"
+    ]
+  },
+  {
+    "file": "shevchenko_ol_ga_vital_evna__921b61e5f476 - Оля Шевченко.yaml",
+    "topic": "Противогрибковый механизм действия пептидов, полученных из EntV",
+    "steps": 4,
+    "papers": 1,
+    "edges": 3,
+    "source_types": [
+      "image",
+      "text"
+    ]
+  },
+  {
+    "file": "zamorin_denis_aleksandrovich__37ab71be5e40 - Денис Александрович.yaml",
+    "topic": "открытие гексатической фазы в двумерной структуре пылевых частиц в плазме",
+    "steps": 6,
+    "papers": 6,
+    "edges": 14,
+    "source_types": [
+      "image",
+      "text"
+    ]
+  }
+]

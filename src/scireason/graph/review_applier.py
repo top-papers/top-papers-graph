@@ -30,6 +30,25 @@ def _weight_for(verdict: str) -> float:
     return 0.0
 
 
+def _time_token(v: Any, *, default: str = "unknown") -> str:
+    if v is None:
+        return default
+    s = str(v).strip()
+    return s or default
+
+
+def _canonical_time_interval(a: Dict[str, Any]) -> str:
+    legacy = str(a.get("time_interval") or "").strip()
+    if legacy:
+        return legacy
+
+    start = _time_token(a.get("start_date"), default="unknown")
+    end = _time_token(a.get("end_date"), default="unknown")
+    valid_from = _time_token(a.get("valid_from"), default=start)
+    valid_to = _time_token(a.get("valid_to"), default="+inf")
+    return f"evidence:{start}..{end}|valid:{valid_from}..{valid_to}"
+
+
 def _normalize_assertions(doc: Dict[str, Any], source_path: Path) -> List[Dict[str, Any]]:
     """Support both new and legacy expert formats.
 
@@ -52,6 +71,11 @@ def _normalize_assertions(doc: Dict[str, Any], source_path: Path) -> List[Dict[s
             "predicate": a.get("predicate"),
             "object": a.get("object"),
             "time_interval": a.get("time_interval", "unknown"),
+            "start_date": a.get("start_date"),
+            "end_date": a.get("end_date"),
+            "valid_from": a.get("valid_from"),
+            "valid_to": a.get("valid_to"),
+            "time_source": a.get("time_source") or "legacy",
             "evidence": {
                 "page": a.get("evidence", {}).get("page"),
                 "figure_or_table": a.get("evidence", {}).get("figure_or_table"),
@@ -68,6 +92,11 @@ def _normalize_assertions(doc: Dict[str, Any], source_path: Path) -> List[Dict[s
             "predicate": a.get("predicate"),
             "object": a.get("object"),
             "time_interval": a.get("time_interval", "unknown"),
+            "start_date": a.get("start_date"),
+            "end_date": a.get("end_date"),
+            "valid_from": a.get("valid_from"),
+            "valid_to": a.get("valid_to"),
+            "time_source": a.get("time_source") or "legacy",
             "evidence": {
                 "page": None,
                 "figure_or_table": None,
@@ -84,6 +113,11 @@ def _normalize_assertions(doc: Dict[str, Any], source_path: Path) -> List[Dict[s
             "predicate": a.get("predicate"),
             "object": a.get("object"),
             "time_interval": a.get("time_interval", "unknown"),
+            "start_date": a.get("start_date"),
+            "end_date": a.get("end_date"),
+            "valid_from": a.get("valid_from"),
+            "valid_to": a.get("valid_to"),
+            "time_source": a.get("time_source") or "legacy",
             "evidence": {
                 "page": None,
                 "figure_or_table": None,
@@ -123,7 +157,12 @@ def compile_overrides(graph_reviews_dir: Path, out_path: Path) -> ReviewStats:
                     "subject": a.get("subject"),
                     "predicate": a.get("predicate"),
                     "object": a.get("object"),
-                    "time_interval": a.get("time_interval", "unknown"),
+                    "start_date": _time_token(a.get("start_date"), default="unknown"),
+                    "end_date": _time_token(a.get("end_date"), default="unknown"),
+                    "valid_from": _time_token(a.get("valid_from"), default=_time_token(a.get("start_date"), default="unknown")),
+                    "valid_to": _time_token(a.get("valid_to"), default="+inf"),
+                    "time_source": a.get("time_source") or "unknown",
+                    "time_interval": _canonical_time_interval(a),
                     "source_review": str(f),
                 }
                 out.write(json.dumps(rec, ensure_ascii=False) + "\n")

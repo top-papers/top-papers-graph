@@ -88,8 +88,40 @@ def export_trajectories(traj_dir: Path) -> List[Dict[str, Any]]:
             if not isinstance(step, dict):
                 continue
 
+            sources = step.get("sources") or []
+            if not isinstance(sources, list):
+                sources = []
+
+            # Backward compatibility: artifact v1 evidence{} -> one pseudo-source
             ev = step.get("evidence") or {}
+            if isinstance(ev, dict) and ev and not sources:
+                sources = [
+                    {
+                        "type": ev.get("type"),
+                        "source": ev.get("source"),
+                        "page": ev.get("page"),
+                        "locator": ev.get("figure_or_table"),
+                        "snippet_or_summary": ev.get("snippet_or_summary"),
+                    }
+                ]
+
             cond = step.get("conditions") or {}
+
+            src_lines: List[str] = []
+            for s in sources:
+                if not isinstance(s, dict):
+                    continue
+                st = str(s.get("type") or "").strip()
+                sid = str(s.get("source") or "").strip()
+                pg = str(s.get("page") or "").strip()
+                loc = str(s.get("locator") or "").strip()
+                sn = str(s.get("snippet_or_summary") or "").strip()
+                meta = " ".join(x for x in [("p."+pg) if pg else "", loc] if x).strip()
+                head = f"- {st}: {sid} {meta}".rstrip()
+                if sn:
+                    head += f"\n  snippet: {sn}"
+                src_lines.append(head)
+            sources_block = "\n".join(src_lines) if src_lines else "-"
 
             user = (
                 f"Topic: {topic}\n"
@@ -97,8 +129,7 @@ def export_trajectories(traj_dir: Path) -> List[Dict[str, Any]]:
                 f"Papers:\n{paper_list}\n\n"
                 f"Step {i}:\n"
                 f"Claim: {step.get('claim','')}\n\n"
-                f"Evidence: source={ev.get('source')} page={ev.get('page')} type={ev.get('type')}\n"
-                f"Evidence snippet: {ev.get('snippet_or_summary','')}\n\n"
+                f"Sources:\n{sources_block}\n\n"
                 f"Conditions/context: {json.dumps(cond, ensure_ascii=False)}\n\n"
                 "Explain the inference and propose the next question."
             )

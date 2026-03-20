@@ -12,11 +12,14 @@ from ..config import settings
 
 @dataclass
 class Neo4jStore:
-    uri: str = settings.neo4j_uri
-    user: str = settings.neo4j_user
-    password: str = settings.neo4j_password
+    uri: str | None = None
+    user: str | None = None
+    password: str | None = None
 
     def __post_init__(self) -> None:
+        self.uri = self.uri if self.uri is not None else settings.neo4j_uri
+        self.user = self.user if self.user is not None else settings.neo4j_user
+        self.password = self.password if self.password is not None else settings.neo4j_password
         if GraphDatabase is None:
             raise RuntimeError(
                 "neo4j python driver is not installed. Install optional dependencies: pip install -e '.[rag]'"

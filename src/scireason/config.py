@@ -7,32 +7,43 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # ===== LLM =====
-    # Default: `auto` for classroom robustness.
-    # auto -> try local Ollama (if reachable) -> g4f (if installed) -> LiteLLM providers -> mock (offline)
     llm_provider: str = "auto"  # auto|mock|ollama|g4f|openai|anthropic|...
     llm_model: str = "auto"
     ollama_base_url: str = "http://localhost:11434"
-
-    # g4f fine-tuning (optional)
     g4f_providers: str | None = None
     g4f_api_key: str | None = None
+    task2_default_g4f_model: str = "r1-1776"
+    task2_default_local_vlm_model: str = "Qwen/Qwen3-VL-8B-Instruct"
 
     # ===== Embeddings =====
     embed_provider: str = "hash"  # hash|sentence-transformers|openai|ollama|...
     embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     hash_embed_dim: int = 384
 
-    # ===== Infra (optional services) =====
+    # ===== OCR / parsing =====
+    ocr_backend: str = "auto"  # auto|paddleocr|grobid|pymupdf
+    paddleocr_lang: str | None = None
+
+    # ===== Infra =====
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "please_change_me"
 
+    memgraph_uri: str = "bolt://localhost:7688"
+    memgraph_user: str = ""
+    memgraph_password: str = ""
+    graph_backend: str = "dual"  # dual|neo4j|memgraph|none
+
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
+    qdrant_dense_vector_name: str = "dense"
+    qdrant_sparse_vector_name: str = "sparse"
+    qdrant_sparse_dim: int = 2048
+    qdrant_retrieval_mode: str = "hybrid"  # hybrid|dense
 
     grobid_url: str = "http://localhost:8070"
 
-    # ===== HTTP Client (cache + rate limiting) =====
+    # ===== HTTP Client =====
     http_cache_dir: str = ".cache/http"
     http_cache_ttl_seconds: int = 7 * 24 * 3600
     http_timeout_seconds: int = 30
@@ -40,82 +51,79 @@ class Settings(BaseSettings):
     # ===== External APIs =====
     contact_email: str | None = None
     user_agent: str | None = None
-
-    # Semantic Scholar
     s2_api_key: str | None = None
-
-    # NCBI / PubMed
     ncbi_api_key: str | None = None
     ncbi_tool: str = "top-papers-graph"
     ncbi_email: str | None = None
-
-    # Crossref / OpenAlex
     crossref_mailto: str | None = None
     openalex_mailto: str | None = None
     openalex_api_key: str | None = None
 
-    # ===== Demo store (retrieval few-shot) =====
+    # ===== Demo store =====
     demo_enabled: bool = True
     demo_schema_version: str = "1.0"
-    demo_quality: str = "gold"  # gold|silver
+    demo_quality: str = "gold"
     demo_top_k_triplets: int = 3
     demo_top_k_hypothesis: int = 2
     demo_max_chars_total: int = 3500
     demo_collection_triplets: str = "demos_temporal_triplets"
     demo_collection_hypothesis: str = "demos_hypothesis_test"
 
-    # ===== Multimodal (VL + MM embeddings) =====
-    vlm_backend: str = "none"  # none|qwen2_vl|llava|phi3_vision
-    vlm_model_id: str = "Qwen/Qwen2-VL-7B-Instruct"
+    # ===== Multimodal =====
+    vlm_backend: str = "none"  # none|qwen2_vl|llava|phi3_vision|g4f
+    vlm_model_id: str = "Qwen/Qwen3-VL-8B-Instruct"
+    vlm_max_new_tokens: int = 512
+    vlm_structured_output: bool = True
     mm_embed_backend: str = "none"  # none|open_clip
     open_clip_model: str = "ViT-B-32"
     open_clip_pretrained: str = "laion2b_s34b_b79k"
     pdf_render_dpi: int = 150
 
     # ===== Temporal GraphRAG =====
-    temporal_default_granularity: str = "year"  # year|month|day
+    temporal_default_granularity: str = "year"
 
     # ===== Domain =====
     domain_id: str = "science"
     domain_config_path: str | None = None
 
-    # ===== Agentic hypothesis generation (code-writing agent) =====
+    # ===== Agentic hypothesis generation =====
     hyp_agent_enabled: bool = True
-    # internal|smolagents
-    # - internal: lightweight built-in code agent (works fully offline with --llm-provider mock)
-    # - smolagents: Hugging Face smolagents CodeAgent (optional dependency)
     hyp_agent_backend: str = "internal"
     hyp_agent_max_steps: int = 4
     hyp_agent_timeout_seconds: int = 20
 
-    # ===== smolagents integration (optional) =====
-    # Only used when HYP_AGENT_BACKEND=smolagents.
-    #
-    # smol_model_backend:
-    # - scireason: wrap this project's LLM router (LLM_PROVIDER=auto|g4f|ollama|...) into a smolagents Model
-    # - transformers: smolagents.TransformersModel for local HF models (requires smolagents[transformers])
-    # - g4f: direct smolagents Model that calls g4f client (requires g4f)
+    # ===== smolagents =====
     smol_model_backend: str = "scireason"
     smol_model_id: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
     smol_max_new_tokens: int = 768
     smol_device_map: str | None = None
-    smol_torch_dtype: str | None = None  # e.g. float16|bfloat16
+    smol_torch_dtype: str | None = None
     smol_g4f_model: str = "auto"
-    smol_executor: str = "local"  # local|docker (docker requires Docker)
+    smol_executor: str = "local"
     smol_print_steps: bool = False
 
-    # ===== Optional GNN (PyTorch Geometric) for hypothesis discovery =====
-    # Disabled by default to keep the base installation lightweight.
-    # Enable via:
-    #   HYP_GNN_ENABLED=1
+    # ===== Temporal link prediction / TGNN =====
+    hyp_tgnn_enabled: bool = True
+    hyp_tgnn_backend: str = "auto"  # auto|heuristic|pyg
+    hyp_tgnn_recent_window_years: int = 3
+    hyp_tgnn_half_life_years: float = 2.0
+    hyp_tgnn_min_candidate_score: float = 0.05
+    hyp_tgnn_memory_dim: int = 64
+    hyp_tgnn_time_dim: int = 16
+    hyp_tgnn_epochs: int = 25
+
+    # ===== Static GNN baseline =====
     hyp_gnn_enabled: bool = False
     hyp_gnn_epochs: int = 80
     hyp_gnn_hidden_dim: int = 64
     hyp_gnn_lr: float = 0.01
-    # To keep training fast for classroom-sized runs, we restrict to an induced
-    # subgraph of the most connected terms.
     hyp_gnn_node_cap: int = 300
     hyp_gnn_seed: int = 7
+
+    # ===== Vector indexing =====
+    neo4j_vector_enabled: bool = True
+    neo4j_vector_chunk_dimensions: int = 384
+    neo4j_vector_assertion_dimensions: int = 384
 
 
 settings = Settings()

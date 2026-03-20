@@ -1,0 +1,9 @@
+teacher_model_id: Qwen/Qwen3-VL-30B-A3B-Instruct
+student_model_id: Qwen/Qwen3-VL-2B-Instruct
+trainer: sft_distill
+adapter: lora
+blend:
+  gold_weight: 1.0
+  silver_weight: 0.25
+  keep_only_high_agreement: true
+notes: Second distillation stage for a lightweight student after validating the 4B student.

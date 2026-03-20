@@ -1,25 +1,19 @@
-topic: "Effect of method X on outcome Y"
-domain: "example_domain"
-cutoff_year: 2020
-
+artifact_version: 2
+domain: science
+topic: Template reasoning trajectory
+submission_id: template-trajectory
 papers:
-  - id: "doi:10.xxxx/xxxx"
-    year: 2020
-    title: "..."
-
+  - id: doi:10.0000/example
+    title: Example paper
+    year: 2024
 steps:
-  - step_id: 1
-    claim: "..."
-    evidence:
-      type: "text|figure|table"
-      source: "doi:..."
-      page: 5
-      figure_or_table: "Figure 3"
-      snippet_or_summary: "Коротко: что показано/сказано"
+  - claim: Example grounded claim from the paper corpus.
     conditions:
-      system: "что именно изучается (организм/материал/датасет/модель)"
-      environment: "температура/настройки/версия датасета/оборудование"
-      protocol: "ключевые детали методики"
-      notes: "прочие важные допущения"
-    inference: "Почему это важно"
-    next_question: "Что проверить дальше"
+      context: Template placeholder condition.
+    sources:
+      - type: text
+        source: doi:10.0000/example
+        snippet_or_summary: Example supporting evidence snippet.
+    inference: Example inference that links the evidence to the claim.
+    next_question: What evidence should be checked next?
+edges: []
