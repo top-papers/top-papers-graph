@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,7 +18,23 @@ class PaddleOCRUnavailableError(RuntimeError):
     pass
 
 
+def configure_paddle_environment() -> None:
+    """Make PaddleOCR startup more notebook-friendly by default."""
+    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    os.environ.setdefault("PADDLE_PDX_MODEL_SOURCE", "BOS")
+
+
+
+def _have_module(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except Exception:
+        return False
+
+
+
 def paddleocr_available() -> bool:
+    configure_paddle_environment()
     try:
         import paddleocr  # noqa: F401
 
@@ -25,24 +43,54 @@ def paddleocr_available() -> bool:
         return False
 
 
+
+def _paddle_install_hint(*, paddle_present: bool, paddleocr_present: bool) -> str:
+    if not paddle_present:
+        return (
+            "PaddlePaddle runtime is not installed. Install a compatible PaddlePaddle wheel "
+            "and PaddleOCR doc parser extras, for example: "
+            "pip install -e '.[task2_notebook]' or explicitly install "
+            "paddlepaddle and 'paddleocr[doc-parser]>=3.0.0'."
+        )
+    if not paddleocr_present:
+        return (
+            "PaddleOCR is not installed. Install notebook OCR dependencies with "
+            "pip install -e '.[task2_notebook]' or explicitly install "
+            "'paddleocr[doc-parser]>=3.0.0'."
+        )
+    return (
+        "PaddleOCR is installed, but the PP-Structure document parser is unavailable. "
+        "Install/upgrade the document parsing extras with "
+        "pip install 'paddleocr[doc-parser]>=3.0.0' and make sure PaddlePaddle is installed."
+    )
+
+
 def _load_pipeline(lang: Optional[str] = None):
+    configure_paddle_environment()
+    paddle_present = _have_module("paddle")
+    paddleocr_present = _have_module("paddleocr")
+    errors: list[str] = []
+
     try:
         from paddleocr import PPStructureV3  # type: ignore
 
         pipeline = PPStructureV3(lang=lang) if lang else PPStructureV3()
         return pipeline, "PPStructureV3"
-    except Exception:
-        pass
+    except Exception as e:
+        errors.append(f"PPStructureV3: {type(e).__name__}: {e}")
 
     try:
         from paddleocr import PPStructure  # type: ignore
 
         pipeline = PPStructure(lang=lang, show_log=False) if lang else PPStructure(show_log=False)
         return pipeline, "PPStructure"
-    except Exception as e:  # pragma: no cover - import guard only
-        raise PaddleOCRUnavailableError(
-            "PaddleOCR is not installed. Install optional dependencies: pip install -e '.[ocr]'"
-        ) from e
+    except Exception as e:
+        errors.append(f"PPStructure: {type(e).__name__}: {e}")
+
+    hint = _paddle_install_hint(paddle_present=paddle_present, paddleocr_present=paddleocr_present)
+    detail = " | ".join(errors[-2:]) if errors else "no additional diagnostics"
+    raise PaddleOCRUnavailableError(f"{hint} Diagnostics: {detail}")
+
 
 
 def _safe_bbox(obj: Any) -> Optional[List[float]]:
@@ -63,6 +111,7 @@ def _safe_bbox(obj: Any) -> Optional[List[float]]:
     return None
 
 
+
 def _text_from_markdown(md: Any) -> str:
     if md is None:
         return ""
@@ -76,10 +125,10 @@ def _text_from_markdown(md: Any) -> str:
     return ""
 
 
+
 def _records_from_predict_result(result: Any, *, paper_id: str, page_index: int, source_backend: str) -> List[ChunkRecord]:
     records: List[ChunkRecord] = []
 
-    # Primary path for PP-StructureV3: markdown per page.
     markdown = getattr(result, "markdown", None)
     page_text = _text_from_markdown(markdown)
     if page_text:
@@ -95,7 +144,6 @@ def _records_from_predict_result(result: Any, *, paper_id: str, page_index: int,
             )
         )
 
-    # Best-effort access to structured layout blocks.
     items = None
     for attr in ("json", "data", "result", "res"):
         value = getattr(result, attr, None)
@@ -164,6 +212,7 @@ def _records_from_predict_result(result: Any, *, paper_id: str, page_index: int,
     return records
 
 
+
 def _fallback_pdf_records(pdf_path: Path, paper_id: str) -> List[ChunkRecord]:
     try:
         import fitz  # PyMuPDF  # type: ignore
@@ -190,6 +239,7 @@ def _fallback_pdf_records(pdf_path: Path, paper_id: str) -> List[ChunkRecord]:
     return records
 
 
+
 def extract_pdf_chunks_paddleocr(pdf_path: Path, *, paper_id: str, lang: Optional[str] = None) -> List[ChunkRecord]:
     pipeline, backend_name = _load_pipeline(lang=lang)
     try:
@@ -211,6 +261,7 @@ def extract_pdf_chunks_paddleocr(pdf_path: Path, *, paper_id: str, lang: Optiona
         console.print("[yellow]PaddleOCR returned no structured chunks; using PyMuPDF fallback.[/yellow]")
         return _fallback_pdf_records(pdf_path=pdf_path, paper_id=paper_id)
     return records
+
 
 
 def ingest_pdf_paddleocr(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, *, lang: Optional[str] = None) -> Path:
