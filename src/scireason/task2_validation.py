@@ -277,7 +277,7 @@ def build_task2_validation_bundle(
 
         if enable_reference_scout:
             try:
-                resolved = resolve_papers_from_trajectory(doc)
+                resolved = resolve_papers_from_trajectory(doc, enable_remote_lookup=enable_remote_lookup)
                 suggestions = suggest_link_candidates(
                     doc,
                     known_papers=resolved,

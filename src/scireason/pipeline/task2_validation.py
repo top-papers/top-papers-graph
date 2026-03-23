@@ -76,6 +76,173 @@ def _looks_like_url(text: str) -> bool:
     return bool(u.scheme and u.netloc)
 
 
+def _normalized_url_match_key(text: str, *, strip_pdf_suffix: bool = False) -> str:
+    raw = str(text or "").strip()
+    if not raw or not _looks_like_url(raw):
+        return ""
+    try:
+        u = urlparse(raw)
+    except Exception:
+        return ""
+    path = unquote(u.path or "").strip().rstrip("/")
+    if strip_pdf_suffix and path.lower().endswith(".pdf"):
+        path = path[:-4]
+    return f"{u.scheme.lower()}://{u.netloc.lower()}{path}"
+
+
+def _entry_identity_keys(entry: Dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    raw_id = str(entry.get("id") or "").strip()
+    title = str(entry.get("title") or "").strip()
+
+    doi = _extract_doi(raw_id)
+    if doi:
+        keys.add(f"doi:{doi.lower()}")
+
+    arxiv = _extract_arxiv(raw_id)
+    if arxiv:
+        keys.add(f"arxiv:{arxiv.lower()}")
+
+    pmcid = _extract_pmcid(raw_id)
+    if pmcid:
+        keys.add(f"pmcid:{pmcid.lower()}")
+
+    pmid = _extract_pmid(raw_id) if not _looks_like_url(raw_id) else None
+    if pmid:
+        keys.add(f"pmid:{pmid}")
+
+    if _looks_like_url(raw_id):
+        keys.add(_normalized_url_match_key(raw_id, strip_pdf_suffix=False))
+        keys.add(_normalized_url_match_key(raw_id, strip_pdf_suffix=True))
+
+    if title:
+        keys.add(f"title:{_norm_title(title)}")
+
+    return {k for k in keys if k}
+
+
+def _primary_entry_identity_key(entry: Dict[str, Any]) -> str:
+    raw_id = str(entry.get("id") or "").strip()
+    title = str(entry.get("title") or "").strip()
+
+    doi = _extract_doi(raw_id)
+    if doi:
+        return f"doi:{doi.lower()}"
+
+    arxiv = _extract_arxiv(raw_id)
+    if arxiv:
+        return f"arxiv:{arxiv.lower()}"
+
+    openalex = _extract_openalex(raw_id)
+    if openalex:
+        return f"openalex:{openalex.lower()}"
+
+    pmcid = _extract_pmcid(raw_id)
+    if pmcid:
+        return f"pmcid:{pmcid.lower()}"
+
+    pmid = _extract_pmid(raw_id) if not _looks_like_url(raw_id) else None
+    if pmid:
+        return f"pmid:{pmid}"
+
+    if _looks_like_url(raw_id):
+        key = _normalized_url_match_key(raw_id, strip_pdf_suffix=True)
+        if key:
+            return key
+
+    if title:
+        return f"title:{_norm_title(title)}"
+
+    return f"raw:{raw_id}"
+
+
+def _source_entry_to_dict(src: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    source_ref = str(src.get("source") or "").strip()
+    if not source_ref:
+        return None
+
+    title = str(src.get("title") or "").strip()
+    year = src.get("year")
+    try:
+        year = int(year) if year not in (None, "") else None
+    except Exception:
+        year = None
+
+    if not (
+        _looks_like_url(source_ref)
+        or _extract_doi(source_ref)
+        or _extract_arxiv(source_ref)
+        or _extract_openalex(source_ref)
+        or _extract_pmid(source_ref)
+        or _extract_pmcid(source_ref)
+    ):
+        return None
+
+    return {
+        "id": source_ref,
+        "title": title,
+        "year": year,
+        "_derived_from_step_source": True,
+    }
+
+
+def _iter_trajectory_entries(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(entry: Dict[str, Any]) -> None:
+        if not isinstance(entry, dict):
+            return
+        key = _primary_entry_identity_key(entry)
+        if key in seen:
+            return
+        seen.add(key)
+        entries.append(entry)
+
+    for entry in doc.get("papers", []) or []:
+        add(dict(entry))
+
+    for step in doc.get("steps", []) or []:
+        if not isinstance(step, dict):
+            continue
+        for src in step.get("sources", []) or []:
+            if not isinstance(src, dict):
+                continue
+            synthesized = _source_entry_to_dict(src)
+            if synthesized is not None:
+                add(synthesized)
+
+    return entries
+
+
+def _trajectory_acquire_hints_for_entry(doc: Dict[str, Any], entry: Dict[str, Any]) -> List[str]:
+    entry_keys = _entry_identity_keys(entry)
+    if not entry_keys:
+        return []
+
+    hints: List[str] = []
+    for step in doc.get("steps", []) or []:
+        if not isinstance(step, dict):
+            continue
+        for src in step.get("sources", []) or []:
+            if not isinstance(src, dict):
+                continue
+            source_ref = str(src.get("source") or "").strip()
+            if not source_ref:
+                continue
+
+            src_entry = _source_entry_to_dict(src) or {"id": source_ref, "title": str(src.get("title") or "").strip()}
+            source_keys = _entry_identity_keys(src_entry)
+            if entry_keys & source_keys and source_ref not in hints:
+                hints.append(source_ref)
+
+    return hints
+
+
+def _trajectory_pdf_hints_for_entry(doc: Dict[str, Any], entry: Dict[str, Any]) -> List[str]:
+    return [hint for hint in _trajectory_acquire_hints_for_entry(doc, entry) if str(hint).lower().endswith(".pdf")]
+
+
 def _extract_doi(text: str) -> Optional[str]:
     s = unquote((text or "").strip())
     m = DOI_RE.search(s)
@@ -210,13 +377,26 @@ def _fallback_paper(entry: Dict[str, Any]) -> PaperMetadata:
     else:
         canonical_id = f"manual:{_slugify(canonical_id)}"
 
+    doi = _extract_doi(raw_id)
+    pmid = _extract_pmid(raw_id) if not _looks_like_url(raw_id) else None
+    pmcid = _extract_pmcid(raw_id)
     ids = ExternalIds(
-        doi=_extract_doi(raw_id),
+        doi=doi,
         arxiv=_extract_arxiv(raw_id),
         openalex=_extract_openalex(raw_id),
-        pmid=_extract_pmid(raw_id) if not _looks_like_url(raw_id) else None,
-        pmcid=_extract_pmcid(raw_id),
+        pmid=pmid,
+        pmcid=pmcid,
     )
+
+    fallback_url: Optional[str] = None
+    if _looks_like_url(raw_id):
+        fallback_url = raw_id
+    elif doi:
+        fallback_url = f"https://doi.org/{doi}"
+    elif pmcid:
+        fallback_url = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
+    elif pmid:
+        fallback_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
 
     return PaperMetadata(
         id=canonical_id,
@@ -224,7 +404,7 @@ def _fallback_paper(entry: Dict[str, Any]) -> PaperMetadata:
         title=title,
         abstract=None,
         year=year,
-        url=raw_id if _looks_like_url(raw_id) else None,
+        url=fallback_url,
         pdf_url=None,
         ids=ids,
     )
@@ -268,7 +448,7 @@ def resolve_papers_from_trajectory(
     resolved: List[PaperMetadata] = []
     seen_ids: set[str] = set()
 
-    for entry in doc.get("papers", []) or []:
+    for entry in _iter_trajectory_entries(doc):
         if not isinstance(entry, dict):
             continue
         meta = _resolve_entry_by_exact_identifier(entry, enable_remote_lookup=enable_remote_lookup)
@@ -293,6 +473,30 @@ def resolve_papers_from_trajectory(
                 pass
         if not meta.url and _looks_like_url(str(entry.get("id") or "")):
             meta.url = str(entry.get("id") or "")
+
+        acquire_hints = _trajectory_acquire_hints_for_entry(doc, entry)
+        if acquire_hints:
+            raw_payload = dict(meta.raw or {})
+            existing_hints = raw_payload.get("acquire_hints") or []
+            if isinstance(existing_hints, (str, bytes)):
+                existing_hints = [existing_hints]
+            merged_hints: List[str] = []
+            for hint in list(existing_hints) + acquire_hints:
+                hint = str(hint or "").strip()
+                if hint and hint not in merged_hints:
+                    merged_hints.append(hint)
+            raw_payload["acquire_hints"] = merged_hints
+            meta.raw = raw_payload
+
+        if not meta.pdf_url:
+            pdf_hints = _trajectory_pdf_hints_for_entry(doc, entry)
+            if pdf_hints:
+                meta.pdf_url = pdf_hints[0]
+
+        if not meta.url and acquire_hints:
+            landing_hints = [h for h in acquire_hints if _looks_like_url(h) and not str(h).lower().endswith(".pdf")]
+            if landing_hints:
+                meta.url = landing_hints[0]
 
         if meta.id in seen_ids:
             continue
