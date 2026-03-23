@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import os
+import sys
+import types
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +27,77 @@ def configure_paddle_environment() -> None:
     os.environ.setdefault("PADDLE_PDX_MODEL_SOURCE", "BOS")
 
 
+def _install_langchain_docstore_shim() -> None:
+    """Provide a lightweight compatibility shim for older PaddleX imports.
+
+    Some recent PaddleOCR/PaddleX code paths still import
+    ``langchain.docstore.document.Document``, while current LangChain docs
+    point users to ``langchain_community.docstore`` and ``langchain_core``.
+    We expose the legacy module path at runtime so PP-StructureV3 can start
+    without forcing a downgrade of LangChain.
+    """
+    try:
+        importlib.import_module("langchain.docstore.document")
+        return
+    except Exception:
+        pass
+
+    try:
+        from langchain_core.documents import Document  # type: ignore
+    except Exception:
+        class Document:  # type: ignore[override]
+            def __init__(self, page_content: str = "", metadata: Optional[dict] = None, **kwargs):
+                self.page_content = page_content
+                self.metadata = metadata or {}
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+    root_mod = sys.modules.get("langchain")
+    if root_mod is None:
+        root_mod = types.ModuleType("langchain")
+        root_mod.__path__ = []  # type: ignore[attr-defined]
+        sys.modules["langchain"] = root_mod
+
+    docstore_pkg = sys.modules.get("langchain.docstore")
+    if docstore_pkg is None:
+        docstore_pkg = types.ModuleType("langchain.docstore")
+        docstore_pkg.__path__ = []  # type: ignore[attr-defined]
+        sys.modules["langchain.docstore"] = docstore_pkg
+        setattr(root_mod, "docstore", docstore_pkg)
+
+    document_mod = sys.modules.get("langchain.docstore.document")
+    if document_mod is None:
+        document_mod = types.ModuleType("langchain.docstore.document")
+        sys.modules["langchain.docstore.document"] = document_mod
+    setattr(document_mod, "Document", Document)
+    setattr(docstore_pkg, "document", document_mod)
+
+    try:
+        from langchain_community.docstore.base import AddableMixin, Docstore  # type: ignore
+
+        base_mod = sys.modules.get("langchain.docstore.base")
+        if base_mod is None:
+            base_mod = types.ModuleType("langchain.docstore.base")
+            sys.modules["langchain.docstore.base"] = base_mod
+        setattr(base_mod, "Docstore", Docstore)
+        setattr(base_mod, "AddableMixin", AddableMixin)
+        setattr(docstore_pkg, "base", base_mod)
+    except Exception:
+        pass
+
+    try:
+        from langchain_community.docstore.in_memory import InMemoryDocstore  # type: ignore
+
+        in_memory_mod = sys.modules.get("langchain.docstore.in_memory")
+        if in_memory_mod is None:
+            in_memory_mod = types.ModuleType("langchain.docstore.in_memory")
+            sys.modules["langchain.docstore.in_memory"] = in_memory_mod
+        setattr(in_memory_mod, "InMemoryDocstore", InMemoryDocstore)
+        setattr(docstore_pkg, "in_memory", in_memory_mod)
+    except Exception:
+        pass
+
+
 
 def _have_module(name: str) -> bool:
     try:
@@ -35,6 +109,7 @@ def _have_module(name: str) -> bool:
 
 def paddleocr_available() -> bool:
     configure_paddle_environment()
+    _install_langchain_docstore_shim()
     try:
         import paddleocr  # noqa: F401
 
@@ -61,23 +136,37 @@ def _paddle_install_hint(*, paddle_present: bool, paddleocr_present: bool) -> st
     return (
         "PaddleOCR is installed, but the PP-Structure document parser is unavailable. "
         "Install/upgrade the document parsing extras with "
-        "pip install 'paddleocr[doc-parser]>=3.0.0' and make sure PaddlePaddle is installed."
+        "pip install 'paddleocr[doc-parser]>=3.0.0', make sure PaddlePaddle is installed, "
+        "and keep the LangChain compatibility shim enabled for legacy PaddleX imports."
     )
 
 
 def _load_pipeline(lang: Optional[str] = None):
     configure_paddle_environment()
+    _install_langchain_docstore_shim()
     paddle_present = _have_module("paddle")
     paddleocr_present = _have_module("paddleocr")
     errors: list[str] = []
 
+    ppv3_cls = None
     try:
         from paddleocr import PPStructureV3  # type: ignore
 
-        pipeline = PPStructureV3(lang=lang) if lang else PPStructureV3()
-        return pipeline, "PPStructureV3"
+        ppv3_cls = PPStructureV3
     except Exception as e:
-        errors.append(f"PPStructureV3: {type(e).__name__}: {e}")
+        errors.append(f"PPStructureV3 import: {type(e).__name__}: {e}")
+
+    if ppv3_cls is not None:
+        try:
+            pipeline = ppv3_cls(lang=lang) if lang else ppv3_cls()
+            return pipeline, "PPStructureV3"
+        except Exception as e:
+            errors.append(f"PPStructureV3: {type(e).__name__}: {e}")
+            msg = str(e).lower()
+            if "reinitialization is not supported" in msg or "langchain.docstore" in msg:
+                hint = _paddle_install_hint(paddle_present=paddle_present, paddleocr_present=paddleocr_present)
+                detail = " | ".join(errors[-2:]) if errors else "no additional diagnostics"
+                raise PaddleOCRUnavailableError(f"{hint} Diagnostics: {detail}") from e
 
     try:
         from paddleocr import PPStructure  # type: ignore

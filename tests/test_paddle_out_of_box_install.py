@@ -14,4 +14,6 @@ def test_notebook_bootstraps_paddle_doc_parser_stack() -> None:
     assert 'PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK' in cell2
     assert 'ensure_paddle_stack' in cell2
     assert 'paddleocr[doc-parser]>=3.0.0' in cell2
+    assert 'langchain-community>=0.3' in cell2
     assert 'paddlepaddle==3.2.0' in cell2
+    assert 'ensure_paddle_stack()' in cell2

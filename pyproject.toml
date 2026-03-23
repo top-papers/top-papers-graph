@@ -54,6 +54,7 @@ mm = [
   "sentencepiece>=0.2",
   "qwen-vl-utils>=0.0.14",
   "g4f>=7.1.2",
+  "langchain-community>=0.3",
 ]
 
 
@@ -70,6 +71,7 @@ multimodal = [
   "sentencepiece>=0.2",
   "qwen-vl-utils>=0.0.14",
   "g4f>=7.1.2",
+  "langchain-community>=0.3",
 ]
 
 # Notebook / Colab visualization helpers
@@ -131,6 +133,7 @@ task2_notebook = [
   "jupyter_bokeh>=4.0",
   "pandas>=2.2.2,<2.4",
   "g4f>=7.1.2",
+  "langchain-community>=0.3",
 ]
 
 # Temporal parsing helpers
@@ -193,6 +196,7 @@ tgnn = [
 ocr = [
   "paddleocr[doc-parser]>=3.0.0",
   "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
+  "langchain-community>=0.3",
 ]
 
 # Convenience extra for the full document -> graph -> retrieval -> VLM stack.
@@ -212,6 +216,7 @@ fullstack = [
   "paddleocr[doc-parser]>=3.0.0",
   "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
   "g4f>=7.1.2",
+  "langchain-community>=0.3",
 ]
 
 # Neo4j as graph + vector DB, GraphRAG integration.
