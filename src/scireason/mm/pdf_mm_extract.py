@@ -5,7 +5,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..config import settings
+from rich.console import Console
+
 from .vlm import describe_image, VLMResult
+
+
+console = Console()
 
 
 @dataclass
@@ -72,13 +77,19 @@ def extract_pages(
         )
 
         if run_vlm and getattr(settings, "vlm_backend", "none") != "none":
-            res: VLMResult = describe_image(
-                image_path=img_path,
-                prompt=prompt_context or "Извлеки смысл страницы научной статьи (графики/таблицы/формулы)",
-            )
-            rec.vlm_caption = res.caption
-            rec.tables_md = res.extracted_tables_md
-            rec.equations_md = res.extracted_equations_md
+            try:
+                res: VLMResult = describe_image(
+                    image_path=img_path,
+                    prompt=prompt_context or "Извлеки смысл страницы научной статьи (графики/таблицы/формулы)",
+                )
+                rec.vlm_caption = res.caption
+                rec.tables_md = res.extracted_tables_md
+                rec.equations_md = res.extracted_equations_md
+            except Exception as e:  # pragma: no cover - belt-and-suspenders fallback
+                console.print(
+                    f"[yellow]MM page-level fallback for {img_path.name}: {type(e).__name__}: {e}. "
+                    "Продолжаю без VLM-данных для страницы.[/yellow]"
+                )
 
         pages.append(rec)
 

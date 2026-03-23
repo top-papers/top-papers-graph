@@ -46,8 +46,9 @@ class QdrantStore:
         if u == ":memory:":
             self._client = QdrantClient(":memory:")
             return
+        check_compatibility = bool(getattr(settings, "qdrant_check_compatibility", False))
         if u.startswith("http://") or u.startswith("https://"):
-            self._client = QdrantClient(url=u, api_key=self.api_key)
+            self._client = QdrantClient(url=u, api_key=self.api_key, check_compatibility=check_compatibility)
             return
         self._client = QdrantClient(path=u)
 

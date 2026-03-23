@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     qdrant_sparse_vector_name: str = "sparse"
     qdrant_sparse_dim: int = 2048
     qdrant_retrieval_mode: str = "hybrid"  # hybrid|dense
+    qdrant_check_compatibility: bool = False
 
     grobid_url: str = "http://localhost:8070"
 

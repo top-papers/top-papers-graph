@@ -2,8 +2,8 @@
 
 This repository snapshot includes:
 
-- direct notebook support via `pip install -e ".[task2_notebook]"`
-- alias extras: `.[multimodal]`, `.[notebook_viz]`, `.[notebook]`, `.[colab]`
+- direct notebook support via `pip install -e ".[task2_notebook]"` (g4f включён по умолчанию)
+- alias extras: `.[multimodal]`, `.[notebook_viz]`, `.[notebook]`, `.[colab]` (`.[multimodal]` теперь тоже включает g4f)
 - compatibility module `scireason.task2_validation` for legacy notebooks
 - CLI aliases `top-papers-graph prepare-task2-validation` and `top-papers-graph task2-bundle`
 - temporal review schema v3 (`start_date`, `end_date`, `valid_from`, `valid_to`)
@@ -16,6 +16,8 @@ Recommended entrypoint for experts:
 pip install -e ".[task2_notebook]"
 # or: pip install -e ".[temporal,multimodal,notebook_viz]"
 ```
+
+Both commands install `g4f` by default.
 
 Then open the notebook and run it top-to-bottom.
 

@@ -51,6 +51,7 @@ mm = [
   "accelerate>=0.33",
   "sentencepiece>=0.2",
   "qwen-vl-utils>=0.0.14",
+  "g4f>=7.1.2",
 ]
 
 
@@ -64,6 +65,7 @@ multimodal = [
   "accelerate>=0.33",
   "sentencepiece>=0.2",
   "qwen-vl-utils>=0.0.14",
+  "g4f>=7.1.2",
 ]
 
 # Notebook / Colab visualization helpers
@@ -122,6 +124,7 @@ task2_notebook = [
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
   "pandas>=2.2.2,<2.4",
+  "g4f>=7.1.2",
 ]
 
 # Temporal parsing helpers
@@ -142,7 +145,7 @@ mcp = [
 ]
 
 # Extra connectors / compatibility
-# g4f is intentionally OPTIONAL (it can be unstable in classroom environments).
+# Dedicated extra kept for users who want to install g4f explicitly.
 g4f = [
   "g4f>=7.1.2",
 ]
@@ -201,7 +204,7 @@ fullstack = [
   "dateparser>=1.2",
   "torch-geometric>=2.6.0",
   "paddleocr>=3.0.0",
-  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
+  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",  "g4f>=7.1.2",
 ]
 
 # Neo4j as graph + vector DB, GraphRAG integration.

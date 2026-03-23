@@ -42,8 +42,8 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev,agents]"
 ```
 
-> Если вы хотите использовать **g4f** (LLM_PROVIDER=g4f или smolagents+g4f),
-> установите также: `pip install -e ".[g4f]"`.
+> `g4f` теперь ставится автоматически вместе с `.[task2_notebook]`, `.[mm]`, `.[multimodal]` и `.[fullstack]`.
+> Отдельный extra `.[g4f]` сохранён для явной установки только g4f.
 
 ### 2) Настройка
 Скопируйте `.env.example` → `.env`.  
@@ -91,7 +91,7 @@ docker compose down -v
 
 Вы можете явно переопределить модель в команде:
 ```bash
-# g4f (если установлен: pip install -e '.[g4f]')
+# g4f (ставится по умолчанию в task2/mm/multimodal/fullstack; отдельно: pip install -e '.[g4f]')
 top-papers-graph run --query "..." --g4f-model deepseek-r1
 
 # (опционально) попробовать в первую очередь конкретные модели (если они есть в g4f/models.py)

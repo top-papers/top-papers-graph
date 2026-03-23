@@ -3,13 +3,19 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
+import importlib.util
 from pathlib import Path
 from typing import Optional, Literal
+
+from rich.console import Console
 
 from ..config import settings
 
 
-Backend = Literal["none", "qwen2_vl", "qwen3_vl", "llava", "phi3_vision", "g4f"]
+console = Console()
+
+
+Backend = Literal["auto", "none", "qwen2_vl", "qwen3_vl", "llava", "phi3_vision", "g4f"]
 
 
 @dataclass
@@ -84,12 +90,47 @@ def _load_transformers_vlm(model_id: str):
     return processor, model, "generic"
 
 
+def _has_g4f() -> bool:
+    return importlib.util.find_spec("g4f") is not None
+
+
+def _has_local_vlm_stack() -> bool:
+    return all(importlib.util.find_spec(pkg) is not None for pkg in ("torch", "transformers", "PIL"))
+
+
+def _resolve_backend(backend: Optional[Backend], model_id: Optional[str]) -> Backend:
+    requested = str(backend or getattr(settings, "vlm_backend", "none") or "none").strip().lower()
+
+    if requested == "auto":
+        if model_id and ("Qwen/Qwen3-VL" in model_id or "Qwen3-VL" in model_id):
+            return "qwen3_vl" if _has_local_vlm_stack() else ("g4f" if _has_g4f() else "none")
+        if _has_local_vlm_stack():
+            return "qwen2_vl"
+        if _has_g4f():
+            return "g4f"
+        return "none"
+
+    if requested == "g4f" and not _has_g4f():
+        if _has_local_vlm_stack():
+            console.print("[yellow]g4f не установлен; переключаю VLM на локальный Transformers backend.[/yellow]")
+            return "qwen2_vl"
+        console.print("[yellow]g4f не установлен; продолжу без VLM-captioning.[/yellow]")
+        return "none"
+
+    if requested in {"qwen2_vl", "qwen3_vl", "llava", "phi3_vision"} and not _has_local_vlm_stack():
+        if requested != "none":
+            console.print("[yellow]Локальный VLM-стек недоступен; продолжу без VLM-captioning.[/yellow]")
+        return "none"
+
+    return requested  # type: ignore[return-value]
+
+
 def _describe_image_g4f(image_path: Path, prompt: str, model_id: str) -> VLMResult:
     try:
         import base64
         from g4f.client import Client as G4FClient  # type: ignore
     except Exception as e:  # pragma: no cover
-        raise RuntimeError("Для VLM backend='g4f' нужен пакет g4f (pip install -e '.[g4f]').") from e
+        raise RuntimeError("Для VLM backend='g4f' нужен пакет g4f (pip install -U g4f[all] или pip install -e '.[g4f]').") from e
 
     client = G4FClient(api_key=getattr(settings, "g4f_api_key", None) or None)
     providers = None
@@ -230,17 +271,29 @@ def describe_image(
     model_id: Optional[str] = None,
     max_new_tokens: int = 512,
 ) -> VLMResult:
-    """Описывает изображение (страница PDF / figure / table) через VL-модель."""
-    backend = backend or settings.vlm_backend  # type: ignore[attr-defined]
-    model_id = model_id or settings.vlm_model_id  # type: ignore[attr-defined]
+    """Описывает изображение (страница PDF / figure / table) через VL-модель.
 
-    if backend == "none":
+    Никогда не роняет общий ingest из-за отсутствия опционального VLM backend.
+    """
+    effective_model_id = model_id or settings.vlm_model_id  # type: ignore[attr-defined]
+    effective_backend = _resolve_backend(backend or settings.vlm_backend, effective_model_id)  # type: ignore[attr-defined]
+
+    if effective_backend == "none":
         return VLMResult(caption="")
 
-    if backend == "g4f":
-        return _describe_image_g4f(image_path=image_path, prompt=prompt, model_id=model_id)
+    try:
+        if effective_backend == "g4f":
+            return _describe_image_g4f(image_path=image_path, prompt=prompt, model_id=effective_model_id)
 
-    if backend == "qwen2_vl":
-        return _describe_image_qwen(image_path=image_path, prompt=prompt, model_id=model_id, max_new_tokens=max_new_tokens)
-
-    return _describe_image_qwen(image_path=image_path, prompt=prompt, model_id=model_id, max_new_tokens=max_new_tokens)
+        return _describe_image_qwen(
+            image_path=image_path,
+            prompt=prompt,
+            model_id=effective_model_id,
+            max_new_tokens=max_new_tokens,
+        )
+    except Exception as e:
+        console.print(
+            f"[yellow]VLM warning for {image_path.name} ({effective_backend}): {type(e).__name__}: {e}. "
+            "Продолжаю без caption/tables/equations для этой страницы.[/yellow]"
+        )
+        return VLMResult(caption="")
