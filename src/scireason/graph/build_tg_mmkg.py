@@ -47,6 +47,15 @@ def _load_chunk_records(paper_dir: Path, paper_id: str) -> List[ChunkRecord]:
     return records
 
 
+def _paper_context_payload(meta: Dict[str, Any]) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    for key in ('country_id', 'country_label', 'city_id', 'city_label', 'science_branch_ids', 'science_branch_labels'):
+        val = meta.get(key)
+        if val not in (None, '', [], {}):
+            payload[key] = val
+    return payload
+
+
 def _payload_from_chunk(rec: ChunkRecord, idx: int) -> Dict[str, Any]:
     payload = rec.to_payload()
     payload['chunk_index'] = idx
@@ -83,7 +92,8 @@ def build_temporal_and_multimodal(
     vectors = embed(chunks)
     vector_size = len(vectors[0]) if vectors else int(getattr(settings, 'hash_embed_dim', 384) or 384)
     qd = QdrantStore()
-    payloads = [_payload_from_chunk(rec, i) for i, rec in enumerate(chunk_records)]
+    paper_context = _paper_context_payload(meta)
+    payloads = [(_payload_from_chunk(rec, i) | dict(paper_context)) for i, rec in enumerate(chunk_records)]
 
     retrieval_mode = str(getattr(settings, 'qdrant_retrieval_mode', 'hybrid') or 'hybrid').lower()
     if retrieval_mode == 'hybrid':
@@ -126,6 +136,7 @@ def build_temporal_and_multimodal(
                 'year': paper_year,
                 'source': meta.get('source', ''),
                 'url': meta.get('url', ''),
+                **paper_context,
             }
         )
 
@@ -139,6 +150,7 @@ def build_temporal_and_multimodal(
                 'year': paper_year,
                 'source': meta.get('source', ''),
                 'url': meta.get('url', ''),
+                **paper_context,
             }
         )
 

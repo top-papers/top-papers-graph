@@ -1,0 +1,17 @@
+{
+  "id": "demo:pulse-protocol-2023",
+  "title": "Pulse charging increases cycle life during high-rate charging",
+  "year": 2023,
+  "source": "live_smoke",
+  "url": "",
+  "country_id": "Q30",
+  "country_label": "United States of America",
+  "city_id": "Q60",
+  "city_label": "New York City",
+  "science_branch_ids": [
+    "Q11410"
+  ],
+  "science_branch_labels": [
+    "engineering"
+  ]
+}

@@ -75,6 +75,29 @@ def maybe_image_path(source: Dict[str, Any], base_dir: Path) -> Optional[str]:
     return None
 
 
+
+
+def edge_annotations_for_step(doc: Dict[str, Any], step_id: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for edge in ensure_list(doc.get('edges')):
+        if isinstance(edge, dict):
+            try:
+                a = int(edge.get('from_step_id'))
+                b = int(edge.get('to_step_id'))
+            except Exception:
+                continue
+            if a == step_id or b == step_id:
+                out.append(dict(edge))
+        elif isinstance(edge, (list, tuple)) and len(edge) == 2:
+            try:
+                a = int(edge[0]); b = int(edge[1])
+            except Exception:
+                continue
+            if a == step_id or b == step_id:
+                out.append({'from_step_id': a, 'to_step_id': b, 'predicate': 'leads_to', 'directionality': 'directed'})
+    return out
+
+
 def build_messages(system: str, user: str, assistant: str) -> List[Dict[str, str]]:
     return [
         {'role': 'system', 'content': system},
@@ -151,6 +174,7 @@ def trajectory_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
         rec = {
             'id': f'trajectory:{submission_id}:{idx}',
             'task_family': 'trajectory_reasoning',
+            'artifact_version': doc.get('artifact_version'),
             'domain': domain,
             'topic': topic,
             'expert_key': expert_key,
@@ -160,6 +184,11 @@ def trajectory_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
                 user,
                 assistant,
             ),
+            'step_context': {
+                'conditions': step.get('conditions') or {},
+                'discovery_context': step.get('discovery_context') or {},
+            },
+            'edge_annotations': edge_annotations_for_step(doc, int(step.get('step_id', idx))),
             'metadata': {
                 'submission_id': submission_id,
                 'step_id': step.get('step_id', idx),

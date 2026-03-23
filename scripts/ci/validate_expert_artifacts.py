@@ -127,7 +127,7 @@ def _resolve_domain_config(domain_value: str) -> Dict[str, Any]:
 def _required_condition_keys(domain: str) -> List[str]:
     """Domain-specific condition requirements for trajectories.
 
-    For artifact v2 the trajectory stores `domain` as a Wikidata QID (e.g. Q336).
+    For artifact v2/v3 the trajectory may store `domain` as a Wikidata QID (e.g. Q336).
     We map it back to configs/domains/*.yaml via `wikidata_qid`.
     """
     cfg = _resolve_domain_config(domain)
@@ -136,6 +136,101 @@ def _required_condition_keys(domain: str) -> List[str]:
     if isinstance(req, list):
         return [str(x) for x in req]
     return []
+
+
+def _is_qid_like(value: Any) -> bool:
+    return bool(re.fullmatch(r"Q\d+", str(value or "").strip(), flags=re.I))
+
+
+def _is_qid_dict(value: Any) -> bool:
+    return isinstance(value, dict) and _is_qid_like(value.get("id"))
+
+
+def _validate_qid_dict(value: Any, prefix: str) -> List[str]:
+    errs: List[str] = []
+    if value in (None, "", {}):
+        return errs
+    if not isinstance(value, dict):
+        errs.append(f"{prefix}: must be object with fields id/label")
+        return errs
+    if not _is_qid_like(value.get("id")):
+        errs.append(f"{prefix}: id must be a Wikidata QID")
+    return errs
+
+
+def _validate_step_discovery_context(step: Dict[str, Any], step_idx: int) -> List[str]:
+    errs: List[str] = []
+    ctx = step.get("discovery_context")
+    if ctx in (None, "", {}):
+        return errs
+    if not isinstance(ctx, dict):
+        return [f"step {step_idx}: discovery_context must be an object"]
+    geography = ctx.get("geography") or {}
+    if geography not in (None, "") and not isinstance(geography, dict):
+        errs.append(f"step {step_idx}: discovery_context.geography must be an object")
+        geography = {}
+    country = geography.get("country") if isinstance(geography, dict) else None
+    city = geography.get("city") if isinstance(geography, dict) else None
+    errs.extend(_validate_qid_dict(country, f"step {step_idx}: geography.country"))
+    errs.extend(_validate_qid_dict(city, f"step {step_idx}: geography.city"))
+    if city not in (None, "", {}) and country in (None, "", {}):
+        errs.append(f"step {step_idx}: geography.country is required when geography.city is set")
+    branches = ctx.get("science_branches") or []
+    if branches not in (None, "") and not isinstance(branches, list):
+        errs.append(f"step {step_idx}: discovery_context.science_branches must be a list")
+        branches = []
+    for b_idx, branch in enumerate(branches, start=1):
+        errs.extend(_validate_qid_dict(branch, f"step {step_idx}: science_branches[{b_idx}]"))
+    simultaneous = ctx.get("simultaneous_discovery")
+    if simultaneous not in (None, True, False):
+        errs.append(f"step {step_idx}: simultaneous_discovery must be boolean")
+    return errs
+
+
+def _validate_edges_v3(edges: Any, n_steps: int) -> List[str]:
+    errs: List[str] = []
+    if edges is None or edges == []:
+        return errs
+    if not isinstance(edges, list):
+        return ["edges must be a list"]
+    seen: set[tuple[int, int, str, str]] = set()
+    for k, e in enumerate(edges, start=1):
+        if isinstance(e, (list, tuple)) and len(e) == 2:
+            try:
+                a_i = int(e[0]); b_i = int(e[1])
+            except Exception:
+                errs.append(f"edge {k}: from/to must be integers")
+                continue
+            predicate = "leads_to"
+            directionality = "directed"
+        elif isinstance(e, dict):
+            try:
+                a_i = int(e.get("from_step_id"))
+                b_i = int(e.get("to_step_id"))
+            except Exception:
+                errs.append(f"edge {k}: from_step_id/to_step_id must be integers")
+                continue
+            predicate = str(e.get("predicate") or "").strip() or "leads_to"
+            directionality = str(e.get("directionality") or "directed").strip().lower()
+            if directionality not in {"directed", "bidirectional", "simultaneous"}:
+                errs.append(f"edge {k}: invalid directionality '{directionality}'")
+            if e.get("simultaneous_discovery") not in (None, True, False):
+                errs.append(f"edge {k}: simultaneous_discovery must be boolean")
+        else:
+            errs.append(f"edge {k}: must be [from, to] or object with from_step_id/to_step_id")
+            continue
+        if a_i == b_i:
+            errs.append(f"edge {k}: self-loop {a_i}->{b_i} is not allowed")
+            continue
+        if not (1 <= a_i <= n_steps) or not (1 <= b_i <= n_steps):
+            errs.append(f"edge {k}: out of range (steps are 1..{n_steps})")
+            continue
+        key = (a_i, b_i, predicate, directionality)
+        if key in seen:
+            errs.append(f"edge {k}: duplicate edge {a_i}->{b_i} ({predicate}, {directionality})")
+        else:
+            seen.add(key)
+    return errs
 
 
 
@@ -180,6 +275,9 @@ def validate_trajectory(path: Path) -> List[str]:
         if _is_empty(step.get("next_question")):
             errs.append(f"step {i}: missing next_question")
 
+        if artifact_version >= 3:
+            errs.extend(_validate_step_discovery_context(step, i))
+
         if artifact_version >= 2:
             # v2: sources[]
             sources = step.get("sources", [])
@@ -215,37 +313,9 @@ def validate_trajectory(path: Path) -> List[str]:
                 if etype in {"figure", "table"} and _is_empty(evidence.get("figure_or_table")):
                     errs.append(f"step {i}: evidence.figure_or_table required for {etype}")
 
-    # edges (optional): directed graph as ordered pairs [from, to]
+    # edges (optional): legacy [from, to] pairs or rich v3 edge objects
     edges = doc.get("edges", [])
-    if edges is None:
-        edges = []
-    if not _is_empty(edges):
-        if not isinstance(edges, list):
-            errs.append("edges must be a list of [from,to]")
-        else:
-            seen: set[tuple[int, int]] = set()
-            for k, e in enumerate(edges, start=1):
-                if not isinstance(e, (list, tuple)) or len(e) != 2:
-                    errs.append(f"edge {k}: must be [from, to]")
-                    continue
-                a, b = e[0], e[1]
-                try:
-                    a_i = int(a)
-                    b_i = int(b)
-                except Exception:
-                    errs.append(f"edge {k}: from/to must be integers")
-                    continue
-                if a_i == b_i:
-                    errs.append(f"edge {k}: self-loop {a_i}->{b_i} is not allowed")
-                    continue
-                if not (1 <= a_i <= n_steps) or not (1 <= b_i <= n_steps):
-                    errs.append(f"edge {k}: out of range (steps are 1..{n_steps})")
-                    continue
-                t = (a_i, b_i)
-                if t in seen:
-                    errs.append(f"edge {k}: duplicate edge {a_i}->{b_i}")
-                else:
-                    seen.add(t)
+    errs.extend(_validate_edges_v3(edges, n_steps))
 
     return errs
 

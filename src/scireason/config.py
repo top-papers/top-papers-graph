@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     g4f_providers: str | None = None
     g4f_api_key: str | None = None
     task2_default_g4f_model: str = "r1-1776"
-    task2_default_local_vlm_model: str = "Qwen/Qwen3-VL-8B-Instruct"
+    task2_default_local_vlm_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"
 
     # ===== Embeddings =====
     embed_provider: str = "hash"  # hash|sentence-transformers|openai|ollama|...
@@ -71,7 +71,7 @@ class Settings(BaseSettings):
 
     # ===== Multimodal =====
     vlm_backend: str = "none"  # none|qwen2_vl|llava|phi3_vision|g4f
-    vlm_model_id: str = "Qwen/Qwen3-VL-8B-Instruct"
+    vlm_model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct"
     vlm_max_new_tokens: int = 512
     vlm_structured_output: bool = True
     mm_embed_backend: str = "none"  # none|open_clip

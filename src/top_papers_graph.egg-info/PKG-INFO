@@ -1,0 +1,390 @@
+Metadata-Version: 2.4
+Name: top-papers-graph
+Version: 0.4.3
+Summary: top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)
+Author: top-papers-graph contributors
+License: MIT
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.6
+Requires-Dist: pydantic-settings>=2.2
+Requires-Dist: typer>=0.12
+Requires-Dist: rich>=13.7
+Requires-Dist: httpx>=0.27
+Requires-Dist: tenacity>=8.2
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: networkx>=3.3
+Requires-Dist: numpy<2,>=1.26
+Requires-Dist: pypdf>=4.0
+Requires-Dist: neo4j>=5.20
+Requires-Dist: qdrant-client>=1.9
+Requires-Dist: litellm>=1.0
+Requires-Dist: langchain-core>=0.2
+Requires-Dist: langgraph>=0.1
+Provides-Extra: embeddings
+Requires-Dist: sentence-transformers>=2.7; extra == "embeddings"
+Provides-Extra: mm
+Requires-Dist: pymupdf>=1.24; extra == "mm"
+Requires-Dist: pillow>=10.0; extra == "mm"
+Requires-Dist: open_clip_torch>=2.24; extra == "mm"
+Requires-Dist: torch>=2.2; extra == "mm"
+Requires-Dist: transformers>=4.57.0; extra == "mm"
+Requires-Dist: accelerate>=0.33; extra == "mm"
+Requires-Dist: sentencepiece>=0.2; extra == "mm"
+Requires-Dist: qwen-vl-utils>=0.0.14; extra == "mm"
+Provides-Extra: multimodal
+Requires-Dist: pymupdf>=1.24; extra == "multimodal"
+Requires-Dist: pillow>=10.0; extra == "multimodal"
+Requires-Dist: open_clip_torch>=2.24; extra == "multimodal"
+Requires-Dist: torch>=2.2; extra == "multimodal"
+Requires-Dist: transformers>=4.57.0; extra == "multimodal"
+Requires-Dist: accelerate>=0.33; extra == "multimodal"
+Requires-Dist: sentencepiece>=0.2; extra == "multimodal"
+Requires-Dist: qwen-vl-utils>=0.0.14; extra == "multimodal"
+Provides-Extra: notebook-viz
+Requires-Dist: ipywidgets>=8.1; extra == "notebook-viz"
+Requires-Dist: panel>=1.4; extra == "notebook-viz"
+Requires-Dist: hvplot>=0.10; extra == "notebook-viz"
+Requires-Dist: holoviews>=1.19; extra == "notebook-viz"
+Requires-Dist: bokeh>=3.4; extra == "notebook-viz"
+Requires-Dist: pyvis>=0.3.2; extra == "notebook-viz"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "notebook-viz"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "notebook-viz"
+Provides-Extra: notebook
+Requires-Dist: ipywidgets>=8.1; extra == "notebook"
+Requires-Dist: panel>=1.4; extra == "notebook"
+Requires-Dist: hvplot>=0.10; extra == "notebook"
+Requires-Dist: holoviews>=1.19; extra == "notebook"
+Requires-Dist: bokeh>=3.4; extra == "notebook"
+Requires-Dist: pyvis>=0.3.2; extra == "notebook"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "notebook"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "notebook"
+Provides-Extra: colab
+Requires-Dist: ipywidgets>=8.1; extra == "colab"
+Requires-Dist: panel>=1.4; extra == "colab"
+Requires-Dist: hvplot>=0.10; extra == "colab"
+Requires-Dist: holoviews>=1.19; extra == "colab"
+Requires-Dist: bokeh>=3.4; extra == "colab"
+Requires-Dist: pyvis>=0.3.2; extra == "colab"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "colab"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "colab"
+Provides-Extra: task2-notebook
+Requires-Dist: python-dateutil>=2.9; extra == "task2-notebook"
+Requires-Dist: dateparser>=1.2; extra == "task2-notebook"
+Requires-Dist: pymupdf>=1.24; extra == "task2-notebook"
+Requires-Dist: pillow>=10.0; extra == "task2-notebook"
+Requires-Dist: open_clip_torch>=2.24; extra == "task2-notebook"
+Requires-Dist: torch>=2.2; extra == "task2-notebook"
+Requires-Dist: transformers>=4.57.0; extra == "task2-notebook"
+Requires-Dist: accelerate>=0.33; extra == "task2-notebook"
+Requires-Dist: sentencepiece>=0.2; extra == "task2-notebook"
+Requires-Dist: qwen-vl-utils>=0.0.14; extra == "task2-notebook"
+Requires-Dist: ipywidgets>=8.1; extra == "task2-notebook"
+Requires-Dist: panel>=1.4; extra == "task2-notebook"
+Requires-Dist: hvplot>=0.10; extra == "task2-notebook"
+Requires-Dist: holoviews>=1.19; extra == "task2-notebook"
+Requires-Dist: bokeh>=3.4; extra == "task2-notebook"
+Requires-Dist: pyvis>=0.3.2; extra == "task2-notebook"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "task2-notebook"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "task2-notebook"
+Provides-Extra: temporal
+Requires-Dist: python-dateutil>=2.9; extra == "temporal"
+Requires-Dist: dateparser>=1.2; extra == "temporal"
+Provides-Extra: api
+Requires-Dist: fastapi>=0.110; extra == "api"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "api"
+Provides-Extra: mcp
+Requires-Dist: mcp>=1.0.0; extra == "mcp"
+Provides-Extra: g4f
+Requires-Dist: g4f>=7.1.2; extra == "g4f"
+Provides-Extra: agents
+Requires-Dist: smolagents>=1.0.0; extra == "agents"
+Provides-Extra: agents-hf
+Requires-Dist: smolagents[transformers]>=1.0.0; extra == "agents-hf"
+Provides-Extra: gnn
+Requires-Dist: torch>=2.2; extra == "gnn"
+Requires-Dist: torch-geometric>=2.6.0; extra == "gnn"
+Provides-Extra: gnn-ext
+Requires-Dist: pyg-lib>=0.4.0; extra == "gnn-ext"
+Requires-Dist: torch-scatter>=2.1.2; extra == "gnn-ext"
+Requires-Dist: torch-sparse>=0.6.18; extra == "gnn-ext"
+Requires-Dist: torch-cluster>=1.6.3; extra == "gnn-ext"
+Requires-Dist: torch-spline-conv>=1.2.2; extra == "gnn-ext"
+Provides-Extra: tgnn
+Requires-Dist: torch>=2.2; extra == "tgnn"
+Requires-Dist: torch-geometric>=2.6.0; extra == "tgnn"
+Provides-Extra: ocr
+Requires-Dist: paddleocr>=3.0.0; extra == "ocr"
+Requires-Dist: paddlepaddle>=3.0.0; platform_system != "Darwin" and extra == "ocr"
+Provides-Extra: fullstack
+Requires-Dist: sentence-transformers>=2.7; extra == "fullstack"
+Requires-Dist: pymupdf>=1.24; extra == "fullstack"
+Requires-Dist: pillow>=10.0; extra == "fullstack"
+Requires-Dist: open_clip_torch>=2.24; extra == "fullstack"
+Requires-Dist: torch>=2.2; extra == "fullstack"
+Requires-Dist: transformers>=4.57.0; extra == "fullstack"
+Requires-Dist: accelerate>=0.33; extra == "fullstack"
+Requires-Dist: sentencepiece>=0.2; extra == "fullstack"
+Requires-Dist: qwen-vl-utils>=0.0.14; extra == "fullstack"
+Requires-Dist: python-dateutil>=2.9; extra == "fullstack"
+Requires-Dist: dateparser>=1.2; extra == "fullstack"
+Requires-Dist: torch-geometric>=2.6.0; extra == "fullstack"
+Requires-Dist: paddleocr>=3.0.0; extra == "fullstack"
+Requires-Dist: paddlepaddle>=3.0.0; platform_system != "Darwin" and extra == "fullstack"
+Provides-Extra: neo4j-rag
+Requires-Dist: neo4j-graphrag>=1.8.0; extra == "neo4j-rag"
+Provides-Extra: rdf-validation
+Requires-Dist: rdflib>=7.0; extra == "rdf-validation"
+Requires-Dist: pyshacl>=0.30.0; extra == "rdf-validation"
+Provides-Extra: battery
+Requires-Dist: pybamm>=25.12.0; extra == "battery"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "battery"
+Requires-Dist: matplotlib>=3.8; extra == "battery"
+Provides-Extra: all
+Requires-Dist: sentence-transformers>=2.7; extra == "all"
+Requires-Dist: pymupdf>=1.24; extra == "all"
+Requires-Dist: pillow>=10.0; extra == "all"
+Requires-Dist: open_clip_torch>=2.24; extra == "all"
+Requires-Dist: torch>=2.2; extra == "all"
+Requires-Dist: transformers>=4.57.0; extra == "all"
+Requires-Dist: accelerate>=0.33; extra == "all"
+Requires-Dist: sentencepiece>=0.2; extra == "all"
+Requires-Dist: qwen-vl-utils>=0.0.14; extra == "all"
+Requires-Dist: python-dateutil>=2.9; extra == "all"
+Requires-Dist: dateparser>=1.2; extra == "all"
+Requires-Dist: fastapi>=0.110; extra == "all"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "all"
+Requires-Dist: mcp>=1.0.0; extra == "all"
+Requires-Dist: g4f>=7.1.2; extra == "all"
+Requires-Dist: smolagents>=1.0.0; extra == "all"
+Requires-Dist: smolagents[transformers]>=1.0.0; extra == "all"
+Requires-Dist: torch-geometric>=2.6.0; extra == "all"
+Requires-Dist: neo4j-graphrag>=1.8.0; extra == "all"
+Requires-Dist: rdflib>=7.0; extra == "all"
+Requires-Dist: pyshacl>=0.30.0; extra == "all"
+Requires-Dist: pybamm>=25.12.0; extra == "all"
+Requires-Dist: matplotlib>=3.8; extra == "all"
+Requires-Dist: ipywidgets>=8.1; extra == "all"
+Requires-Dist: panel>=1.4; extra == "all"
+Requires-Dist: hvplot>=0.10; extra == "all"
+Requires-Dist: holoviews>=1.19; extra == "all"
+Requires-Dist: bokeh>=3.4; extra == "all"
+Requires-Dist: pyvis>=0.3.2; extra == "all"
+Requires-Dist: jupyter_bokeh>=4.0; extra == "all"
+Requires-Dist: pandas<2.4,>=2.2.2; extra == "all"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-xdist>=3.5; extra == "dev"
+Requires-Dist: ruff>=0.5; extra == "dev"
+Requires-Dist: mypy>=1.10; extra == "dev"
+Requires-Dist: types-requests; extra == "dev"
+Requires-Dist: pre-commit>=3.7; extra == "dev"
+Requires-Dist: streamlit>=1.36; extra == "dev"
+Requires-Dist: ragas>=0.1.15; extra == "dev"
+Requires-Dist: deepeval>=3.0; extra == "dev"
+
+# top-papers-graph — генерация научных гипотез из графа знаний, который создается на основе научных публикаций и подходит для *любой* тематики
+
+Проект собирает публикации из нескольких крупных источников, нормализует метаданные в единый формат и помогает строить **проверяемый** граф знаний (KG) и evidence‑based синтез по вашей теме.
+
+> CLI: `top-papers-graph ...` (алиас `scireason ...` сохранён для обратной совместимости)
+
+## Возможности
+- **Источники публикаций**: arXiv, PubMed (NCBI), Europe PMC, bioRxiv/medRxiv, Crossref, OpenAlex, Semantic Scholar.
+- **Единая схема метаданных**: `PaperMetadata` (Pydantic) + нормализация ответов всех источников.
+- **Resolver идентификаторов**: DOI ⇄ PMID ⇄ arXivID ⇄ OpenAlexID.
+- **Кеширование и rate-limit** на уровне HTTP‑клиента (особенно полезно для NCBI/Crossref).
+- **CLI**, **FastAPI** (наружный API) и **MCP‑сервер** (интеграции с AI‑сервисами).
+
+## Быстрый старт
+
+### Student quickstart (3 команды)
+
+**Linux/macOS:**
+```bash
+./scripts/bootstrap.sh
+top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+```
+
+**Windows (PowerShell):**
+```powershell
+.\scripts\bootstrap.ps1
+top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+```
+
+> Здесь используется **smolagents CodeAgent** (агент пишет и исполняет Python‑код) — это основной режим курса.
+
+### 1) Установка
+```bash
+# Вариант 1 (рекомендуется для курса): одна команда
+./scripts/bootstrap.sh  # Windows: .\scripts\bootstrap.ps1
+
+# Вариант 2 (ручной):
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[dev,agents]"
+```
+
+> Если вы хотите использовать **g4f** (LLM_PROVIDER=g4f или smolagents+g4f),
+> установите также: `pip install -e ".[g4f]"`.
+
+### 2) Настройка
+Скопируйте `.env.example` → `.env`.  
+По умолчанию используется домен `science` (`configs/domains/science.yaml`).
+
+### 3) Полностью автоматический пайплайн (рекомендуется)
+Одна команда:
+```bash
+top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
+```
+
+#### Оффлайн демонстрация (без интернета и сервисов)
+```bash
+top-papers-graph demo-run --edge-mode cooccurrence
+top-papers-graph smoke-all
+```
+
+#### Запуск в Docker (из коробки)
+
+В репозитории есть Dockerfile для CLI/API и `docker-compose.yml`, который поднимает **всю инфраструктуру**, используемую проектом:
+**Neo4j** (графовая БД), **Qdrant** (векторное хранилище для demo‑few‑shot) и **GROBID** (парсинг PDF).
+
+```bash
+# 1) Собрать образ и поднять стек
+docker compose up -d --build
+
+# 2) Запустить пайплайн внутри контейнера
+docker compose exec app top-papers-graph run \
+  --query "graph neural network survey" \
+  --sources all \
+  --top-papers 20
+
+# 3) Остановить и удалить тома (опционально)
+docker compose down -v
+```
+
+Подсказки:
+- GROBID доступен на `http://localhost:8070` (проверка: `/api/isalive`). Если он недоступен, пайплайн автоматически
+  переключится на локальный PDF‑парсер.
+- Neo4j Browser: `http://localhost:7474`.
+- Qdrant: `http://localhost:6333`.
+- Для локального Ollama на хосте используйте `OLLAMA_BASE_URL` (по умолчанию `http://host.docker.internal:11434`).
+
+По умолчанию LLM = **auto/auto**: проект пробует локальный Ollama (если доступен), иначе g4f (если установлен), иначе включает оффлайн `mock`.
+
+Вы можете явно переопределить модель в команде:
+```bash
+# g4f (если установлен: pip install -e '.[g4f]')
+top-papers-graph run --query "..." --g4f-model deepseek-r1
+
+# (опционально) попробовать в первую очередь конкретные модели (если они есть в g4f/models.py)
+G4F_MODEL_PREFER="gpt-4o-mini,deepseek-r1" top-papers-graph run --query "..."
+
+# (опционально) ограничить число попыток автоподбора (по умолчанию 25)
+G4F_AUTO_MAX_MODELS=10 top-papers-graph run --query "..."
+
+# (опционально) форсировать список провайдеров g4f (RetryProvider)
+G4F_PROVIDERS="Phind,FreeChatgpt,Liaobots" top-papers-graph run --query "..."
+
+# локальная модель через Ollama
+top-papers-graph run --query "..." --local-model llama3.2
+
+# универсальный формат (provider:model)
+top-papers-graph run --query "..." --llm g4f:gpt-4o-mini
+top-papers-graph run --query "..." --llm ollama:llama3.2
+```
+
+Артефакты появятся в `runs/<timestamp>_<slug>/`:
+- `temporal_kg.json` — темпоральный граф знаний (термы/связи/временные счётчики)
+- `hypotheses.json` + `hypotheses.md` — ранжированный набор проверяемых гипотез
+- `review_queue/` — шаблоны для экспертной разметки (hypothesis_reviews)
+
+> Пайплайн старается скачать PDF (если доступен OA) и распарсить его через GROBID.
+> Если GROBID не запущен, будет fallback‑парсинг PDF через `pypdf` (по умолчанию).
+> Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` или `pip install -e ".[multimodal]"` (алиас для того же стека).
+> Если PDF недоступен, пайплайн продолжит работу по абстрактам.
+
+> **Опционально (GNN mode):** для “более взрослого” режима генерации гипотез через
+> PyTorch Geometric (GNN link prediction) установите `pip install -e ".[gnn]"` и включите
+> `HYP_GNN_ENABLED=1`. Подробности: `docs/gnn.md`.
+
+> **Опционально (smolagents):** чтобы использовать Hugging Face **smolagents CodeAgent** вместо
+> встроенного агента, установите `pip install -e ".[agents]"` и включите
+> `HYP_AGENT_BACKEND=smolagents`.
+> Для **локальных HF моделей**: `pip install -e ".[agents_hf]"`.
+> Подробности: `docs/smolagents.md`.
+
+### 4) Поиск статей по вашей теме (отдельный шаг)
+```bash
+top-papers-graph fetch "graph neural network survey" --source arxiv --limit 10 --out data/papers/arxiv.json
+top-papers-graph fetch "graph neural network survey" --source pubmed --limit 10 --out data/papers/pubmed.json
+```
+
+### 5) Наружный API (FastAPI)
+```bash
+pip install -e ".[api]"
+top-papers-graph-api
+```
+
+### 6) MCP‑сервер
+```bash
+pip install -e ".[mcp]"
+top-papers-graph-mcp
+```
+
+## Конфиг домена (topic‑agnostic)
+- Домен настраивается YAML‑файлом в `configs/domains/<DOMAIN_ID>.yaml`.
+- “Скептик” (критический чек‑лист) задаётся файлом в `configs/checklists/`.
+
+Смотрите: `docs/quickstart.md`, `docs/architecture.md`, `docs/sources.md`.
+
+## Примеры
+- `examples/battery_fastcharge/` — пример домена “быстрая зарядка батарей” с PyBaMM и профилями зарядки.
+  - Чтобы включить пример, укажите `DOMAIN_ID=ied_fastcharge` и пути на конфиги из `examples/...`.
+
+## Лицензия
+См. `LICENSE`.
+
+
+## Full-stack OCR -> Temporal KG -> Multimodal verification
+
+This repository now supports a staged full-stack pipeline aligned with the uploaded architecture notes:
+
+- **Step 1 / OCR + document structure**: PaddleOCR + PP-Structure/PP-StructureV3 ingestion with a richer `ChunkRecord` contract and automatic fallback to GROBID / PyMuPDF.
+- **Step 2 / unified PyTorch contour**: optional PyTorch Geometric TGN memory backend for temporal link prediction, Neo4j temporal KG, Qdrant dense+sparse hybrid retrieval, and Qwen2.5-VL-ready multimodal verification hooks.
+- **Step 3 / Memgraph-centric analytics**: optional Memgraph + MAGE dual-write for temporal events/assertions/chunks, plus best-effort MAGE analytics snapshots.
+
+### Docker stack
+
+By default, `docker-compose.yml` builds the app with the `fullstack` extra and starts:
+
+- Qdrant
+- Neo4j
+- Memgraph (MAGE image)
+- GROBID
+- the application container
+
+Example:
+
+```bash
+docker compose up --build
+```
+
+### Key environment switches
+
+- `OCR_BACKEND=auto|paddleocr|grobid|pymupdf`
+- `GRAPH_BACKEND=dual|neo4j|memgraph|none`
+- `QDRANT_RETRIEVAL_MODE=hybrid|dense`
+- `HYP_TGNN_BACKEND=auto|pyg|heuristic`
+- `VLM_BACKEND=none|qwen2_vl|g4f`
+
+### Product contracts
+
+The main product artifact chain is now explicitly modeled as:
+
+`ChunkRecord -> TemporalEvent -> Hypothesis`
+
+`ChunkRecord` is stored in `chunks.jsonl`, reused for Qdrant payloads, temporal graph provenance, and downstream multimodal verification.

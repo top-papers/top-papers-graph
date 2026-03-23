@@ -1,19 +1,71 @@
-artifact_version: 2
-domain: science
+artifact_version: 3
+domain: Q336
 topic: Template reasoning trajectory
+cutoff_year: 2025
 submission_id: template-trajectory
 papers:
   - id: doi:10.0000/example
     title: Example paper
     year: 2024
 steps:
-  - claim: Example grounded claim from the paper corpus.
+  - step_id: 1
+    claim: Example grounded claim from the paper corpus.
     conditions:
-      context: Template placeholder condition.
+      system: Template system or object under study.
+      environment: Template environment or boundary conditions.
+      protocol: Template measurement or intervention protocol.
+      notes: Additional scope notes.
     sources:
       - type: text
         source: doi:10.0000/example
         snippet_or_summary: Example supporting evidence snippet.
+    discovery_context:
+      simultaneous_discovery: false
+      geography:
+        country:
+          id: Q183
+          label: Germany
+        city:
+          id: Q64
+          label: Berlin
+      science_branches:
+        - id: Q11190
+          label: medicine
     inference: Example inference that links the evidence to the claim.
     next_question: What evidence should be checked next?
-edges: []
+  - step_id: 2
+    claim: Example follow-up claim grounded in the next paper.
+    conditions:
+      system: Template downstream system.
+      environment: Controlled laboratory conditions.
+      protocol: Follow-up verification protocol.
+      notes: Replication study.
+    sources:
+      - type: table
+        source: doi:10.0000/example
+        locator: Table 1
+        snippet_or_summary: Example table-based evidence.
+    discovery_context:
+      simultaneous_discovery: true
+      geography:
+        country:
+          id: Q30
+          label: United States of America
+        city:
+          id: Q60
+          label: New York City
+      science_branches:
+        - id: Q11410
+          label: engineering
+    inference: Example follow-up inference.
+    next_question: Which mechanism should be tested next?
+edges:
+  - from_step_id: 1
+    to_step_id: 2
+    predicate: leads_to
+    directionality: directed
+    direction_label: evidential progression
+    simultaneous_discovery: false
+expert:
+  latin_slug: template_expert
+  full_name: Template Expert

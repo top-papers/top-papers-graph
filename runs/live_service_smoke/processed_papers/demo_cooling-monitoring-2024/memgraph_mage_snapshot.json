@@ -1,0 +1,248 @@
+{
+  "pagerank": [
+    {
+      "node_id": "fast charging stability lithium cells 2022",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "stability Fast charging increases stress Pulse charging reduces",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "plating",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "cycle life high-rate charging 2023",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "lithium plating when cooling insufficient",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "cycle life High-rate charging causes plating Cooling improves",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "plating Cooling improves stability",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "plating extreme fast charging 2024",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "diagnostic accuracy thermal stability",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "diagnostics Integrated protocols enhance safety",
+      "rank": 0.05110480434565154
+    },
+    {
+      "node_id": "lithium plating 3C charging",
+      "rank": 0.03936462888183225
+    },
+    {
+      "node_id": "lower impedance growth",
+      "rank": 0.03936462888183225
+    },
+    {
+      "node_id": "thermal stability graphite anodes",
+      "rank": 0.03936462888183225
+    },
+    {
+      "node_id": "cooling control integrated protocols",
+      "rank": 0.03936462888183225
+    },
+    {
+      "node_id": "aphene coating improves fast-charging stability lithium cells Graphene",
+      "rank": 0.027624453418012975
+    },
+    {
+      "node_id": "Graphene coating",
+      "rank": 0.027624453418012975
+    },
+    {
+      "node_id": "Pulse charging",
+      "rank": 0.027624453418012975
+    },
+    {
+      "node_id": "Factor Effect Graphene coating",
+      "rank": 0.027624453418012975
+    },
+    {
+      "node_id": "Graphene coating improves stability Fast charging increases stress",
+      "rank": 0.027624453418012975
+    },
+    {
+      "node_id": "Pulse charging increases cycle life high-rate charging Pulse",
+      "rank": 0.027624453418012975
+    }
+  ],
+  "betweenness": [
+    {
+      "node_id": "Graphene coating",
+      "betweenness_centrality": 0.0033333333333333335
+    },
+    {
+      "node_id": "Pulse charging",
+      "betweenness_centrality": 0.0033333333333333335
+    },
+    {
+      "node_id": "aphene coating improves fast-charging stability lithium cells Graphene",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "fast charging stability lithium cells 2022",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "lithium plating 3C charging",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "lower impedance growth",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "Factor Effect Graphene coating",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "stability Fast charging increases stress Pulse charging reduces",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "Graphene coating improves stability Fast charging increases stress",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "plating",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "Pulse charging increases cycle life high-rate charging Pulse",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "cycle life high-rate charging 2023",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "thermal stability graphite anodes",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "High-rate charging",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "lithium plating when cooling insufficient",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "Factor Effect Pulse charging",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "cycle life High-rate charging causes plating Cooling improves",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "Factor Effect Pulse charging increases cycle life High-rate",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "plating Cooling improves stability",
+      "betweenness_centrality": 0.0
+    },
+    {
+      "node_id": "Cooling control reduces plating improves diagnostic accuracy Cooling",
+      "betweenness_centrality": 0.0
+    }
+  ],
+  "communities": [
+    {
+      "node_id": "aphene coating improves fast-charging stability lithium cells Graphene",
+      "community_id": 0
+    },
+    {
+      "node_id": "fast charging stability lithium cells 2022",
+      "community_id": 0
+    },
+    {
+      "node_id": "Graphene coating",
+      "community_id": 1
+    },
+    {
+      "node_id": "lithium plating 3C charging",
+      "community_id": 1
+    },
+    {
+      "node_id": "Pulse charging",
+      "community_id": 2
+    },
+    {
+      "node_id": "lower impedance growth",
+      "community_id": 2
+    },
+    {
+      "node_id": "Factor Effect Graphene coating",
+      "community_id": 3
+    },
+    {
+      "node_id": "stability Fast charging increases stress Pulse charging reduces",
+      "community_id": 3
+    },
+    {
+      "node_id": "Graphene coating improves stability Fast charging increases stress",
+      "community_id": 4
+    },
+    {
+      "node_id": "plating",
+      "community_id": 4
+    },
+    {
+      "node_id": "Pulse charging increases cycle life high-rate charging Pulse",
+      "community_id": 5
+    },
+    {
+      "node_id": "cycle life high-rate charging 2023",
+      "community_id": 5
+    },
+    {
+      "node_id": "thermal stability graphite anodes",
+      "community_id": 2
+    },
+    {
+      "node_id": "High-rate charging",
+      "community_id": 6
+    },
+    {
+      "node_id": "lithium plating when cooling insufficient",
+      "community_id": 6
+    },
+    {
+      "node_id": "Factor Effect Pulse charging",
+      "community_id": 7
+    },
+    {
+      "node_id": "cycle life High-rate charging causes plating Cooling improves",
+      "community_id": 7
+    },
+    {
+      "node_id": "Factor Effect Pulse charging increases cycle life High-rate",
+      "community_id": 8
+    },
+    {
+      "node_id": "plating Cooling improves stability",
+      "community_id": 8
+    },
+    {
+      "node_id": "Cooling control reduces plating improves diagnostic accuracy Cooling",
+      "community_id": 9
+    }
+  ]
+}

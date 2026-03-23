@@ -378,6 +378,144 @@ def _coerce_time_token(value: Any, *, default: str = "unknown") -> str:
     return default
 
 
+def _qid_node_id(prefix: str, payload: Dict[str, Any]) -> str:
+    qid = str(payload.get("id") or "").strip()
+    if qid:
+        return f"{prefix}:{qid}"
+    label = _slugify(str(payload.get("label") or prefix))
+    return f"{prefix}:{label}"
+
+
+def _add_discovery_context_nodes(
+    *,
+    step_node_id: str,
+    step: Dict[str, Any],
+    manual_nodes: List[Dict[str, Any]],
+    manual_edges: List[Dict[str, Any]],
+    manual_triplets: List[Dict[str, Any]],
+    start_date: str,
+    end_date: str,
+) -> None:
+    ctx = step.get("discovery_context") if isinstance(step.get("discovery_context"), dict) else {}
+    if not ctx:
+        return
+    geography = ctx.get("geography") if isinstance(ctx.get("geography"), dict) else {}
+    country = geography.get("country") if isinstance(geography, dict) and isinstance(geography.get("country"), dict) else None
+    city = geography.get("city") if isinstance(geography, dict) and isinstance(geography.get("city"), dict) else None
+    branches = ctx.get("science_branches") if isinstance(ctx.get("science_branches"), list) else []
+
+    if country:
+        country_node = {
+            "id": _qid_node_id("country", country),
+            "type": "country",
+            "label": str(country.get("label") or country.get("id") or "Country"),
+            "wikidata_id": str(country.get("id") or ""),
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if country_node["id"] not in {n.get("id") for n in manual_nodes}:
+            manual_nodes.append(country_node)
+        manual_edges.append({
+            "source": step_node_id,
+            "target": country_node["id"],
+            "predicate": "origin_country",
+            "type": "discovery_geography",
+            "start_date": start_date,
+            "end_date": end_date,
+        })
+        manual_triplets.append({
+            "assertion_id": f"{step_node_id}:country",
+            "subject": step_node_id,
+            "predicate": "origin_country",
+            "object": country_node["id"],
+            "start_date": start_date,
+            "end_date": end_date,
+            "valid_from": start_date,
+            "valid_to": end_date,
+            "time_source": "metadata",
+            "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{end_date}",
+            "evidence": {"snippet_or_summary": "Discovery context country from Task 1 trajectory."},
+            "verdict": "accepted",
+            "rationale": "Discovery geography country reconstructed from Task 1 trajectory YAML.",
+        })
+
+    if city:
+        city_node = {
+            "id": _qid_node_id("city", city),
+            "type": "city",
+            "label": str(city.get("label") or city.get("id") or "City"),
+            "wikidata_id": str(city.get("id") or ""),
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if city_node["id"] not in {n.get("id") for n in manual_nodes}:
+            manual_nodes.append(city_node)
+        manual_edges.append({
+            "source": step_node_id,
+            "target": city_node["id"],
+            "predicate": "origin_city",
+            "type": "discovery_geography",
+            "start_date": start_date,
+            "end_date": end_date,
+        })
+        if country:
+            manual_edges.append({
+                "source": city_node["id"],
+                "target": _qid_node_id("country", country),
+                "predicate": "located_in_country",
+                "type": "geography_hierarchy",
+                "start_date": start_date,
+                "end_date": end_date,
+            })
+
+    for idx, branch in enumerate(branches, start=1):
+        if not isinstance(branch, dict):
+            continue
+        branch_node = {
+            "id": _qid_node_id("branch", branch),
+            "type": "science_branch",
+            "label": str(branch.get("label") or branch.get("id") or f"branch_{idx}"),
+            "wikidata_id": str(branch.get("id") or ""),
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if branch_node["id"] not in {n.get("id") for n in manual_nodes}:
+            manual_nodes.append(branch_node)
+        manual_edges.append({
+            "source": step_node_id,
+            "target": branch_node["id"],
+            "predicate": "science_branch",
+            "type": "discovery_branch",
+            "start_date": start_date,
+            "end_date": end_date,
+        })
+
+
+def _edge_record_variants(edge: Dict[str, Any], *, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    src_step = int(edge.get("from_step_id"))
+    dst_step = int(edge.get("to_step_id"))
+    src_node = f"step:{src_step}"
+    dst_node = f"step:{dst_step}"
+    predicate = str(edge.get("predicate") or "leads_to")
+    directionality = str(edge.get("directionality") or "directed").strip().lower()
+    direction_label = str(edge.get("direction_label") or "").strip()
+    simultaneous = bool(edge.get("simultaneous_discovery"))
+    base = {
+        "predicate": predicate,
+        "type": "reasoning_transition",
+        "directionality": directionality,
+        "direction_label": direction_label,
+        "simultaneous_discovery": simultaneous,
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+    variants = [dict(base, source=src_node, target=dst_node)]
+    if directionality in {"bidirectional", "simultaneous"}:
+        variants.append(dict(base, source=dst_node, target=src_node))
+    return variants
+
+
+
 def _canonical_time_interval(rec: Dict[str, Any]) -> str:
     start = _coerce_time_token(rec.get("start_date"), default="unknown")
     end = _coerce_time_token(rec.get("end_date"), default="unknown")
@@ -403,6 +541,7 @@ def build_reference_graph(doc: Dict[str, Any]) -> Dict[str, Any]:
         start_date, end_date = _step_time_window(step, papers_by_key)
         node_id = f"step:{sid}"
         conditions = step.get("conditions") if isinstance(step.get("conditions"), dict) else {}
+        discovery_context = step.get("discovery_context") if isinstance(step.get("discovery_context"), dict) else {}
         manual_nodes.append(
             {
                 "id": node_id,
@@ -413,12 +552,23 @@ def build_reference_graph(doc: Dict[str, Any]) -> Dict[str, Any]:
                 "inference": str(step.get("inference") or ""),
                 "next_question": str(step.get("next_question") or ""),
                 "conditions": conditions,
+                "discovery_context": discovery_context,
+                "simultaneous_discovery": bool(discovery_context.get("simultaneous_discovery")) if discovery_context else False,
                 "start_date": start_date,
                 "end_date": end_date,
                 "valid_from": start_date,
                 "valid_to": "+inf" if start_date != "unknown" else "unknown",
                 "time_source": "metadata",
             }
+        )
+        _add_discovery_context_nodes(
+            step_node_id=node_id,
+            step=step,
+            manual_nodes=manual_nodes,
+            manual_edges=manual_edges,
+            manual_triplets=manual_triplets,
+            start_date=start_date,
+            end_date=end_date,
         )
         manual_triplets.append(
             {
@@ -504,52 +654,50 @@ def build_reference_graph(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     raw_edges = doc.get("edges") or []
     if not raw_edges and len(step_ids) > 1:
-        raw_edges = [[step_ids[i], step_ids[i + 1]] for i in range(len(step_ids) - 1)]
+        raw_edges = [{"from_step_id": step_ids[i], "to_step_id": step_ids[i + 1], "predicate": "leads_to", "directionality": "directed"} for i in range(len(step_ids) - 1)]
 
     step_map = {int(step.get("step_id") or idx): step for idx, step in enumerate(steps, start=1)}
     for edge_idx, edge in enumerate(raw_edges, start=1):
-        if not isinstance(edge, (list, tuple)) or len(edge) != 2:
+        edge_obj: Dict[str, Any]
+        if isinstance(edge, (list, tuple)) and len(edge) == 2:
+            edge_obj = {"from_step_id": edge[0], "to_step_id": edge[1], "predicate": "leads_to", "directionality": "directed"}
+        elif isinstance(edge, dict):
+            edge_obj = dict(edge)
+        else:
             continue
         try:
-            src_step = int(edge[0])
-            dst_step = int(edge[1])
+            src_step = int(edge_obj.get("from_step_id"))
+            dst_step = int(edge_obj.get("to_step_id"))
         except Exception:
             continue
-        src_node = f"step:{src_step}"
-        dst_node = f"step:{dst_step}"
         src_step_obj = step_map.get(src_step, {})
         start_date, end_date = _step_time_window(src_step_obj, papers_by_key) if src_step_obj else ("unknown", "unknown")
-        manual_edges.append(
-            {
-                "source": src_node,
-                "target": dst_node,
-                "predicate": "leads_to",
-                "type": "reasoning_transition",
-                "start_date": start_date,
-                "end_date": end_date,
-            }
-        )
-        manual_triplets.append(
-            {
-                "assertion_id": f"manual-edge-{edge_idx}",
-                "subject": src_node,
-                "predicate": "leads_to",
-                "object": dst_node,
-                "start_date": start_date,
-                "end_date": end_date,
-                "valid_from": start_date,
-                "valid_to": "+inf" if start_date != "unknown" else "unknown",
-                "time_source": "metadata",
-                "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{'+inf' if start_date != 'unknown' else 'unknown'}",
-                "evidence": {
-                    "page": None,
-                    "figure_or_table": None,
-                    "snippet_or_summary": str(src_step_obj.get("next_question") or src_step_obj.get("inference") or ""),
-                },
-                "verdict": "accepted",
-                "rationale": "Reasoning transition reconstructed from Task 1 trajectory YAML.",
-            }
-        )
+        for variant_idx, edge_variant in enumerate(_edge_record_variants(edge_obj, start_date=start_date, end_date=end_date), start=1):
+            manual_edges.append(edge_variant)
+            manual_triplets.append(
+                {
+                    "assertion_id": f"manual-edge-{edge_idx}-{variant_idx}",
+                    "subject": edge_variant["source"],
+                    "predicate": edge_variant.get("predicate") or "leads_to",
+                    "object": edge_variant["target"],
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "valid_from": start_date,
+                    "valid_to": "+inf" if start_date != "unknown" else "unknown",
+                    "time_source": "metadata",
+                    "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{'+inf' if start_date != 'unknown' else 'unknown'}",
+                    "directionality": edge_variant.get("directionality"),
+                    "direction_label": edge_variant.get("direction_label"),
+                    "simultaneous_discovery": bool(edge_variant.get("simultaneous_discovery")),
+                    "evidence": {
+                        "page": None,
+                        "figure_or_table": None,
+                        "snippet_or_summary": str(src_step_obj.get("next_question") or src_step_obj.get("inference") or ""),
+                    },
+                    "verdict": "accepted",
+                    "rationale": "Reasoning transition reconstructed from Task 1 trajectory YAML.",
+                }
+            )
 
     return {
         "meta": {

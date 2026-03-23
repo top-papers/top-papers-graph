@@ -2,17 +2,81 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MultimodalPreferenceRecord",
   "type": "object",
-  "required": ["id", "task_type", "prompt", "chosen", "rejected"],
+  "required": [
+    "id",
+    "prompt",
+    "chosen",
+    "rejected"
+  ],
   "properties": {
-    "id": {"type": "string"},
-    "task_type": {"type": "string"},
+    "id": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string"
+    },
     "images": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "string"
+      }
     },
     "prompt": {},
     "chosen": {},
     "rejected": {},
-    "metadata": {"type": "object"}
-  }
+    "metadata": {
+      "type": "object"
+    },
+    "task_family": {
+      "type": "string"
+    },
+    "artifact_version": {
+      "type": [
+        "integer",
+        "string"
+      ]
+    },
+    "step_context": {
+      "type": "object"
+    },
+    "edge_annotations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "geography": {
+      "type": "object"
+    },
+    "science_branches": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "image": {
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "required": [
+        "id"
+      ]
+    },
+    {
+      "anyOf": [
+        {
+          "required": [
+            "task_type"
+          ]
+        },
+        {
+          "required": [
+            "task_family"
+          ]
+        }
+      ]
+    }
+  ]
 }
