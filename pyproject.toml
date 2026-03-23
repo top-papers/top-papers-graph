@@ -44,6 +44,8 @@ embeddings = [
 # Multimodal ingestion + embeddings (optional)
 mm = [
   "pymupdf>=1.24",
+  "paddleocr>=3.0.0",
+  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
   "pillow>=10.0",
   "open_clip_torch>=2.24",
   "torch>=2.2",
@@ -58,6 +60,8 @@ mm = [
 # Human-friendly alias for multimodal stack
 multimodal = [
   "pymupdf>=1.24",
+  "paddleocr>=3.0.0",
+  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
   "pillow>=10.0",
   "open_clip_torch>=2.24",
   "torch>=2.2",
@@ -109,6 +113,8 @@ task2_notebook = [
   "python-dateutil>=2.9",
   "dateparser>=1.2",
   "pymupdf>=1.24",
+  "paddleocr>=3.0.0",
+  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
   "pillow>=10.0",
   "open_clip_torch>=2.24",
   "torch>=2.2",
@@ -204,7 +210,8 @@ fullstack = [
   "dateparser>=1.2",
   "torch-geometric>=2.6.0",
   "paddleocr>=3.0.0",
-  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",  "g4f>=7.1.2",
+  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
+  "g4f>=7.1.2",
 ]
 
 # Neo4j as graph + vector DB, GraphRAG integration.

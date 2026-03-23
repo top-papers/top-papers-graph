@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     hash_embed_dim: int = 384
 
     # ===== OCR / parsing =====
-    ocr_backend: str = "auto"  # auto|paddleocr|grobid|pymupdf
+    ocr_backend: str = "auto"  # auto(default=PaddleOCR->local fallback)|paddleocr|grobid|pymupdf
     paddleocr_lang: str | None = None
 
     # ===== Infra =====
@@ -71,8 +71,8 @@ class Settings(BaseSettings):
     demo_collection_hypothesis: str = "demos_hypothesis_test"
 
     # ===== Multimodal =====
-    vlm_backend: str = "none"  # none|qwen2_vl|llava|phi3_vision|g4f
-    vlm_model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    vlm_backend: str = "g4f"  # g4f(default)|none|qwen2_vl|qwen3_vl|llava|phi3_vision
+    vlm_model_id: str = "auto"
     vlm_max_new_tokens: int = 512
     vlm_structured_output: bool = True
     mm_embed_backend: str = "none"  # none|open_clip

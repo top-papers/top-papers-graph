@@ -11,7 +11,7 @@ console = Console()
 
 
 def ingest_pdf_multimodal(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, run_vlm: bool = True) -> Path:
-    """1) Текст: GROBID -> chunks (как в базовом пайплайне)
+    """1) Текст/таблицы/формулы: PaddleOCR PP-StructureV3 -> chunks (как в базовом пайплайне)
     2) Мультимодальность: PyMuPDF -> страницы + картинки (+ опционально VLM)
 
     В результате paper_dir содержит:
@@ -38,7 +38,7 @@ def ingest_pdf_multimodal(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, r
 def ingest_pdf_multimodal_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, run_vlm: bool = True) -> Path:
     """Multimodal ingest with automatic fallback for PDF->text.
 
-    Uses `ingest_pdf_auto()` for text (GROBID -> PyMuPDF fallback), then runs the multimodal stage.
+    Uses `ingest_pdf_auto()` for document parsing (PaddleOCR -> PyMuPDF fallback), then runs the multimodal stage.
     """
     paper_dir = ingest_pdf_auto(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
     paper_id = meta.get("id") or paper_dir.name

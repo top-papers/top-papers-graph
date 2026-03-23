@@ -1262,6 +1262,9 @@ def prepare_task2_validation_bundle(
                 scout_dir.mkdir(parents=True, exist_ok=True)
                 (scout_dir / "suggested_links.json").write_text(json.dumps(suggestions, ensure_ascii=False, indent=2), encoding="utf-8")
 
+            review_state_dir = out / "expert_validation" / "drafts"
+            review_state_dir.mkdir(parents=True, exist_ok=True)
+
             manifest = {
                 "generated_at": _utc_now(),
                 "trajectory_file": trajectory_yaml.name,
@@ -1277,6 +1280,8 @@ def prepare_task2_validation_bundle(
                 "llm_effective_model": str(settings.llm_model or ""),
                 "vlm_effective_backend": str(getattr(settings, "vlm_backend", "") or ""),
                 "vlm_effective_model": str(getattr(settings, "vlm_model_id", "") or ""),
+                "review_state_dir": str(review_state_dir),
+                "review_state_latest": str(review_state_dir / "review_state_latest.json"),
                 "artifacts": {
                     "reference_graph": "reference_graph.json",
                     "reference_triplets": "reference_triplets.json",

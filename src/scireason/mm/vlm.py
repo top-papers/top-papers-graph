@@ -98,6 +98,29 @@ def _has_local_vlm_stack() -> bool:
     return all(importlib.util.find_spec(pkg) is not None for pkg in ("torch", "transformers", "PIL"))
 
 
+def _default_model_id_for_backend(backend: Backend) -> str:
+    if backend == "g4f":
+        return str(getattr(settings, "task2_default_g4f_model", "auto") or "auto")
+    return str(getattr(settings, "task2_default_local_vlm_model", "Qwen/Qwen2.5-VL-3B-Instruct") or "Qwen/Qwen2.5-VL-3B-Instruct")
+
+
+def _resolve_model_id_for_backend(backend: Backend, model_id: Optional[str]) -> str:
+    requested = str(model_id or getattr(settings, "vlm_model_id", "") or "").strip()
+    local_default = str(getattr(settings, "task2_default_local_vlm_model", "Qwen/Qwen2.5-VL-3B-Instruct") or "Qwen/Qwen2.5-VL-3B-Instruct")
+    g4f_default = str(getattr(settings, "task2_default_g4f_model", "auto") or "auto")
+
+    if backend == "g4f":
+        if not requested or requested.lower() == "auto":
+            return g4f_default
+        if requested.startswith("Qwen/") or "Qwen2.5-VL" in requested or "Qwen3-VL" in requested:
+            return g4f_default
+        return requested
+
+    if not requested or requested.lower() == "auto":
+        return local_default
+    return requested
+
+
 def _resolve_backend(backend: Optional[Backend], model_id: Optional[str]) -> Backend:
     requested = str(backend or getattr(settings, "vlm_backend", "none") or "none").strip().lower()
 
@@ -275,8 +298,9 @@ def describe_image(
 
     Никогда не роняет общий ingest из-за отсутствия опционального VLM backend.
     """
-    effective_model_id = model_id or settings.vlm_model_id  # type: ignore[attr-defined]
-    effective_backend = _resolve_backend(backend or settings.vlm_backend, effective_model_id)  # type: ignore[attr-defined]
+    requested_model_id = model_id or settings.vlm_model_id  # type: ignore[attr-defined]
+    effective_backend = _resolve_backend(backend or settings.vlm_backend, requested_model_id)  # type: ignore[attr-defined]
+    effective_model_id = _resolve_model_id_for_backend(effective_backend, requested_model_id)
 
     if effective_backend == "none":
         return VLMResult(caption="")

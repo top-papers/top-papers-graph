@@ -4,6 +4,7 @@ import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Dict, Tuple
 
 import yaml  # type: ignore
@@ -20,6 +21,40 @@ from .pipeline.task2_validation import (
 class BundleResult:
     bundle_dir: Path
     manifest_path: Path
+
+
+def get_task2_review_state_paths(bundle_dir: str | Path) -> Dict[str, Path]:
+    root = Path(bundle_dir) / "expert_validation" / "drafts"
+    latest = root / "review_state_latest.json"
+    return {"draft_dir": root, "latest": latest}
+
+
+def save_task2_review_state(bundle_dir: str | Path, payload: Dict[str, Any], *, label: str = "manual") -> Path:
+    paths = get_task2_review_state_paths(bundle_dir)
+    draft_dir = paths["draft_dir"]
+    latest = paths["latest"]
+    draft_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    safe_label = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(label or "manual")).strip("-") or "manual"
+    versioned = draft_dir / f"review_state_{timestamp}_{safe_label}.json"
+
+    body = dict(payload)
+    body.setdefault("artifact_version", 1)
+    body["saved_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    body["bundle_dir"] = str(Path(bundle_dir))
+
+    encoded = json.dumps(body, ensure_ascii=False, indent=2)
+    versioned.write_text(encoded, encoding="utf-8")
+    latest.write_text(encoded, encoding="utf-8")
+    return latest
+
+
+def load_task2_review_state(bundle_dir: str | Path, path: str | Path | None = None) -> Dict[str, Any]:
+    target = Path(path) if path else get_task2_review_state_paths(bundle_dir)["latest"]
+    if not target.exists():
+        return {}
+    return json.loads(target.read_text(encoding="utf-8"))
 
 
 def load_task1_yaml(path: str | Path) -> Dict[str, Any]:
@@ -312,13 +347,18 @@ def build_task2_validation_bundle(
     if auto_graph_json.exists():
         _write_graph_html(auto_graph_json, auto_graph_html)
 
+    review_state_paths = get_task2_review_state_paths(bundle_dir)
+    review_state_paths["draft_dir"].mkdir(parents=True, exist_ok=True)
+
     manifest = {
         "topic": str(doc.get("topic") or ""),
         "bundle_dir": str(bundle_dir),
         "gold_graph": str(gold_graph_json),
         "gold_graph_html": str(gold_graph_html),
         "gold_triplets_csv": str(gold_triplets_csv),
-        "manifest_version": 4,
+        "manifest_version": 5,
+        "review_state_dir": str(review_state_paths["draft_dir"]),
+        "review_state_latest": str(review_state_paths["latest"]),
     }
 
     if auto_graph_json.exists():

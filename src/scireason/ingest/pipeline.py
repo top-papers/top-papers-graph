@@ -85,9 +85,10 @@ def ingest_pdf_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path) -> Path
     """Ingest PDF using the best available backend.
 
     Priority in `OCR_BACKEND=auto`:
-    1) PaddleOCR / PP-StructureV3 (preferred structured OCR/layout pipeline)
-    2) GROBID (best text parser for scientific PDFs when service is up)
-    3) PyMuPDF / pypdf fallback
+    1) PaddleOCR / PP-StructureV3 (preferred structured multimodal parser for text/tables/figures)
+    2) PyMuPDF / pypdf fallback for text-only recovery
+
+    GROBID is kept only as an explicit opt-in backend (`OCR_BACKEND=grobid`) for legacy setups.
     """
 
     backend = str(getattr(settings, "ocr_backend", "auto") or "auto").strip().lower()
@@ -99,21 +100,14 @@ def ingest_pdf_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path) -> Path
     if backend == "grobid":
         return ingest_pdf(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
 
-    # Auto mode: prefer structured OCR if available, then GROBID, then local fallback.
+    # Auto mode: prefer structured multimodal OCR/layout first, then local text fallback.
     try:
         return ingest_pdf_paddleocr(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
-    except PaddleOCRUnavailableError:
-        pass
-    except Exception as e:
-        console.print(f"[yellow]PaddleOCR failed ({type(e).__name__}: {e}). Trying GROBID...[/yellow]")
-
-    try:
-        return ingest_pdf(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
-    except GrobidUnavailableError as e:
-        if not getattr(ingest_pdf_auto, "_grobid_warned", False):
+    except PaddleOCRUnavailableError as e:
+        if not getattr(ingest_pdf_auto, "_paddle_warned", False):
             console.print(f"[yellow]{e} Буду использовать локальный парсер (PyMuPDF / pypdf).[/yellow]")
-            setattr(ingest_pdf_auto, "_grobid_warned", True)
+            setattr(ingest_pdf_auto, "_paddle_warned", True)
     except Exception as e:
-        console.print(f"[yellow]GROBID failed ({type(e).__name__}: {e}). Falling back to local parsing...[/yellow]")
+        console.print(f"[yellow]PaddleOCR failed ({type(e).__name__}: {e}). Falling back to local parsing...[/yellow]")
 
     return _ingest_pdf_pymupdf(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
