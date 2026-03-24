@@ -19,6 +19,8 @@ console = Console()
 
 _G4F_AUTH_DISABLED = False
 _G4F_TIMEOUT_DISABLED = False
+_LOCAL_VLM_DISABLED = False
+_LOCAL_VLM_DISABLE_REASON = ""
 
 
 Backend = Literal["auto", "none", "qwen2_vl", "qwen3_vl", "llava", "phi3_vision", "g4f"]
@@ -103,9 +105,44 @@ def _has_g4f() -> bool:
     return importlib.util.find_spec("g4f") is not None
 
 
-def _has_local_vlm_stack() -> bool:
-    return all(importlib.util.find_spec(pkg) is not None for pkg in ("torch", "transformers", "PIL"))
+def _local_vlm_runtime_check(model_id: Optional[str] = None) -> tuple[bool, str]:
+    """Return whether the local VLM runtime is really importable in the current process.
 
+    `find_spec()` alone is too optimistic for notebook environments: partially installed
+    or ABI-broken torch/transformers packages can still have specs but fail on import.
+    """
+    try:
+        import torch  # type: ignore  # noqa: F401
+        from PIL import Image  # type: ignore  # noqa: F401
+        from transformers import AutoProcessor  # type: ignore  # noqa: F401
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+    requested = str(model_id or "").strip()
+    try:
+        if "Qwen/Qwen3-VL" in requested or "Qwen3-VL" in requested:
+            from transformers import Qwen3VLForConditionalGeneration  # type: ignore  # noqa: F401
+        elif "Qwen/Qwen2.5-VL" in requested or "Qwen2.5-VL" in requested:
+            from transformers import Qwen2_5_VLForConditionalGeneration  # type: ignore  # noqa: F401
+        else:
+            from transformers import AutoModelForVision2Seq  # type: ignore  # noqa: F401
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+    return True, ""
+
+
+def _has_local_vlm_stack(model_id: Optional[str] = None) -> bool:
+    ok, _ = _local_vlm_runtime_check(model_id=model_id)
+    return ok
+
+
+
+def _local_stack_available(model_id: Optional[str] = None) -> bool:
+    try:
+        return bool(_has_local_vlm_stack(model_id=model_id))
+    except TypeError:
+        return bool(_has_local_vlm_stack())
 
 def _default_model_id_for_backend(backend: Backend) -> str:
     if backend == "g4f":
@@ -165,31 +202,34 @@ def _run_with_timeout(timeout_seconds: float, fn, /, *args, **kwargs):
 
 
 def _resolve_backend(backend: Optional[Backend], model_id: Optional[str]) -> Backend:
-    global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED
+    global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED, _LOCAL_VLM_DISABLED
     requested = str(backend or getattr(settings, "vlm_backend", "none") or "none").strip().lower()
 
     if requested == "g4f" and (_G4F_AUTH_DISABLED or _G4F_TIMEOUT_DISABLED):
-        if _has_local_vlm_stack():
+        if _local_stack_available(model_id=model_id):
             return "qwen2_vl"
+        return "none"
+
+    if requested in {"qwen2_vl", "qwen3_vl", "llava", "phi3_vision"} and _LOCAL_VLM_DISABLED:
         return "none"
 
     if requested == "auto":
         if model_id and ("Qwen/Qwen3-VL" in model_id or "Qwen3-VL" in model_id):
-            return "qwen3_vl" if _has_local_vlm_stack() else ("g4f" if _has_g4f() else "none")
-        if _has_local_vlm_stack():
+            return "qwen3_vl" if _local_stack_available(model_id=model_id) else ("g4f" if _has_g4f() else "none")
+        if _local_stack_available(model_id=model_id):
             return "qwen2_vl"
         if _has_g4f():
             return "g4f"
         return "none"
 
     if requested == "g4f" and not _has_g4f():
-        if _has_local_vlm_stack():
+        if _local_stack_available(model_id=model_id):
             console.print("[yellow]g4f не установлен; переключаю VLM на локальный Transformers backend.[/yellow]")
             return "qwen2_vl"
         console.print("[yellow]g4f не установлен; продолжу без VLM-captioning.[/yellow]")
         return "none"
 
-    if requested in {"qwen2_vl", "qwen3_vl", "llava", "phi3_vision"} and not _has_local_vlm_stack():
+    if requested in {"qwen2_vl", "qwen3_vl", "llava", "phi3_vision"} and not _local_stack_available(model_id=model_id):
         if requested != "none":
             console.print("[yellow]Локальный VLM-стек недоступен; продолжу без VLM-captioning.[/yellow]")
         return "none"
@@ -385,7 +425,7 @@ def describe_image(
             max_new_tokens=max_new_tokens,
         )
     except Exception as e:
-        global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED
+        global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED, _LOCAL_VLM_DISABLED
         if effective_backend == "g4f" and _missing_auth_error(e):
             _G4F_AUTH_DISABLED = True
             if _has_local_vlm_stack():
@@ -431,6 +471,16 @@ def describe_image(
                     return VLMResult(caption="")
             console.print(
                 f"[yellow]g4f не ответил вовремя на {image_path.name}; отключаю g4f-captioning для оставшихся страниц.[/yellow]"
+            )
+            return VLMResult(caption="")
+
+        if effective_backend in {"qwen2_vl", "qwen3_vl", "llava", "phi3_vision"}:
+            _LOCAL_VLM_DISABLED = True
+            _LOCAL_VLM_DISABLE_REASON = f"{type(e).__name__}: {e}"
+            console.print(
+                f"[yellow]Локальный VLM backend недоступен для {image_path.name}: {type(e).__name__}: {e}. "
+                "Отключаю local VLM для оставшихся страниц, чтобы не повторять предупреждение на каждой странице. "
+                "Переустановите runtime (torch/transformers/qwen-vl-utils) и перезапустите notebook, если нужен local VLM.[/yellow]"
             )
             return VLMResult(caption="")
 
