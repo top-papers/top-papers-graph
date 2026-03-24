@@ -168,22 +168,28 @@ def load_papers_from_processed(
         except Exception:
             year_int = None
 
-        # Join chunks (best-effort, truncated)
+        # Join chunks (best-effort, truncated) in a streaming way so large
+        # jsonl files do not get loaded into RAM all at once.
         texts: List[str] = []
         total = 0
-        for line in chunks_path.read_text(encoding="utf-8").splitlines():
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            t = str(rec.get("text") or "")
-            if not t:
-                continue
-            if total >= max_chars_per_paper:
-                break
-            remaining = max_chars_per_paper - total
-            texts.append(t[:remaining])
-            total += len(t[:remaining])
+        try:
+            with chunks_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    if total >= max_chars_per_paper:
+                        break
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    t = str(rec.get("text") or "")
+                    if not t:
+                        continue
+                    remaining = max_chars_per_paper - total
+                    piece = t[:remaining]
+                    texts.append(piece)
+                    total += len(piece)
+        except OSError:
+            continue
 
         text = "\n\n".join(texts).strip()
         if not text and meta.get("abstract"):

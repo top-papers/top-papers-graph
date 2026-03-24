@@ -31,6 +31,7 @@ def ingest_pdf_multimodal(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, r
         prompt_context=prompt_context,
         run_vlm=run_vlm,
         progress_callback=progress_callback,
+        collect_records=False,
     )
     console.print(f"[green]MM stored:[/green] {paper_dir / 'mm'}")
     return paper_dir
@@ -53,6 +54,7 @@ def ingest_pdf_multimodal_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Pa
         prompt_context=prompt_context,
         run_vlm=run_vlm,
         progress_callback=progress_callback,
+        collect_records=False,
     )
     console.print(f"[green]MM stored:[/green] {paper_dir / 'mm'}")
     return paper_dir

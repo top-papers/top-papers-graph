@@ -374,23 +374,23 @@ def _fallback_pdf_records(pdf_path: Path, paper_id: str) -> List[ChunkRecord]:
     except Exception as e:  # pragma: no cover
         raise RuntimeError("PyMuPDF is required for OCR fallback.") from e
 
-    doc = fitz.open(str(pdf_path))
     records: List[ChunkRecord] = []
-    for page_index in range(len(doc)):
-        page = doc.load_page(page_index)
-        text = (page.get_text("text", sort=True) or "").strip()
-        if not text:
-            continue
-        records.append(
-            ChunkRecord(
-                chunk_id=f"{paper_id}:page:{page_index}:fallback",
-                paper_id=paper_id,
-                page=page_index,
-                text=text,
-                modality="page",
-                source_backend="pymupdf_fallback",
+    with fitz.open(str(pdf_path)) as doc:
+        for page_index in range(len(doc)):
+            page = doc.load_page(page_index)
+            text = (page.get_text("text", sort=True) or "").strip()
+            if not text:
+                continue
+            records.append(
+                ChunkRecord(
+                    chunk_id=f"{paper_id}:page:{page_index}:fallback",
+                    paper_id=paper_id,
+                    page=page_index,
+                    text=text,
+                    modality="page",
+                    source_backend="pymupdf_fallback",
+                )
             )
-        )
     return records
 
 

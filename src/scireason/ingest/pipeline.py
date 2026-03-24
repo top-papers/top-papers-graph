@@ -48,13 +48,13 @@ def _extract_text_pymupdf(pdf_path: Path) -> str:
     try:
         import fitz  # PyMuPDF  # type: ignore
 
-        doc = fitz.open(str(pdf_path))
         parts: list[str] = []
-        for i in range(len(doc)):
-            page = doc.load_page(i)
-            t = (page.get_text("text", sort=True) or "").strip()
-            if t:
-                parts.append(t)
+        with fitz.open(str(pdf_path)) as doc:
+            for i in range(len(doc)):
+                page = doc.load_page(i)
+                t = (page.get_text("text", sort=True) or "").strip()
+                if t:
+                    parts.append(t)
         return "\n\n".join(parts)
     except Exception:
         try:

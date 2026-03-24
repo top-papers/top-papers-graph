@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
+import gc
 import importlib.util
 import os
 import threading
@@ -64,6 +65,7 @@ def _load_transformers_vlm(model_id: str):
             model_id,
             torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
             device_map="auto" if torch.cuda.is_available() else None,
+            low_cpu_mem_usage=True,
             trust_remote_code=True,
         )
         return processor, model, "qwen3_vl"
@@ -77,6 +79,7 @@ def _load_transformers_vlm(model_id: str):
             model_id,
             torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
             device_map="auto" if torch.cuda.is_available() else None,
+            low_cpu_mem_usage=True,
             trust_remote_code=True,
         )
         return processor, model, "qwen2_5_vl"
@@ -90,6 +93,7 @@ def _load_transformers_vlm(model_id: str):
         model_id,
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
+        low_cpu_mem_usage=True,
         trust_remote_code=True,
     )
     return processor, model, "generic"
@@ -264,7 +268,6 @@ def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_t
         _require("torch/pillow")
 
     processor, model, family = _load_transformers_vlm(model_id)
-    img = Image.open(image_path).convert("RGB")
     full_prompt = (
         "Ты — научный ассистент. "
         "1) Дай краткую подпись к изображению (1-3 предложения). "
@@ -273,32 +276,45 @@ def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_t
         f"\n\nЗадача/контекст: {prompt}"
     )
 
-    if family in {"qwen2_5_vl", "qwen3_vl"}:
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": img},
-                    {"type": "text", "text": full_prompt},
-                ],
-            }
-        ]
-        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = processor(text=[text], images=[img], padding=True, return_tensors="pt")
-        if torch.cuda.is_available():
-            inputs = {k: v.to(model.device) for k, v in inputs.items()}
-        with torch.no_grad():
-            generated_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
-        prompt_len = inputs["input_ids"].shape[1]
-        trimmed = [out_ids[prompt_len:] for out_ids in generated_ids]
-        raw_text = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0].strip()
-    else:
-        inputs = processor(images=img, text=full_prompt, return_tensors="pt")
-        if torch.cuda.is_available():
-            inputs = {k: v.to(model.device) for k, v in inputs.items()}
-        with torch.no_grad():
-            out = model.generate(**inputs, max_new_tokens=max_new_tokens)
-        raw_text = processor.batch_decode(out, skip_special_tokens=True)[0].strip()
+    raw_text = ""
+    with Image.open(image_path) as opened_img:
+        img = opened_img.convert("RGB")
+        try:
+            if family in {"qwen2_5_vl", "qwen3_vl"}:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": img},
+                            {"type": "text", "text": full_prompt},
+                        ],
+                    }
+                ]
+                text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                inputs = processor(text=[text], images=[img], padding=True, return_tensors="pt")
+                if torch.cuda.is_available():
+                    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+                with torch.no_grad():
+                    generated_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
+                prompt_len = inputs["input_ids"].shape[1]
+                trimmed = [out_ids[prompt_len:] for out_ids in generated_ids]
+                raw_text = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0].strip()
+            else:
+                inputs = processor(images=img, text=full_prompt, return_tensors="pt")
+                if torch.cuda.is_available():
+                    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+                with torch.no_grad():
+                    out = model.generate(**inputs, max_new_tokens=max_new_tokens)
+                raw_text = processor.batch_decode(out, skip_special_tokens=True)[0].strip()
+        finally:
+            # Release per-page tensors / images aggressively to keep notebook RAM stable.
+            try:
+                img.close()
+            except Exception:
+                pass
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
 
     caption = raw_text
     tables_md = None
