@@ -26,6 +26,8 @@ Provides-Extra: embeddings
 Requires-Dist: sentence-transformers>=2.7; extra == "embeddings"
 Provides-Extra: mm
 Requires-Dist: pymupdf>=1.24; extra == "mm"
+Requires-Dist: paddleocr[doc-parser]>=3.0.0; extra == "mm"
+Requires-Dist: paddlepaddle>=3.0.0; platform_system != "Darwin" and extra == "mm"
 Requires-Dist: pillow>=10.0; extra == "mm"
 Requires-Dist: open_clip_torch>=2.24; extra == "mm"
 Requires-Dist: torch>=2.2; extra == "mm"
@@ -33,8 +35,13 @@ Requires-Dist: transformers>=4.57.0; extra == "mm"
 Requires-Dist: accelerate>=0.33; extra == "mm"
 Requires-Dist: sentencepiece>=0.2; extra == "mm"
 Requires-Dist: qwen-vl-utils>=0.0.14; extra == "mm"
+Requires-Dist: g4f>=7.1.2; extra == "mm"
+Requires-Dist: langchain-community>=0.3; extra == "mm"
+Requires-Dist: langchain-text-splitters>=0.3; extra == "mm"
 Provides-Extra: multimodal
 Requires-Dist: pymupdf>=1.24; extra == "multimodal"
+Requires-Dist: paddleocr[doc-parser]>=3.0.0; extra == "multimodal"
+Requires-Dist: paddlepaddle>=3.0.0; platform_system != "Darwin" and extra == "multimodal"
 Requires-Dist: pillow>=10.0; extra == "multimodal"
 Requires-Dist: open_clip_torch>=2.24; extra == "multimodal"
 Requires-Dist: torch>=2.2; extra == "multimodal"
@@ -42,6 +49,9 @@ Requires-Dist: transformers>=4.57.0; extra == "multimodal"
 Requires-Dist: accelerate>=0.33; extra == "multimodal"
 Requires-Dist: sentencepiece>=0.2; extra == "multimodal"
 Requires-Dist: qwen-vl-utils>=0.0.14; extra == "multimodal"
+Requires-Dist: g4f>=7.1.2; extra == "multimodal"
+Requires-Dist: langchain-community>=0.3; extra == "multimodal"
+Requires-Dist: langchain-text-splitters>=0.3; extra == "multimodal"
 Provides-Extra: notebook-viz
 Requires-Dist: ipywidgets>=8.1; extra == "notebook-viz"
 Requires-Dist: panel>=1.4; extra == "notebook-viz"
@@ -74,12 +84,6 @@ Requires-Dist: python-dateutil>=2.9; extra == "task2-notebook"
 Requires-Dist: dateparser>=1.2; extra == "task2-notebook"
 Requires-Dist: pymupdf>=1.24; extra == "task2-notebook"
 Requires-Dist: pillow>=10.0; extra == "task2-notebook"
-Requires-Dist: open_clip_torch>=2.24; extra == "task2-notebook"
-Requires-Dist: torch>=2.2; extra == "task2-notebook"
-Requires-Dist: transformers>=4.57.0; extra == "task2-notebook"
-Requires-Dist: accelerate>=0.33; extra == "task2-notebook"
-Requires-Dist: sentencepiece>=0.2; extra == "task2-notebook"
-Requires-Dist: qwen-vl-utils>=0.0.14; extra == "task2-notebook"
 Requires-Dist: ipywidgets>=8.1; extra == "task2-notebook"
 Requires-Dist: panel>=1.4; extra == "task2-notebook"
 Requires-Dist: hvplot>=0.10; extra == "task2-notebook"
@@ -115,8 +119,10 @@ Provides-Extra: tgnn
 Requires-Dist: torch>=2.2; extra == "tgnn"
 Requires-Dist: torch-geometric>=2.6.0; extra == "tgnn"
 Provides-Extra: ocr
-Requires-Dist: paddleocr>=3.0.0; extra == "ocr"
+Requires-Dist: paddleocr[doc-parser]>=3.0.0; extra == "ocr"
 Requires-Dist: paddlepaddle>=3.0.0; platform_system != "Darwin" and extra == "ocr"
+Requires-Dist: langchain-community>=0.3; extra == "ocr"
+Requires-Dist: langchain-text-splitters>=0.3; extra == "ocr"
 Provides-Extra: fullstack
 Requires-Dist: sentence-transformers>=2.7; extra == "fullstack"
 Requires-Dist: pymupdf>=1.24; extra == "fullstack"
@@ -130,8 +136,11 @@ Requires-Dist: qwen-vl-utils>=0.0.14; extra == "fullstack"
 Requires-Dist: python-dateutil>=2.9; extra == "fullstack"
 Requires-Dist: dateparser>=1.2; extra == "fullstack"
 Requires-Dist: torch-geometric>=2.6.0; extra == "fullstack"
-Requires-Dist: paddleocr>=3.0.0; extra == "fullstack"
+Requires-Dist: paddleocr[doc-parser]>=3.0.0; extra == "fullstack"
 Requires-Dist: paddlepaddle>=3.0.0; platform_system != "Darwin" and extra == "fullstack"
+Requires-Dist: g4f>=7.1.2; extra == "fullstack"
+Requires-Dist: langchain-community>=0.3; extra == "fullstack"
+Requires-Dist: langchain-text-splitters>=0.3; extra == "fullstack"
 Provides-Extra: neo4j-rag
 Requires-Dist: neo4j-graphrag>=1.8.0; extra == "neo4j-rag"
 Provides-Extra: rdf-validation
@@ -228,8 +237,8 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev,agents]"
 ```
 
-> Если вы хотите использовать **g4f** (LLM_PROVIDER=g4f или smolagents+g4f),
-> установите также: `pip install -e ".[g4f]"`.
+> `g4f` теперь ставится автоматически вместе с `.[task2_notebook]`, `.[mm]`, `.[multimodal]` и `.[fullstack]`.
+> Отдельный extra `.[g4f]` сохранён для явной установки только g4f.
 
 ### 2) Настройка
 Скопируйте `.env.example` → `.env`.  
@@ -277,7 +286,7 @@ docker compose down -v
 
 Вы можете явно переопределить модель в команде:
 ```bash
-# g4f (если установлен: pip install -e '.[g4f]')
+# g4f (ставится по умолчанию в task2/mm/multimodal/fullstack; отдельно: pip install -e '.[g4f]')
 top-papers-graph run --query "..." --g4f-model deepseek-r1
 
 # (опционально) попробовать в первую очередь конкретные модели (если они есть в g4f/models.py)

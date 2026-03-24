@@ -111,21 +111,15 @@ colab = [
   "pandas>=2.2.2,<2.4",
 ]
 
-# One-shot extra for the Task 2 notebook experience
-# (temporal parsing + multimodal PDF support + notebook UI)
+# One-shot extra for the Task 2 notebook experience.
+# Keep this extra intentionally lightweight so editable installs remain robust in
+# Colab/Jupyter. Heavy multimodal/runtime providers (PaddleOCR, Transformers VLM,
+# open_clip, g4f) are installed by the notebook on a best-effort basis.
 task2_notebook = [
   "python-dateutil>=2.9",
   "dateparser>=1.2",
   "pymupdf>=1.24",
-  "paddleocr[doc-parser]>=3.0.0",
-  "paddlepaddle>=3.0.0; platform_system != 'Darwin'",
   "pillow>=10.0",
-  "open_clip_torch>=2.24",
-  "torch>=2.2",
-  "transformers>=4.57.0",
-  "accelerate>=0.33",
-  "sentencepiece>=0.2",
-  "qwen-vl-utils>=0.0.14",
   "ipywidgets>=8.1",
   "panel>=1.4",
   "hvplot>=0.10",
@@ -134,9 +128,6 @@ task2_notebook = [
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
   "pandas>=2.2.2,<2.4",
-  "g4f>=7.1.2",
-  "langchain-community>=0.3",
-  "langchain-text-splitters>=0.3",
 ]
 
 # Temporal parsing helpers

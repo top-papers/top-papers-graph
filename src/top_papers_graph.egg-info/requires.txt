@@ -100,7 +100,10 @@ qwen-vl-utils>=0.0.14
 python-dateutil>=2.9
 dateparser>=1.2
 torch-geometric>=2.6.0
-paddleocr>=3.0.0
+paddleocr[doc-parser]>=3.0.0
+g4f>=7.1.2
+langchain-community>=0.3
+langchain-text-splitters>=0.3
 
 [fullstack:platform_system != "Darwin"]
 paddlepaddle>=3.0.0
@@ -124,6 +127,7 @@ mcp>=1.0.0
 
 [mm]
 pymupdf>=1.24
+paddleocr[doc-parser]>=3.0.0
 pillow>=10.0
 open_clip_torch>=2.24
 torch>=2.2
@@ -131,9 +135,16 @@ transformers>=4.57.0
 accelerate>=0.33
 sentencepiece>=0.2
 qwen-vl-utils>=0.0.14
+g4f>=7.1.2
+langchain-community>=0.3
+langchain-text-splitters>=0.3
+
+[mm:platform_system != "Darwin"]
+paddlepaddle>=3.0.0
 
 [multimodal]
 pymupdf>=1.24
+paddleocr[doc-parser]>=3.0.0
 pillow>=10.0
 open_clip_torch>=2.24
 torch>=2.2
@@ -141,6 +152,12 @@ transformers>=4.57.0
 accelerate>=0.33
 sentencepiece>=0.2
 qwen-vl-utils>=0.0.14
+g4f>=7.1.2
+langchain-community>=0.3
+langchain-text-splitters>=0.3
+
+[multimodal:platform_system != "Darwin"]
+paddlepaddle>=3.0.0
 
 [neo4j_rag]
 neo4j-graphrag>=1.8.0
@@ -166,7 +183,9 @@ jupyter_bokeh>=4.0
 pandas<2.4,>=2.2.2
 
 [ocr]
-paddleocr>=3.0.0
+paddleocr[doc-parser]>=3.0.0
+langchain-community>=0.3
+langchain-text-splitters>=0.3
 
 [ocr:platform_system != "Darwin"]
 paddlepaddle>=3.0.0
@@ -180,12 +199,6 @@ python-dateutil>=2.9
 dateparser>=1.2
 pymupdf>=1.24
 pillow>=10.0
-open_clip_torch>=2.24
-torch>=2.2
-transformers>=4.57.0
-accelerate>=0.33
-sentencepiece>=0.2
-qwen-vl-utils>=0.0.14
 ipywidgets>=8.1
 panel>=1.4
 hvplot>=0.10
