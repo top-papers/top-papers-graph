@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -73,6 +74,50 @@ def _extract_text_pymupdf(pdf_path: Path) -> str:
         return "\n\n".join(parts)
 
 
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return default
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _pdf_looks_text_native(
+    pdf_path: Path,
+    *,
+    probe_pages: int = 4,
+    min_chars_per_page: int = 400,
+    min_coverage: float = 0.75,
+) -> bool:
+    """Heuristic: prefer local text extraction for born-digital PDFs.
+
+    Many journal PDFs already contain a dense text layer. Running PP-Structure on
+    such files is unnecessarily slow and can trigger worker timeouts while adding
+    little value over PyMuPDF for the Task 2 pipeline.
+    """
+
+    if not _bool_env("OCR_AUTO_SKIP_PADDLE_FOR_TEXT_NATIVE", True):
+        return False
+
+    try:
+        import fitz  # type: ignore
+
+        with fitz.open(str(pdf_path)) as doc:
+            total_pages = len(doc)
+            if total_pages <= 0:
+                return False
+            limit = min(total_pages, max(1, int(probe_pages)))
+            rich_pages = 0
+            for page_index in range(limit):
+                page = doc.load_page(page_index)
+                text = (page.get_text("text", sort=True) or "").strip()
+                if len(text) >= int(min_chars_per_page):
+                    rich_pages += 1
+            return (rich_pages / float(limit)) >= float(min_coverage)
+    except Exception:
+        return False
+
 def _ingest_pdf_pymupdf(pdf_path: Path, meta: Dict[str, Any], out_dir: Path) -> Path:
     text = _extract_text_pymupdf(pdf_path)
     pid = str(meta.get("id") or pdf_path.stem)
@@ -100,7 +145,21 @@ def ingest_pdf_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, progres
     if backend == "grobid":
         return ingest_pdf(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
 
-    # Auto mode: prefer structured multimodal OCR/layout first, then local text fallback.
+    # Auto mode: prefer the lightweight local parser for born-digital PDFs with
+    # an obvious text layer; otherwise try structured OCR/layout first.
+    if _pdf_looks_text_native(pdf_path):
+        if progress_callback is not None:
+            progress_callback({
+                "event": "ocr_short_circuit",
+                "paper_id": str(meta.get("id") or pdf_path.stem),
+                "pdf_path": str(pdf_path),
+                "current": 1,
+                "total": 1,
+                "message": "PDF already contains a dense text layer -> using PyMuPDF directly",
+            })
+        console.print(f"[cyan]Text-native PDF detected:[/cyan] {pdf_path.name} -> using local parser directly.")
+        return _ingest_pdf_pymupdf(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
+
     try:
         return ingest_pdf_paddleocr(pdf_path=pdf_path, meta=meta, out_dir=out_dir, progress_callback=progress_callback)
     except PaddleOCRUnavailableError as e:

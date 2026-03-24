@@ -101,3 +101,51 @@ def test_ingest_pdf_auto_falls_back_after_paddle_timeout(monkeypatch, tmp_path: 
 
     assert out == fallback_dir
     assert any("fallback to pymupdf" in (e.get("message") or "").lower() for e in events)
+
+
+def test_ingest_pdf_auto_short_circuits_text_native_pdf(monkeypatch, tmp_path: Path) -> None:
+    import fitz  # type: ignore
+    from scireason.ingest import pipeline as ingest_pipe
+
+    pdf_path = tmp_path / "text_native.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    for i in range(40):
+        page.insert_text((72, 72 + 12 * i), f"This is selectable text line {i}.", fontsize=11)
+    doc.save(pdf_path)
+    doc.close()
+
+    meta = {"id": "paper-text", "title": "Text Native Demo"}
+
+    def _should_not_run_paddle(*args, **kwargs):
+        raise AssertionError("PaddleOCR should be skipped for text-native PDFs")
+
+    fallback_dir = tmp_path / "processed" / "paper-text"
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(ingest_pipe, "ingest_pdf_paddleocr", _should_not_run_paddle)
+    monkeypatch.setattr(ingest_pipe, "_ingest_pdf_pymupdf", lambda *args, **kwargs: fallback_dir)
+
+    events = []
+    out = ingest_pipe.ingest_pdf_auto(pdf_path, meta, tmp_path / "processed", progress_callback=events.append)
+
+    assert out == fallback_dir
+    assert any(e.get("event") == "ocr_short_circuit" for e in events)
+
+
+def test_paddle_timeout_scales_with_pdf_page_count(monkeypatch, tmp_path: Path) -> None:
+    import fitz  # type: ignore
+    from scireason.ingest import paddleocr_pipeline as pop
+
+    pdf_path = tmp_path / "eleven_pages.pdf"
+    doc = fitz.open()
+    for _ in range(11):
+        doc.new_page()
+    doc.save(pdf_path)
+    doc.close()
+
+    monkeypatch.setattr(pop.settings, "paddleocr_worker_timeout_seconds", 90)
+    monkeypatch.setenv("PADDLEOCR_WORKER_TIMEOUT_PER_PAGE_SECONDS", "8")
+    monkeypatch.setenv("PADDLEOCR_WORKER_TIMEOUT_MAX_SECONDS", "900")
+
+    assert pop._effective_worker_timeout_seconds(pdf_path) == 170

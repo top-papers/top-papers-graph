@@ -24,8 +24,6 @@ class Settings(BaseSettings):
     ocr_backend: str = "auto"  # auto(default=PaddleOCR->local fallback)|paddleocr|grobid|pymupdf
     paddleocr_lang: str | None = None
     paddleocr_worker_timeout_seconds: int = 90
-    paddleocr_worker_timeout_per_page_seconds: int = 8
-    paddleocr_worker_timeout_max_seconds: int = 900
 
     # ===== Infra =====
     neo4j_uri: str = "bolt://localhost:7687"
