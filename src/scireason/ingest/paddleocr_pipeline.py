@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import os
+import subprocess
 import sys
+import tempfile
 import types
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -329,23 +332,57 @@ def _fallback_pdf_records(pdf_path: Path, paper_id: str) -> List[ChunkRecord]:
 
 
 
-def extract_pdf_chunks_paddleocr(pdf_path: Path, *, paper_id: str, lang: Optional[str] = None) -> List[ChunkRecord]:
-    pipeline, backend_name = _load_pipeline(lang=lang)
-    try:
-        output = pipeline.predict(input=str(pdf_path))
-    except TypeError:
-        output = pipeline.predict(str(pdf_path))
-
+def _worker_payload_to_records(payload: Any) -> List[ChunkRecord]:
+    if not isinstance(payload, list):
+        raise PaddleOCRUnavailableError("PaddleOCR worker returned malformed payload.")
     records: List[ChunkRecord] = []
-    for page_index, result in enumerate(output):
-        page_records = _records_from_predict_result(
-            result,
-            paper_id=paper_id,
-            page_index=page_index,
-            source_backend=backend_name,
-        )
-        records.extend(page_records)
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        records.append(ChunkRecord(**item))
+    return records
 
+
+def _extract_pdf_chunks_paddleocr_worker(pdf_path: Path, *, paper_id: str, lang: Optional[str] = None) -> List[ChunkRecord]:
+    env = os.environ.copy()
+    env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", os.environ.get("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True"))
+    env.setdefault("PADDLE_PDX_MODEL_SOURCE", os.environ.get("PADDLE_PDX_MODEL_SOURCE", "BOS"))
+
+    with tempfile.NamedTemporaryFile("w+", suffix=".json", delete=False) as tmp:
+        out_path = Path(tmp.name)
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "scireason.ingest.paddleocr_worker",
+        "--pdf",
+        str(pdf_path),
+        "--paper-id",
+        paper_id,
+        "--out",
+        str(out_path),
+    ]
+    if lang:
+        cmd.extend(["--lang", str(lang)])
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    stderr = (proc.stderr or "").strip()
+    stdout = (proc.stdout or "").strip()
+    try:
+        if proc.returncode != 0:
+            detail = stderr or stdout or f"worker exited with code {proc.returncode}"
+            raise PaddleOCRUnavailableError(detail)
+        payload = json.loads(out_path.read_text(encoding="utf-8"))
+        return _worker_payload_to_records(payload)
+    finally:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def extract_pdf_chunks_paddleocr(pdf_path: Path, *, paper_id: str, lang: Optional[str] = None) -> List[ChunkRecord]:
+    records = _extract_pdf_chunks_paddleocr_worker(pdf_path=pdf_path, paper_id=paper_id, lang=lang)
     if not records:
         console.print("[yellow]PaddleOCR returned no structured chunks; using PyMuPDF fallback.[/yellow]")
         return _fallback_pdf_records(pdf_path=pdf_path, paper_id=paper_id)
