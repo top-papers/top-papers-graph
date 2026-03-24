@@ -79,3 +79,25 @@ def test_notebook_exposes_progress_widgets_and_callback() -> None:
     assert "progress_bar = W.IntProgress" in cell4
     assert "def _task2_progress_callback(payload):" in cell4
     assert "'progress_callback': _task2_progress_callback" in cell4
+
+
+
+def test_ingest_pdf_auto_falls_back_after_paddle_timeout(monkeypatch, tmp_path: Path) -> None:
+    from scireason.ingest import pipeline as ingest_pipe
+    from scireason.ingest.paddleocr_pipeline import PaddleOCRUnavailableError
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%test")
+    meta = {"id": "paper-1", "title": "Demo"}
+
+    monkeypatch.setattr(ingest_pipe, "ingest_pdf_paddleocr", lambda *args, **kwargs: (_ for _ in ()).throw(PaddleOCRUnavailableError("worker timed out")))
+
+    fallback_dir = tmp_path / "processed" / "paper-1"
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(ingest_pipe, "_ingest_pdf_pymupdf", lambda *args, **kwargs: fallback_dir)
+
+    events = []
+    out = ingest_pipe.ingest_pdf_auto(pdf_path, meta, tmp_path / "processed", progress_callback=events.append)
+
+    assert out == fallback_dir
+    assert any("fallback to pymupdf" in (e.get("message") or "").lower() for e in events)

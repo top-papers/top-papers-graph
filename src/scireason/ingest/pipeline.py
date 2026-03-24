@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 from rich.console import Console
 
@@ -81,7 +81,7 @@ def _ingest_pdf_pymupdf(pdf_path: Path, meta: Dict[str, Any], out_dir: Path) -> 
     return save_paper(out_dir, meta=meta, chunks=chunks)
 
 
-def ingest_pdf_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path) -> Path:
+def ingest_pdf_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Path:
     """Ingest PDF using the best available backend.
 
     Priority in `OCR_BACKEND=auto`:
@@ -94,7 +94,7 @@ def ingest_pdf_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path) -> Path
     backend = str(getattr(settings, "ocr_backend", "auto") or "auto").strip().lower()
 
     if backend in {"paddleocr", "paddle", "ppstructure", "pp_structure"}:
-        return ingest_pdf_paddleocr(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
+        return ingest_pdf_paddleocr(pdf_path=pdf_path, meta=meta, out_dir=out_dir, progress_callback=progress_callback)
     if backend in {"pymupdf", "fitz", "local"}:
         return _ingest_pdf_pymupdf(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
     if backend == "grobid":
@@ -102,12 +102,30 @@ def ingest_pdf_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path) -> Path
 
     # Auto mode: prefer structured multimodal OCR/layout first, then local text fallback.
     try:
-        return ingest_pdf_paddleocr(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
+        return ingest_pdf_paddleocr(pdf_path=pdf_path, meta=meta, out_dir=out_dir, progress_callback=progress_callback)
     except PaddleOCRUnavailableError as e:
+        if progress_callback is not None:
+            progress_callback({
+                "event": "ocr_fallback",
+                "paper_id": str(meta.get("id") or pdf_path.stem),
+                "pdf_path": str(pdf_path),
+                "current": 1,
+                "total": 1,
+                "message": f"Fallback to PyMuPDF: {e}",
+            })
         if not getattr(ingest_pdf_auto, "_paddle_warned", False):
             console.print(f"[yellow]{e} Буду использовать локальный парсер (PyMuPDF / pypdf).[/yellow]")
             setattr(ingest_pdf_auto, "_paddle_warned", True)
     except Exception as e:
+        if progress_callback is not None:
+            progress_callback({
+                "event": "ocr_fallback",
+                "paper_id": str(meta.get("id") or pdf_path.stem),
+                "pdf_path": str(pdf_path),
+                "current": 1,
+                "total": 1,
+                "message": f"PaddleOCR failed -> fallback to PyMuPDF ({type(e).__name__}: {e})",
+            })
         console.print(f"[yellow]PaddleOCR failed ({type(e).__name__}: {e}). Falling back to local parsing...[/yellow]")
 
     return _ingest_pdf_pymupdf(pdf_path=pdf_path, meta=meta, out_dir=out_dir)

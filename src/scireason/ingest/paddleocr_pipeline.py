@@ -9,7 +9,7 @@ import sys
 import tempfile
 import types
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
 
@@ -18,6 +18,11 @@ from ..contracts import ChunkRecord
 from .store import save_paper
 
 console = Console()
+
+
+def _emit_progress(progress_callback: Optional[Callable[[Dict[str, Any]], None]], **payload: Any) -> None:
+    if progress_callback is not None:
+        progress_callback(payload)
 
 
 class PaddleOCRUnavailableError(RuntimeError):
@@ -401,7 +406,13 @@ def _worker_payload_to_records(payload: Any) -> List[ChunkRecord]:
     return records
 
 
-def _extract_pdf_chunks_paddleocr_worker(pdf_path: Path, *, paper_id: str, lang: Optional[str] = None) -> List[ChunkRecord]:
+def _extract_pdf_chunks_paddleocr_worker(
+    pdf_path: Path,
+    *,
+    paper_id: str,
+    lang: Optional[str] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> List[ChunkRecord]:
     env = os.environ.copy()
     env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", os.environ.get("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True"))
     env.setdefault("PADDLE_PDX_MODEL_SOURCE", os.environ.get("PADDLE_PDX_MODEL_SOURCE", "BOS"))
@@ -423,15 +434,51 @@ def _extract_pdf_chunks_paddleocr_worker(pdf_path: Path, *, paper_id: str, lang:
     if lang:
         cmd.extend(["--lang", str(lang)])
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
-    stderr = (proc.stderr or "").strip()
-    stdout = (proc.stdout or "").strip()
+    timeout_seconds = int(getattr(settings, "paddleocr_worker_timeout_seconds", 90) or 90)
+    console.print(f"[cyan]PaddleOCR worker:[/cyan] {pdf_path.name} (timeout={timeout_seconds}s)")
+    _emit_progress(
+        progress_callback,
+        event="ocr_start",
+        paper_id=paper_id,
+        pdf_path=str(pdf_path),
+        current=0,
+        total=1,
+        message=f"PaddleOCR/PP-Structure: старт (timeout {timeout_seconds}s)",
+    )
     try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout_seconds)
+        stderr = (proc.stderr or "").strip()
+        stdout = (proc.stdout or "").strip()
         if proc.returncode != 0:
             detail = stderr or stdout or f"worker exited with code {proc.returncode}"
             raise PaddleOCRUnavailableError(detail)
         payload = json.loads(out_path.read_text(encoding="utf-8"))
-        return _worker_payload_to_records(payload)
+        records = _worker_payload_to_records(payload)
+        _emit_progress(
+            progress_callback,
+            event="ocr_done",
+            paper_id=paper_id,
+            pdf_path=str(pdf_path),
+            current=1,
+            total=1,
+            message=f"PaddleOCR/PP-Structure: готово, чанков {len(records)}",
+        )
+        return records
+    except subprocess.TimeoutExpired as e:
+        console.print(f"[yellow]PaddleOCR worker timeout for {pdf_path.name}: {timeout_seconds}s. Falling back to local parser...[/yellow]")
+        _emit_progress(
+            progress_callback,
+            event="ocr_timeout",
+            paper_id=paper_id,
+            pdf_path=str(pdf_path),
+            current=1,
+            total=1,
+            message=f"PaddleOCR timeout after {timeout_seconds}s -> fallback to PyMuPDF",
+        )
+        raise PaddleOCRUnavailableError(
+            f"PaddleOCR worker timed out after {timeout_seconds}s for {pdf_path.name}. "
+            "Falling back to local parser (PyMuPDF / pypdf)."
+        ) from e
     finally:
         try:
             out_path.unlink(missing_ok=True)
@@ -439,8 +486,19 @@ def _extract_pdf_chunks_paddleocr_worker(pdf_path: Path, *, paper_id: str, lang:
             pass
 
 
-def extract_pdf_chunks_paddleocr(pdf_path: Path, *, paper_id: str, lang: Optional[str] = None) -> List[ChunkRecord]:
-    records = _extract_pdf_chunks_paddleocr_worker(pdf_path=pdf_path, paper_id=paper_id, lang=lang)
+def extract_pdf_chunks_paddleocr(
+    pdf_path: Path,
+    *,
+    paper_id: str,
+    lang: Optional[str] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> List[ChunkRecord]:
+    records = _extract_pdf_chunks_paddleocr_worker(
+        pdf_path=pdf_path,
+        paper_id=paper_id,
+        lang=lang,
+        progress_callback=progress_callback,
+    )
     if not records:
         console.print("[yellow]PaddleOCR returned no structured chunks; using PyMuPDF fallback.[/yellow]")
         return _fallback_pdf_records(pdf_path=pdf_path, paper_id=paper_id)
@@ -448,8 +506,13 @@ def extract_pdf_chunks_paddleocr(pdf_path: Path, *, paper_id: str, lang: Optiona
 
 
 
-def ingest_pdf_paddleocr(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, *, lang: Optional[str] = None) -> Path:
+def ingest_pdf_paddleocr(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, *, lang: Optional[str] = None, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Path:
     pid = str(meta.get("id") or pdf_path.stem)
-    records = extract_pdf_chunks_paddleocr(pdf_path=pdf_path, paper_id=pid, lang=lang or getattr(settings, "paddleocr_lang", None))
+    records = extract_pdf_chunks_paddleocr(
+        pdf_path=pdf_path,
+        paper_id=pid,
+        lang=lang or getattr(settings, "paddleocr_lang", None),
+        progress_callback=progress_callback,
+    )
     console.print(f"[green]PaddleOCR chunks:[/green] {len(records)}")
     return save_paper(out_dir, meta=meta, chunks=records)

@@ -41,7 +41,7 @@ def ingest_pdf_multimodal_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Pa
 
     Uses `ingest_pdf_auto()` for document parsing (PaddleOCR -> PyMuPDF fallback), then runs the multimodal stage.
     """
-    paper_dir = ingest_pdf_auto(pdf_path=pdf_path, meta=meta, out_dir=out_dir)
+    paper_dir = ingest_pdf_auto(pdf_path=pdf_path, meta=meta, out_dir=out_dir, progress_callback=progress_callback)
     paper_id = meta.get("id") or paper_dir.name
     prompt_context = meta.get("title", "") or meta.get("domain", "Science")
 
