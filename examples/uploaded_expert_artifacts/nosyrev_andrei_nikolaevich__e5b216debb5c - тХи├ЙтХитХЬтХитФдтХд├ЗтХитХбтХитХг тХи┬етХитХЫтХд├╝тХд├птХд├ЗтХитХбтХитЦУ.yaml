@@ -1,0 +1,126 @@
+artifact_version: 2
+topic: Наблюдается глобальная тенденция к снижению температуры и плотности термосферы
+  Земли начиная с 1960-х годов
+domain: Q178043
+cutoff_year: 2000
+papers:
+- id: https://doi.org/10.1002/2015JA021047
+  year: 2015
+  title: Altitude and solar activity dependence of 1967–2005 thermospheric density
+    trends derived from orbital drag
+- id: https://www.ipcc.ch/report/ar2/wg1/
+  year: 1995
+  title: 'Climate change 1995: The science of climate change: contribution of working
+    group I to the second assessment report of the Intergovernmental Panel on Climate
+    Change'
+steps:
+- step_id: 1
+  claim: С конца 18 века наблюдается увеличение концентрации углекислого газа в атмосфере
+    Земли
+  sources:
+  - type: text
+    source: https://www.ipcc.ch/report/ar2/wg1/
+    snippet_or_summary: '"Carbon dioxide concentrations have increased by almost 30%
+      from about 280 ppmv in the late 18th century to 358 ppmv in 1994. This increase
+      is primarily due to combustion of fossil fuel and cement production, and to
+      land-use change."
+
+      Перевод: Концентрация углекислого газа увеличилась почти на 30%: с примерно
+      280 ppmv в конце 18 века до 358 ppmv в 1994 году. Это увеличение в основном
+      связано со сжиганием ископаемого топлива и производством цемента, а также с
+      изменением землепользования.'
+    page: '83'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: С конца 18 века наблюдается увеличение концентрации углекислого газа
+    в атмосфере Земли
+  next_question: Как увеличение концентрации углекислого газа может повлиять на атмосферу
+    согласно теоретическим (модельным) представлениям?
+- step_id: 2
+  claim: Увеличение концентрации CO2 в атмосфере приводит к снижению температуры и
+    плотности термосферы
+  sources:
+  - type: text
+    source: https://doi.org/10.1002/2015JA021047
+    snippet_or_summary: '"Infrared emission in the lower thermosphere by CO2 is a
+      key mechanism by which the entire thermosphere sheds the ultraviolet energy
+      it absorbs from the Sun. CO2 therefore contributes signiﬁcantly to the maintenance
+      of approximate thermal equilibrium in the thermosphere. Because the emission
+      rate is proportional to the concentration of CO2, anthropogenic increases in
+      its thermospheric concentration are expected to result in a cooler, more contracted
+      thermosphere, and consequently lower mass density at ﬁxed altitudes; similar
+      enhanced CO2 cooling in the stratosphere and mesosphere will further reduce
+      density by lowering the height of the base of thermosphere."
+
+
+      Перевод: Инфракрасное излучение в нижней термосфере, вызываемое CO2, является
+      ключевым механизмом, посредством которого вся термосфера отводит поглощенную
+      Солнцем ультрафиолетовую энергию. Таким образом, CO2 вносит значительный вклад
+      в поддержание приблизительного теплового равновесия в термосфере. Поскольку
+      скорость излучения пропорциональна концентрации CO2, ожидается, что антропогенное
+      увеличение его концентрации в термосфере приведет к более холодной термосфере
+      и, следовательно, к снижению плотности массы на фиксированных высотах; аналогичное
+      усиленное охлаждение CO2 в стратосфере и мезосфере еще больше снизит плотность
+      за счет уменьшения высоты основания термосферы.'
+    page: '1'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: Согласно предыдущей работе, концентрация CO2 в атмосфере растёт. Согласно
+    текущей работе, это должно приводить к снижению температуры и плотности термосферы.
+  next_question: Подтверждается ли на практике теоретически ожидаемое снижение температуры
+    и плотности термосферы?
+- step_id: 3
+  claim: На основе анализа скорости торможения космических объектов за период 1967-2005
+    г. подтвержден долгосрочный тренд на снижение температуры и плотности термосферы
+  sources:
+  - type: text
+    source: https://doi.org/10.1002/2015JA021047
+    snippet_or_summary: '"We examine 1967–2005 thermospheric mass density trends derived
+      from satellite orbit data, as a function of altitude, solar ﬂux, and geomagnetic
+      activity. At 400 km altitude, the estimated 1967–2005 trend is -2.0 ± 0.5% per
+      decade. The estimated trends become increasingly negative with increasing height
+      between 250 and 575 km, suggesting an exospheric temperature trend of -1 to
+      -2 K per decade."
+
+
+      Перевод: Мы исследуем тенденции изменения плотности массы термосферы в период
+      1967–2005 годов, полученные на основе данных об орбитах спутников, в зависимости
+      от высоты, солнечного потока и геомагнитной активности. На высоте 400 км оценочная
+      тенденция за период 1967–2005 годов составляет -2,0 ± 0,5% за десятилетие. Оценочные
+      тенденции становятся все более отрицательными с увеличением высоты в диапазоне
+      от 250 до 575 км, что указывает на тенденцию изменения температуры экзосферы
+      от -1 до -2 К за десятилетие.'
+    page: '1'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: Согласно предыдущим работам, ожидается уменьшение температуры и плотности
+    термосферы вследствие увеличения концентрации CO2 в термосфере. В этой работе
+    эти теоретические ожидания подтверждаются на основе анализа анализа скорости торможения
+    космических объектов за период 1967-2005 годы.
+  next_question: '-'
+edges:
+- - 1
+  - 2
+- - 1
+  - 3
+- - 2
+  - 3
+generated_at: '2026-03-09T15:36:47Z'
+expert:
+  last_name: Носырев
+  first_name: Андрей
+  patronymic: Николаевич
+  full_name: Носырев Андрей Николаевич
+  latin_full_name: Nosyrev Andrei Nikolaevich
+  latin_slug: nosyrev_andrei_nikolaevich
+artifact_hash: e5b216debb5c
+submission_id: nosyrev_andrei_nikolaevich__e5b216debb5c

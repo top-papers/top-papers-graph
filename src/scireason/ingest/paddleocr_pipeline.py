@@ -31,29 +31,15 @@ def configure_paddle_environment() -> None:
 
 
 def _install_langchain_docstore_shim() -> None:
-    """Provide a lightweight compatibility shim for older PaddleX imports.
+    """Provide lightweight compatibility shims for older PaddleX imports.
 
-    Some recent PaddleOCR/PaddleX code paths still import
-    ``langchain.docstore.document.Document``, while current LangChain docs
-    point users to ``langchain_community.docstore`` and ``langchain_core``.
-    We expose the legacy module path at runtime so PP-StructureV3 can start
-    without forcing a downgrade of LangChain.
+    Recent PaddleOCR/PaddleX releases may still import legacy LangChain paths
+    such as ``langchain.docstore.document`` and ``langchain.text_splitter``.
+    Current LangChain packages expose the same concepts via
+    ``langchain_core``, ``langchain_community`` and
+    ``langchain_text_splitters``. We expose those legacy module paths at
+    runtime so PP-StructureV3 can start without forcing a downgrade.
     """
-    try:
-        importlib.import_module("langchain.docstore.document")
-        return
-    except Exception:
-        pass
-
-    try:
-        from langchain_core.documents import Document  # type: ignore
-    except Exception:
-        class Document:  # type: ignore[override]
-            def __init__(self, page_content: str = "", metadata: Optional[dict] = None, **kwargs):
-                self.page_content = page_content
-                self.metadata = metadata or {}
-                for key, value in kwargs.items():
-                    setattr(self, key, value)
 
     root_mod = sys.modules.get("langchain")
     if root_mod is None:
@@ -61,44 +47,111 @@ def _install_langchain_docstore_shim() -> None:
         root_mod.__path__ = []  # type: ignore[attr-defined]
         sys.modules["langchain"] = root_mod
 
-    docstore_pkg = sys.modules.get("langchain.docstore")
-    if docstore_pkg is None:
-        docstore_pkg = types.ModuleType("langchain.docstore")
-        docstore_pkg.__path__ = []  # type: ignore[attr-defined]
-        sys.modules["langchain.docstore"] = docstore_pkg
-        setattr(root_mod, "docstore", docstore_pkg)
-
-    document_mod = sys.modules.get("langchain.docstore.document")
-    if document_mod is None:
-        document_mod = types.ModuleType("langchain.docstore.document")
-        sys.modules["langchain.docstore.document"] = document_mod
-    setattr(document_mod, "Document", Document)
-    setattr(docstore_pkg, "document", document_mod)
-
+    # ---- docstore.document / docstore.base / docstore.in_memory ----
     try:
-        from langchain_community.docstore.base import AddableMixin, Docstore  # type: ignore
-
-        base_mod = sys.modules.get("langchain.docstore.base")
-        if base_mod is None:
-            base_mod = types.ModuleType("langchain.docstore.base")
-            sys.modules["langchain.docstore.base"] = base_mod
-        setattr(base_mod, "Docstore", Docstore)
-        setattr(base_mod, "AddableMixin", AddableMixin)
-        setattr(docstore_pkg, "base", base_mod)
+        importlib.import_module("langchain.docstore.document")
     except Exception:
-        pass
+        try:
+            from langchain_core.documents import Document  # type: ignore
+        except Exception:
+            class Document:  # type: ignore[override]
+                def __init__(self, page_content: str = "", metadata: Optional[dict] = None, **kwargs):
+                    self.page_content = page_content
+                    self.metadata = metadata or {}
+                    for key, value in kwargs.items():
+                        setattr(self, key, value)
 
+        docstore_pkg = sys.modules.get("langchain.docstore")
+        if docstore_pkg is None:
+            docstore_pkg = types.ModuleType("langchain.docstore")
+            docstore_pkg.__path__ = []  # type: ignore[attr-defined]
+            sys.modules["langchain.docstore"] = docstore_pkg
+            setattr(root_mod, "docstore", docstore_pkg)
+
+        document_mod = sys.modules.get("langchain.docstore.document")
+        if document_mod is None:
+            document_mod = types.ModuleType("langchain.docstore.document")
+            sys.modules["langchain.docstore.document"] = document_mod
+        setattr(document_mod, "Document", Document)
+        setattr(docstore_pkg, "document", document_mod)
+
+        try:
+            from langchain_community.docstore.base import AddableMixin, Docstore  # type: ignore
+
+            base_mod = sys.modules.get("langchain.docstore.base")
+            if base_mod is None:
+                base_mod = types.ModuleType("langchain.docstore.base")
+                sys.modules["langchain.docstore.base"] = base_mod
+            setattr(base_mod, "Docstore", Docstore)
+            setattr(base_mod, "AddableMixin", AddableMixin)
+            setattr(docstore_pkg, "base", base_mod)
+        except Exception:
+            pass
+
+        try:
+            from langchain_community.docstore.in_memory import InMemoryDocstore  # type: ignore
+
+            in_memory_mod = sys.modules.get("langchain.docstore.in_memory")
+            if in_memory_mod is None:
+                in_memory_mod = types.ModuleType("langchain.docstore.in_memory")
+                sys.modules["langchain.docstore.in_memory"] = in_memory_mod
+            setattr(in_memory_mod, "InMemoryDocstore", InMemoryDocstore)
+            setattr(docstore_pkg, "in_memory", in_memory_mod)
+        except Exception:
+            pass
+
+    # ---- text_splitter ----
     try:
-        from langchain_community.docstore.in_memory import InMemoryDocstore  # type: ignore
-
-        in_memory_mod = sys.modules.get("langchain.docstore.in_memory")
-        if in_memory_mod is None:
-            in_memory_mod = types.ModuleType("langchain.docstore.in_memory")
-            sys.modules["langchain.docstore.in_memory"] = in_memory_mod
-        setattr(in_memory_mod, "InMemoryDocstore", InMemoryDocstore)
-        setattr(docstore_pkg, "in_memory", in_memory_mod)
+        importlib.import_module("langchain.text_splitter")
     except Exception:
-        pass
+        splitter_mod = sys.modules.get("langchain.text_splitter")
+        if splitter_mod is None:
+            splitter_mod = types.ModuleType("langchain.text_splitter")
+            sys.modules["langchain.text_splitter"] = splitter_mod
+        setattr(root_mod, "text_splitter", splitter_mod)
+
+        try:
+            from langchain_text_splitters import (  # type: ignore
+                CharacterTextSplitter,
+                RecursiveCharacterTextSplitter,
+                TextSplitter,
+                TokenTextSplitter,
+            )
+            try:
+                from langchain_text_splitters.base import split_text_on_tokens  # type: ignore
+            except Exception:
+                split_text_on_tokens = None
+        except Exception:
+            class TextSplitter:  # type: ignore[override]
+                def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 0, **kwargs):
+                    self.chunk_size = chunk_size
+                    self.chunk_overlap = chunk_overlap
+
+                def split_text(self, text: str):
+                    if not text:
+                        return []
+                    step = max(1, self.chunk_size - self.chunk_overlap)
+                    return [text[i:i + self.chunk_size] for i in range(0, len(text), step)]
+
+            class CharacterTextSplitter(TextSplitter):
+                pass
+
+            class RecursiveCharacterTextSplitter(TextSplitter):
+                pass
+
+            class TokenTextSplitter(TextSplitter):
+                pass
+
+            def split_text_on_tokens(*, text: str, tokenizer=None):
+                splitter = TokenTextSplitter()
+                return splitter.split_text(text)
+
+        setattr(splitter_mod, "TextSplitter", TextSplitter)
+        setattr(splitter_mod, "CharacterTextSplitter", CharacterTextSplitter)
+        setattr(splitter_mod, "RecursiveCharacterTextSplitter", RecursiveCharacterTextSplitter)
+        setattr(splitter_mod, "TokenTextSplitter", TokenTextSplitter)
+        if split_text_on_tokens is not None:
+            setattr(splitter_mod, "split_text_on_tokens", split_text_on_tokens)
 
 
 
@@ -139,8 +192,8 @@ def _paddle_install_hint(*, paddle_present: bool, paddleocr_present: bool) -> st
     return (
         "PaddleOCR is installed, but the PP-Structure document parser is unavailable. "
         "Install/upgrade the document parsing extras with "
-        "pip install 'paddleocr[doc-parser]>=3.0.0', make sure PaddlePaddle is installed, "
-        "and keep the LangChain compatibility shim enabled for legacy PaddleX imports."
+        "pip install 'paddleocr[doc-parser]>=3.0.0' 'langchain-community>=0.3' 'langchain-text-splitters>=0.3', "
+        "make sure PaddlePaddle is installed, and keep the LangChain compatibility shim enabled for legacy PaddleX imports."
     )
 
 
@@ -158,6 +211,11 @@ def _load_pipeline(lang: Optional[str] = None):
         ppv3_cls = PPStructureV3
     except Exception as e:
         errors.append(f"PPStructureV3 import: {type(e).__name__}: {e}")
+        msg = str(e).lower()
+        if ("reinitialization is not supported" in msg or "langchain.docstore" in msg or "langchain.text_splitter" in msg or "langchain_text_splitters" in msg):
+            hint = _paddle_install_hint(paddle_present=paddle_present, paddleocr_present=paddleocr_present)
+            detail = " | ".join(errors[-2:]) if errors else "no additional diagnostics"
+            raise PaddleOCRUnavailableError(f"{hint} Diagnostics: {detail}") from e
 
     if ppv3_cls is not None:
         try:
@@ -166,7 +224,7 @@ def _load_pipeline(lang: Optional[str] = None):
         except Exception as e:
             errors.append(f"PPStructureV3: {type(e).__name__}: {e}")
             msg = str(e).lower()
-            if "reinitialization is not supported" in msg or "langchain.docstore" in msg:
+            if ("reinitialization is not supported" in msg or "langchain.docstore" in msg or "langchain.text_splitter" in msg or "langchain_text_splitters" in msg):
                 hint = _paddle_install_hint(paddle_present=paddle_present, paddleocr_present=paddleocr_present)
                 detail = " | ".join(errors[-2:]) if errors else "no additional diagnostics"
                 raise PaddleOCRUnavailableError(f"{hint} Diagnostics: {detail}") from e

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 import importlib.util
+import os
 from pathlib import Path
 from typing import Optional, Literal
 
@@ -13,6 +14,8 @@ from ..config import settings
 
 
 console = Console()
+
+_G4F_AUTH_DISABLED = False
 
 
 Backend = Literal["auto", "none", "qwen2_vl", "qwen3_vl", "llava", "phi3_vision", "g4f"]
@@ -121,8 +124,19 @@ def _resolve_model_id_for_backend(backend: Backend, model_id: Optional[str]) -> 
     return requested
 
 
+def _missing_auth_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "missingautherror" in msg or "api key is required" in msg or "add a \"api_key\"" in msg
+
+
 def _resolve_backend(backend: Optional[Backend], model_id: Optional[str]) -> Backend:
+    global _G4F_AUTH_DISABLED
     requested = str(backend or getattr(settings, "vlm_backend", "none") or "none").strip().lower()
+
+    if requested == "g4f" and _G4F_AUTH_DISABLED:
+        if _has_local_vlm_stack():
+            return "qwen2_vl"
+        return "none"
 
     if requested == "auto":
         if model_id and ("Qwen/Qwen3-VL" in model_id or "Qwen3-VL" in model_id):
@@ -316,6 +330,31 @@ def describe_image(
             max_new_tokens=max_new_tokens,
         )
     except Exception as e:
+        global _G4F_AUTH_DISABLED
+        if effective_backend == "g4f" and _missing_auth_error(e):
+            _G4F_AUTH_DISABLED = True
+            if _has_local_vlm_stack():
+                console.print(
+                    f"[yellow]g4f требует аутентификацию для текущего provider/model; переключаю VLM на локальный Transformers backend начиная с {image_path.name}.[/yellow]"
+                )
+                try:
+                    fallback_model = _resolve_model_id_for_backend("qwen2_vl", None)
+                    return _describe_image_qwen(
+                        image_path=image_path,
+                        prompt=prompt,
+                        model_id=fallback_model,
+                        max_new_tokens=max_new_tokens,
+                    )
+                except Exception as inner_e:
+                    console.print(
+                        f"[yellow]Локальный VLM fallback для {image_path.name} тоже недоступен: {type(inner_e).__name__}: {inner_e}. Продолжаю без caption/tables/equations.[/yellow]"
+                    )
+                    return VLMResult(caption="")
+            console.print(
+                f"[yellow]g4f требует API key или другой provider; отключаю g4f-captioning для оставшихся страниц после {image_path.name}.[/yellow]"
+            )
+            return VLMResult(caption="")
+
         console.print(
             f"[yellow]VLM warning for {image_path.name} ({effective_backend}): {type(e).__name__}: {e}. "
             "Продолжаю без caption/tables/equations для этой страницы.[/yellow]"

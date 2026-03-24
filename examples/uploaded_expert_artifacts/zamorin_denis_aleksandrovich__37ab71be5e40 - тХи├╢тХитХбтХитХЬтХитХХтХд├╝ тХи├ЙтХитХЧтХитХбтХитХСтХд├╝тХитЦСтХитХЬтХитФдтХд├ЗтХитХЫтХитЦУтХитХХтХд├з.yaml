@@ -1,0 +1,243 @@
+artifact_version: 2
+topic: открытие гексатической фазы в двумерной структуре пылевых частиц в плазме
+domain: Q192864
+cutoff_year: 2025
+papers:
+- id: DOI:10.1088/0022-3719/6/7/010
+  year: 1973
+  title: Ordering, Metastability and Phase Transitions in Two-Dimensional Systems
+- id: DOI:10.1070/PU1997v040n11ABEH000308
+  year: 1977
+  title: Quasicrystalline structures in strongly coupled dusty plasma
+- id: 'DOI: https://doi.org/10.1103/PhysRevLett.73.652'
+  year: 1994
+  title: 'Plasma Crystal: Coulomb Crystallization in a Dusty Plasma'
+- id: DOI:10.1038/379806a0
+  year: 1996
+  title: Melting dynamics of a plasma crystal
+- id: DOI 10.1088/1742-6596/653/1/012103
+  year: 2015
+  title: 'Hexatic phase in two-dimensional Yukawa systems: Existence and properties'
+- id: DOI:10.1038/s41598-020-80082-x
+  year: 2021
+  title: Laser-induced melting of two-dimensional dusty plasma system in RF discharge
+steps:
+- step_id: 1
+  claim: В двумерных системах с непрерывной симметрией возможно существование топологического
+    дальнего порядка, а фазовый переход происходит через развязывание пар топологических
+    дефектов
+  sources:
+  - type: text
+    source: DOI:10.1088/0022-3719/6/7/010
+    snippet_or_summary: A new definition of order called topological order is proposed
+      for two-dimensional systems... The possibility of a phase transition characterized
+      by a change in the response of the system to an external perturbation is discussed...
+      At sufficiently high temperatures, the largest pairs [of dislocations] become
+      unstable under an applied shear stress and produce a viscous response
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: 'Работа устанавливает универсальный механизм: в 2D при низких температурах
+    топологические дефекты (дислокации/вихри) существуют только в виде связанных пар
+    с конечной энергией. При достижении критической температуры пары развязываются,
+    что приводит к качественному изменению отклика системы. Это создаёт теоретическую
+    основу для поиска промежуточной гексатической фазы, в которой трансляционный порядок
+    разрушен, но ориентационный сохраняется.'
+  next_question: Можно ли реализовать условия, необходимые для наблюдения предсказанного
+    двухстадийного плавления, в экспериментально доступной системе с сильным кулоновским
+    взаимодействием, такой как пылевая плазма?
+- step_id: 2
+  claim: К 1997 году пылевая плазма утвердилась как модельная система для изучения
+    фазовых переходов, и в экспериментах в ВЧ-разряде уже наблюдались квазикристаллические
+    состояния пылевой плазмы
+  sources:
+  - type: text
+    source: DOI:10.1070/PU1997v040n11ABEH000308
+    snippet_or_summary: For plasma crystals under RF-discharge conditions, the liquid-crystal
+      phase transition is also greatly affected by the two-dimensional nature of the
+      crystal structure. Thus, instead of the first-order transition found in three
+      dimensions, a two-stage transition was experimentally observed, with an intermediate
+      state characterized by a short-range translational and long-range orientational
+      order.
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: 'Обзор Nefedov et al. подтверждает, что пылевая плазма удовлетворяет
+    критериям BKT-теории (2D-структура, сильно взаимодействующие частицы) и фиксирует
+    статус экспериментальных знаний на 1997 год: переход в 2D-системах,по всей видимости,
+    отличается от 3D и включает промежуточное состояние, гексатическую фазу.'
+  next_question: Какие конкретные экспериментальные работы впервые продемонстрировали
+    формирование устойчивой кристаллической структуры, ставшей базисом для последующего
+    изучения механизмов плавления?
+- step_id: 3
+  claim: В 1994 году впервые наблюдалась макроскопическая гексагональная кристаллическая
+    структура из заряженных пылевых частиц, левитирующих в слабой ионизированной аргоновой
+    плазме
+  sources:
+  - type: image
+    source: 'DOI: https://doi.org/10.1103/PhysRevLett.73.652'
+    snippet_or_summary: Fig. 2 shows an image of the particle cloud in a single plane.
+      The area shown is 7.7 × 7.7 mm² and contains 724 particles of 7-μm diameter.
+      Note the organized structure and nearly uniform particle spacing. Voronoi analysis
+      (Fig. 3) verifies cells are mainly six-sided with nearly equal areas and uniform
+      spacing.
+    locator: Fig. 2, Fig. 3
+  - type: text
+    source: 'DOI: https://doi.org/10.1103/PhysRevLett.73.652'
+    snippet_or_summary: The particles are cooled by neutral gas to 310 K, and their
+      charge is >9800e, corresponding to a Coulomb coupling parameter Γ>20700. For
+      such a large Γ value, strongly coupled plasma theory predicts that the particles
+      should organize in a Coulomb solid, in agreement with our observations.
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: Наблюдение устойчивой гексагональной решётки с параметром неидеальности
+    Γ > 20700 экспериментально подтверждает теоретические предсказания о возможности
+    кристаллизации в пылевой плазме. Это создаёт базис для последующего изучения фазовых
+    переходов (плавления) в этой системе, так как теперь есть воспроизводимая экспериментальная
+    платформа с визуализируемой структурой
+  next_question: Как ведёт себя эта кристаллическая структура при изменении параметров
+    плазмы (нагреве, уменьшении параметра неидеальности Γ) наблюдается ли фазовый
+    переход в жидкое состояние?"
+- step_id: 4
+  claim: При плавлении 2D плазменного кристалла наблюдается промежуточное состояние
+    с сохранением ориентационного порядка при разрушенном трансляционном порядке,
+    идентифицируемое через корреляционные функции"
+  sources:
+  - type: image
+    source: DOI:10.1038/379806a0
+    snippet_or_summary: 'Fig. 1b-c shows the ''flow and floe'' stage: coexistence
+      of directed flows and stable crystalline regions. Fig. 2a shows the ''vibrational
+      state'' with high degree of orientational (six-fold) order despite large-amplitude
+      oscillations.'
+    locator: Fig. 1, Fig. 2
+  - type: text
+    source: DOI:10.1038/379806a0
+    snippet_or_summary: '... shows translational and orientational order parameters
+      as function of gas pressure. The translational order continuously decreases,
+      whereas the orientational order develops a secondary maximum at ~0.32 mbar,
+      coinciding with the vibrational state. Both order parameters can be used to
+      identify the observed instantaneous structure with the prediction of the KTHNY
+      two-dimensional melting theory'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: 'Наблюдение вторичного максимума ориентационного порядка при непрерывном
+    падении трансляционного порядка экспериментально подтверждает существование промежуточной
+    фазы между кристаллом и жидкостью. Ключевой метод идентификации — одновременное
+    измерение двух корреляционных функций: радиальной парной g(r) для трансляционного
+    порядка и ориентационной g₆ для ориентационного порядка. Это создаёт методологическую
+    основу для количественной проверки критериев KTHNY в последующих работах.'
+  next_question: Какие конкретные математические критерии позволяют однозначно отличить
+    гексатическую фазу от кристалла и жидкости в рамках KTHNY-теории?"
+- step_id: 5
+  claim: Гексатическая фаза в 2D Yukawa-системах однозначно идентифицируется через
+    алгебраическое затухание ориентационной корреляционной функции g₆(r) ~ r^(-η₆)
+    с показателем η₆ < 1/4, в отличие от экспоненциального затухания в жидкости и
+    постоянного значения в кристалле
+  sources:
+  - type: image
+    source: DOI 10.1088/1742-6596/653/1/012103
+    snippet_or_summary: 'Figure 1 shows normalized orientational correlation functions
+      g*₆ for three phases: crystal (Γ* ~ 165, curve 1) where g₆ tends to constant
+      at r > 4-6rₚ; hexatic (Γ* ~ 140 and 110, curves 2-3) where g₆ follows power-law
+      r^(-1/5); liquid (Γ* ~ 85 and 5, curves 4-5) where g₆ shows exponential decay'
+    locator: Fig. 1
+  - type: text
+    source: DOI 10.1088/1742-6596/653/1/012103
+    snippet_or_summary: 'According to KTHNY theory, the function g₆(r) for the crystal
+      tends to the constant value on distances r larger than 4-6rₚ, and for the hexatic
+      phase the asymptotics of g₆(r) follows the power-law function r^(-1/5). The
+      normalized functions g*₆ = g₆(r)/N₆ formed three groups of curves, corresponding
+      to the different phase states: crystal, hexatic and liquid.'
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: 'Численное моделирование подтверждает, что отнормированные функции g*₆
+    образуют три отдельные группы кривых для кристалла, гексатики и жидкости. Ключевой
+    критерий: в гексатической фазе g₆(r) затухает по степенному закону с показателем
+    η₆ ≈ 0.2 (что меньше 1/4 = 0.25), что соответствует предсказаниям KTHNY-теории.
+    Два значения Γ* (154 и 98) подтверждают двухстадийный сценарий плавления'
+  next_question: Какие экспериментальные работы после 2000 года предоставили окончательные
+    подтверждения наблюдения гексатической фазы в двумерной пылевой плазме?"
+- step_id: 6
+  claim: В 2021 году получены окончательные экспериментальные доказательства двухстадийного
+    плавления 2D пылевой плазмы через гексатическую фазу, полностью согласующиеся
+    с теорией KTHNY, благодаря анализу корреляционных функций, топологических дефектов
+    и восприимчивостей глобальных параметров порядка"
+  sources:
+  - type: text
+    source: DOI:10.1038/s41598-020-80082-x
+    snippet_or_summary: We present a detailed analysis of experimental study, which
+      shows clear evidence of a two‐stage melting process of a quasi‐two‐dimensional
+      dusty plasma system in a high‐frequency gas discharge... These results are fully
+      consistent with the Berezinsky–Kosterlitz–Thouless theory."
+  - type: image
+    source: DOI:10.1038/s41598-020-80082-x
+    snippet_or_summary: Figure 4 (bottom) shows a plot of the translational, χT, and
+      orientational susceptibilities χ6, in dependence of the effective coupling parameter
+      Γ*. One can see the jumps of the functions χT and χ6, marked by vertical dashed
+      lines, which clearly indicate two points of phase transitions at Γ*~ 100 and
+      Γ*~ 160, respectively."
+    locator: Fig. 4
+  conditions:
+    system: unknown
+    environment: unknown
+    protocol: unknown
+    notes: ''
+  inference: Анализ корреляционных функций показал короткодействующий трансляционный
+    порядок и квазидальний ориентационный порядок в гексатической фазе. Анализ восприимчивостей
+    χT и χ6 дал четкие пики в двух точках перехода (Γ* ≈ 160 и 100), а измеренная
+    энергия ядра дислокаций Ec > 2.84kBT подтвердила предпочтительность сценария KTHNY
+    перед теорией плавления через границы зерен (GBI, grain-boundary induced melting).
+  next_question: Каким образом количество и размер пылевых частиц влияет на картину
+    фазового перехода в двумерной пылевой структуре в ВЧ разряде в плазме?
+edges:
+- - 1
+  - 2
+- - 1
+  - 3
+- - 1
+  - 4
+- - 1
+  - 5
+- - 1
+  - 6
+- - 2
+  - 3
+- - 2
+  - 4
+- - 2
+  - 5
+- - 3
+  - 4
+- - 3
+  - 5
+- - 4
+  - 5
+- - 4
+  - 6
+- - 5
+  - 4
+- - 5
+  - 6
+generated_at: '2026-03-11T16:56:36Z'
+expert:
+  last_name: Заморин
+  first_name: Денис
+  patronymic: Александрович
+  full_name: Заморин Денис Александрович
+  latin_full_name: Zamorin Denis Aleksandrovich
+  latin_slug: zamorin_denis_aleksandrovich
+artifact_hash: 37ab71be5e40
+submission_id: zamorin_denis_aleksandrovich__37ab71be5e40

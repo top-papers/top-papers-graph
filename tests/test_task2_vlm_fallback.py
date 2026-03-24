@@ -37,3 +37,21 @@ def test_describe_image_uses_local_qwen_when_g4f_requested_but_missing(monkeypat
     res = vlm.describe_image(image_path=image_path, prompt="demo", backend="g4f", model_id="Qwen/Qwen2.5-VL-3B-Instruct")
     assert res.caption == "ok"
     assert called["model_id"] == "Qwen/Qwen2.5-VL-3B-Instruct"
+
+
+def test_describe_image_disables_g4f_after_missing_auth(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (16, 16), color="white").save(image_path)
+
+    monkeypatch.setattr(vlm, "_has_g4f", lambda: True)
+    monkeypatch.setattr(vlm, "_has_local_vlm_stack", lambda: False)
+    monkeypatch.setattr(vlm, "_G4F_AUTH_DISABLED", False)
+
+    def _boom(**kwargs):
+        raise RuntimeError('openai_style=MissingAuthError: Add a "api_key"; images_arg=MissingAuthError: API key is required for Puter.js API.')
+
+    monkeypatch.setattr(vlm, "_describe_image_g4f", _boom)
+
+    res = vlm.describe_image(image_path=image_path, prompt="demo", backend="g4f", model_id="auto")
+    assert res.caption == ""
+    assert vlm._G4F_AUTH_DISABLED is True
