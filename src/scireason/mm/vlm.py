@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 import gc
 import importlib.util
+import json
 import os
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Optional, Literal
@@ -105,37 +108,91 @@ def _has_g4f() -> bool:
     return importlib.util.find_spec("g4f") is not None
 
 
+def _run_isolated_python(code: str, *args: str, timeout: int = 180) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    return subprocess.run(
+        [sys.executable, "-c", code, *[str(a) for a in args]],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+    )
+
+
+@lru_cache(maxsize=16)
 def _local_vlm_runtime_check(model_id: Optional[str] = None) -> tuple[bool, str]:
-    """Return whether the local VLM runtime is really importable in the current process.
+    """Return whether the local VLM runtime is really importable.
 
-    `find_spec()` alone is too optimistic for notebook environments: partially installed
-    or ABI-broken torch/transformers packages can still have specs but fail on import.
+    Проверка идёт в отдельном subprocess, чтобы не ломать notebook-kernel повторным
+    импортом torch/transformers после pip-install и не ловить ложные отрицания из-за
+    частично отравленного sys.modules в текущем процессе.
     """
-    try:
-        import torch  # type: ignore  # noqa: F401
-        from PIL import Image  # type: ignore  # noqa: F401
-        from transformers import AutoProcessor  # type: ignore  # noqa: F401
-    except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
-
     requested = str(model_id or "").strip()
-    try:
-        if "Qwen/Qwen3-VL" in requested or "Qwen3-VL" in requested:
-            from transformers import Qwen3VLForConditionalGeneration  # type: ignore  # noqa: F401
-        elif "Qwen/Qwen2.5-VL" in requested or "Qwen2.5-VL" in requested:
-            from transformers import Qwen2_5_VLForConditionalGeneration  # type: ignore  # noqa: F401
-        else:
-            from transformers import AutoModelForVision2Seq  # type: ignore  # noqa: F401
-    except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
+    probe = r"""import json
+import sys
 
-    return True, ""
+requested = (sys.argv[1] if len(sys.argv) > 1 else '').strip()
+result = {"ok": False, "reason": ""}
+
+try:
+    import torch  # noqa: F401
+    from PIL import Image  # noqa: F401
+    from transformers import AutoProcessor  # noqa: F401
+except Exception as e:
+    result["reason"] = f"{type(e).__name__}: {e}"
+    print(json.dumps(result, ensure_ascii=False))
+    raise SystemExit(0)
+
+try:
+    if 'Qwen3-VL' in requested:
+        from transformers import Qwen3VLForConditionalGeneration  # noqa: F401
+    elif 'Qwen/Qwen2.5-VL' in requested or 'Qwen2.5-VL' in requested:
+        from transformers import Qwen2_5_VLForConditionalGeneration  # noqa: F401
+        import qwen_vl_utils  # noqa: F401
+    else:
+        from transformers import AutoModelForVision2Seq  # noqa: F401
+except Exception as e:
+    result["reason"] = f"{type(e).__name__}: {e}"
+    print(json.dumps(result, ensure_ascii=False))
+    raise SystemExit(0)
+
+result["ok"] = True
+print(json.dumps(result, ensure_ascii=False))
+"""
+    try:
+        proc = _run_isolated_python(probe, requested, timeout=120)
+    except subprocess.TimeoutExpired:
+        return False, "TimeoutExpired: isolated_import_probe"
+
+    lines = (proc.stdout or "").strip().splitlines()
+    payload = lines[-1] if lines else ""
+    if payload:
+        try:
+            parsed = json.loads(payload)
+            return bool(parsed.get("ok")), str(parsed.get("reason") or "")
+        except Exception:
+            pass
+
+    stderr_lines = (proc.stderr or "").strip().splitlines()
+    reason = stderr_lines[-1] if stderr_lines else f"isolated_probe_exit_{proc.returncode}"
+    return False, reason
 
 
 def _has_local_vlm_stack(model_id: Optional[str] = None) -> bool:
     ok, _ = _local_vlm_runtime_check(model_id=model_id)
     return ok
 
+
+def reset_vlm_runtime_state() -> None:
+    global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED, _LOCAL_VLM_DISABLED, _LOCAL_VLM_DISABLE_REASON
+    _G4F_AUTH_DISABLED = False
+    _G4F_TIMEOUT_DISABLED = False
+    _LOCAL_VLM_DISABLED = False
+    _LOCAL_VLM_DISABLE_REASON = ""
+    try:
+        _local_vlm_runtime_check.cache_clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 def _local_stack_available(model_id: Optional[str] = None) -> bool:
@@ -231,7 +288,9 @@ def _resolve_backend(backend: Optional[Backend], model_id: Optional[str]) -> Bac
 
     if requested in {"qwen2_vl", "qwen3_vl", "llava", "phi3_vision"} and not _local_stack_available(model_id=model_id):
         if requested != "none":
-            console.print("[yellow]Локальный VLM-стек недоступен; продолжу без VLM-captioning.[/yellow]")
+            _, reason = _local_vlm_runtime_check(model_id=model_id)
+            suffix = f" Причина: {reason}." if reason else ""
+            console.print(f"[yellow]Локальный VLM-стек недоступен; продолжу без VLM-captioning.{suffix}[/yellow]")
         return "none"
 
     return requested  # type: ignore[return-value]
@@ -377,6 +436,7 @@ def temporary_vlm_selection(*, vlm_backend: Optional[str] = None, vlm_model_id: 
 
     prev_backend = getattr(settings, "vlm_backend", "none")
     prev_model = getattr(settings, "vlm_model_id", "")
+    reset_vlm_runtime_state()
     try:
         if vlm_backend and str(vlm_backend).strip():
             settings.vlm_backend = str(vlm_backend).strip()
@@ -386,6 +446,7 @@ def temporary_vlm_selection(*, vlm_backend: Optional[str] = None, vlm_model_id: 
     finally:
         settings.vlm_backend = prev_backend
         settings.vlm_model_id = prev_model
+        reset_vlm_runtime_state()
 
 
 def describe_image(
