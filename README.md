@@ -190,6 +190,7 @@ docker compose up --build
 ### Key environment switches
 
 - `OCR_BACKEND=auto|paddleocr|grobid|pymupdf`
+- `PADDLEOCR_WORKER_TIMEOUT_SECONDS=90`, `PADDLEOCR_WORKER_TIMEOUT_PER_PAGE_SECONDS=8`, `PADDLEOCR_WORKER_TIMEOUT_MAX_SECONDS=900`
 - `GRAPH_BACKEND=dual|neo4j|memgraph|none`
 - `QDRANT_RETRIEVAL_MODE=hybrid|dense`
 - `HYP_TGNN_BACKEND=auto|pyg|heuristic`

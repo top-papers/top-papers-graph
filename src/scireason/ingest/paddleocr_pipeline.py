@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import json
 import os
 import subprocess
@@ -180,6 +181,81 @@ def paddleocr_available() -> bool:
 
 
 
+
+
+def _pipeline_init_kwargs() -> Dict[str, Any]:
+    """Stable PP-Structure defaults for scientific PDFs.
+
+    PaddleOCR 3.x defaults differ across minor versions. Some releases enable
+    extra sub-pipelines by default (for example seal/chart/orientation), which
+    increases cold-start time and can trip the worker timeout on otherwise
+    normal papers. We keep the features that matter for scientific PDFs
+    (layout/text/tables/formulae) and explicitly disable the rest.
+    """
+
+    return {
+        "use_doc_orientation_classify": False,
+        "use_doc_unwarping": False,
+        "use_textline_orientation": False,
+        "use_seal_recognition": False,
+        "use_chart_recognition": False,
+        "use_table_recognition": True,
+        "use_formula_recognition": True,
+        "use_region_detection": True,
+    }
+
+
+def _construct_pipeline(pipeline_cls: Any, *, lang: Optional[str] = None):
+    kwargs: Dict[str, Any] = dict(_pipeline_init_kwargs())
+    if lang:
+        kwargs["lang"] = lang
+
+    try:
+        sig = inspect.signature(pipeline_cls)
+        params = sig.parameters
+        accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if not accepts_var_kw:
+            kwargs = {k: v for k, v in kwargs.items() if k in params}
+    except Exception:
+        pass
+
+    try:
+        return pipeline_cls(**kwargs)
+    except TypeError:
+        if lang:
+            return pipeline_cls(lang=lang)
+        return pipeline_cls()
+
+
+def _estimate_pdf_page_count(pdf_path: Path) -> Optional[int]:
+    try:
+        import fitz  # type: ignore
+
+        with fitz.open(str(pdf_path)) as doc:
+            return len(doc)
+    except Exception:
+        try:
+            from pypdf import PdfReader  # type: ignore
+
+            reader = PdfReader(str(pdf_path))
+            return len(reader.pages)
+        except Exception:
+            return None
+
+
+def _effective_worker_timeout_seconds(pdf_path: Path) -> int:
+    base_timeout = int(getattr(settings, "paddleocr_worker_timeout_seconds", 90) or 90)
+    per_page_timeout = int(getattr(settings, "paddleocr_worker_timeout_per_page_seconds", 8) or 0)
+    max_timeout = int(getattr(settings, "paddleocr_worker_timeout_max_seconds", 900) or base_timeout)
+
+    page_count = _estimate_pdf_page_count(pdf_path)
+    if page_count is None:
+        return max(1, min(base_timeout, max_timeout))
+
+    scaled_timeout = base_timeout + max(0, page_count - 1) * max(0, per_page_timeout)
+    return max(1, min(scaled_timeout, max_timeout))
+
+
 def _paddle_install_hint(*, paddle_present: bool, paddleocr_present: bool) -> str:
     if not paddle_present:
         return (
@@ -224,7 +300,7 @@ def _load_pipeline(lang: Optional[str] = None):
 
     if ppv3_cls is not None:
         try:
-            pipeline = ppv3_cls(lang=lang) if lang else ppv3_cls()
+            pipeline = _construct_pipeline(ppv3_cls, lang=lang)
             return pipeline, "PPStructureV3"
         except Exception as e:
             errors.append(f"PPStructureV3: {type(e).__name__}: {e}")
@@ -237,7 +313,7 @@ def _load_pipeline(lang: Optional[str] = None):
     try:
         from paddleocr import PPStructure  # type: ignore
 
-        pipeline = PPStructure(lang=lang, show_log=False) if lang else PPStructure(show_log=False)
+        pipeline = _construct_pipeline(PPStructure, lang=lang)
         return pipeline, "PPStructure"
     except Exception as e:
         errors.append(f"PPStructure: {type(e).__name__}: {e}")
@@ -434,7 +510,7 @@ def _extract_pdf_chunks_paddleocr_worker(
     if lang:
         cmd.extend(["--lang", str(lang)])
 
-    timeout_seconds = int(getattr(settings, "paddleocr_worker_timeout_seconds", 90) or 90)
+    timeout_seconds = _effective_worker_timeout_seconds(pdf_path)
     console.print(f"[cyan]PaddleOCR worker:[/cyan] {pdf_path.name} (timeout={timeout_seconds}s)")
     _emit_progress(
         progress_callback,
@@ -443,7 +519,7 @@ def _extract_pdf_chunks_paddleocr_worker(
         pdf_path=str(pdf_path),
         current=0,
         total=1,
-        message=f"PaddleOCR/PP-Structure: старт (timeout {timeout_seconds}s)",
+        message=f"PaddleOCR/PP-Structure: старт (timeout {timeout_seconds}s, file {pdf_path.name})",
     )
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout_seconds)

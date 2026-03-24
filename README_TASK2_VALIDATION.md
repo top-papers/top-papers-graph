@@ -36,7 +36,7 @@ Then open the notebook and run it top-to-bottom.
 
 По умолчанию Task 2 bundle теперь работает в надёжном offline-first режиме: notebook и CLI не блокируются на сетевом поиске метаданных и PDF. Чтобы включить удалённое обогащение, передайте `--remote-lookup`.
 
-Дополнительно OCR-воркер PP-Structure теперь защищён таймаутом `PADDLEOCR_WORKER_TIMEOUT_SECONDS` (по умолчанию `90`). Если PaddleOCR зависает на конкретном PDF, pipeline автоматически переключается на локальный PyMuPDF fallback и продолжает сборку bundle.
+Дополнительно OCR-воркер PP-Structure теперь защищён адаптивным таймаутом `PADDLEOCR_WORKER_TIMEOUT_SECONDS` + `PADDLEOCR_WORKER_TIMEOUT_PER_PAGE_SECONDS` (по умолчанию `90 + 8 * (pages-1)`, максимум `PADDLEOCR_WORKER_TIMEOUT_MAX_SECONDS=900`). Если PaddleOCR зависает на конкретном PDF, pipeline автоматически переключается на локальный PyMuPDF fallback и продолжает сборку bundle.
 
 
 ## Обновление Task 2 v2
