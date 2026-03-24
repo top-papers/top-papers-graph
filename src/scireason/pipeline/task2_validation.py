@@ -7,14 +7,14 @@ from dataclasses import asdict
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse, unquote
 
 import yaml  # type: ignore
 from rich.console import Console
 
 from ..domain import DomainConfig, load_domain_config
-from ..ingest.acquire import AcquireResult, acquire_pdfs
+from ..ingest.acquire import AcquireResult, acquire_pdf
 from ..ingest.mm_pipeline import ingest_pdf_multimodal_auto
 from ..config import settings
 from ..ingest.pipeline import ingest_pdf_auto
@@ -34,6 +34,28 @@ OPENALEX_RE = re.compile(r"(?:openalex\.org/)?(W\d+)", re.IGNORECASE)
 PMID_RE = re.compile(r"(?:pubmed(?:\.ncbi\.nlm\.nih\.gov)?/)?(\d{5,10})", re.IGNORECASE)
 PMCID_RE = re.compile(r"(PMC\d+)", re.IGNORECASE)
 DATE_TOKEN_RE = re.compile(r"^(?:\d{4}|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}|unknown|\+inf|-inf)$")
+
+
+def _emit_progress(
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+    *,
+    stage: str,
+    current: int,
+    total: int,
+    message: str,
+    **extra: Any,
+) -> None:
+    payload = {
+        "stage": stage,
+        "current": current,
+        "total": total,
+        "message": message,
+        "percent": 0 if total <= 0 else int(round((current / total) * 100)),
+    }
+    payload.update(extra)
+    console.print(f"[blue][Task2 {current}/{total}][/blue] {message}")
+    if progress_callback is not None:
+        progress_callback(payload)
 
 
 DEFAULT_SEARCH_SOURCES = [
@@ -444,11 +466,23 @@ def resolve_papers_from_trajectory(
     *,
     search_limit: int = 8,
     enable_remote_lookup: bool = False,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> List[PaperMetadata]:
     resolved: List[PaperMetadata] = []
     seen_ids: set[str] = set()
+    entries = _iter_trajectory_entries(doc)
+    total_entries = len(entries)
 
-    for entry in _iter_trajectory_entries(doc):
+    for index, entry in enumerate(entries, start=1):
+        if progress_callback is not None:
+            title_hint = str(entry.get("title") or entry.get("id") or f"paper {index}")
+            progress_callback({
+                "stage": "resolve",
+                "current": index,
+                "total": total_entries or 1,
+                "message": f"Резолв публикаций: {index}/{total_entries or 1} — {title_hint[:80]}",
+                "title": title_hint,
+            })
         if not isinstance(entry, dict):
             continue
         meta = _resolve_entry_by_exact_identifier(entry, enable_remote_lookup=enable_remote_lookup)
@@ -1153,6 +1187,7 @@ def prepare_task2_validation_bundle(
     local_model: str | None = None,
     vlm_backend: str | None = None,
     vlm_model_id: str | None = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Path:
     with temporary_llm_selection(
         llm_provider=llm_provider,
@@ -1161,6 +1196,9 @@ def prepare_task2_validation_bundle(
         local_model=local_model,
     ):
         with temporary_vlm_selection(vlm_backend=vlm_backend, vlm_model_id=vlm_model_id):
+            total_stages = 8 + (1 if suggest_links else 0)
+            _emit_progress(progress_callback, stage="load", current=1, total=total_stages, message="Читаю YAML и готовлю рабочую директорию")
+
             doc = yaml.safe_load(trajectory_yaml.read_text(encoding="utf-8")) or {}
             if not isinstance(doc, dict):
                 raise ValueError("Trajectory YAML must contain a top-level object.")
@@ -1171,13 +1209,15 @@ def prepare_task2_validation_bundle(
 
             shutil.copy2(trajectory_yaml, out / trajectory_yaml.name)
 
+            _emit_progress(progress_callback, stage="reference", current=2, total=total_stages, message="Строю reference graph из YAML")
             reference_graph = build_reference_graph(doc)
             (out / "reference_graph.json").write_text(json.dumps(reference_graph, ensure_ascii=False, indent=2), encoding="utf-8")
             (out / "reference_triplets.json").write_text(json.dumps(reference_graph.get("triplets") or [], ensure_ascii=False, indent=2), encoding="utf-8")
 
             domain_cfg = _load_domain_from_trajectory(doc)
 
-            resolved = resolve_papers_from_trajectory(doc, enable_remote_lookup=enable_remote_lookup)
+            _emit_progress(progress_callback, stage="resolve", current=3, total=total_stages, message="Резолвлю публикации и идентификаторы")
+            resolved = resolve_papers_from_trajectory(doc, enable_remote_lookup=enable_remote_lookup, progress_callback=progress_callback)
             if max_papers and max_papers > 0:
                 resolved = resolved[:max_papers]
 
@@ -1192,7 +1232,23 @@ def prepare_task2_validation_bundle(
             processed_dir = acquire_dir / "processed_papers"
             processed_dir.mkdir(parents=True, exist_ok=True)
 
-            acq: List[AcquireResult] = acquire_pdfs(resolved, raw_dir=raw_dir, meta_dir=meta_dir)
+            _emit_progress(progress_callback, stage="acquire", current=4, total=total_stages, message=f"Скачиваю PDF и сохраняю метаданные: 0/{len(resolved)}")
+            acq: List[AcquireResult] = []
+            total_resolved = len(resolved)
+            for idx, meta in enumerate(resolved, start=1):
+                title_hint = meta.title or meta.id
+                _emit_progress(
+                    progress_callback,
+                    stage="acquire",
+                    current=4,
+                    total=total_stages,
+                    message=f"Скачиваю PDF и сохраняю метаданные: {idx}/{total_resolved} — {title_hint[:80]}",
+                    item_current=idx,
+                    item_total=total_resolved,
+                    paper_id=meta.id,
+                    paper_title=title_hint,
+                )
+                acq.append(acquire_pdf(meta, raw_dir=raw_dir, meta_dir=meta_dir))
             (out / "acquire_results.json").write_text(
                 json.dumps(
                     [asdict(a) | {"pdf_path": str(a.pdf_path) if a.pdf_path else None, "meta_path": str(a.meta_path)} for a in acq],
@@ -1203,19 +1259,56 @@ def prepare_task2_validation_bundle(
             )
 
             ingested_ids: List[str] = []
+            total_to_ingest = sum(1 for item in acq if item.pdf_path)
+            _emit_progress(progress_callback, stage="ingest", current=5, total=total_stages, message=f"Парсю PDF и строю multimodal представление: 0/{total_to_ingest}")
+            ingest_index = 0
             for meta, a in zip(resolved, acq):
                 if not a.pdf_path:
                     continue
+                ingest_index += 1
                 meta_json = meta.model_dump(mode="json")
+                title_hint = meta.title or meta.id
+                _emit_progress(
+                    progress_callback,
+                    stage="ingest",
+                    current=5,
+                    total=total_stages,
+                    message=f"Парсю PDF и строю multimodal представление: {ingest_index}/{total_to_ingest} — {title_hint[:80]}",
+                    item_current=ingest_index,
+                    item_total=total_to_ingest,
+                    paper_id=meta.id,
+                    paper_title=title_hint,
+                )
                 try:
                     if include_multimodal:
-                        ingest_pdf_multimodal_auto(a.pdf_path, meta_json, processed_dir, run_vlm=run_vlm)
+                        ingest_pdf_multimodal_auto(
+                            a.pdf_path,
+                            meta_json,
+                            processed_dir,
+                            run_vlm=run_vlm,
+                            progress_callback=(
+                                (lambda payload, *, meta=meta, index=ingest_index, total=total_to_ingest: _emit_progress(
+                                    progress_callback,
+                                    stage="pages",
+                                    current=5,
+                                    total=total_stages,
+                                    message=f"{meta.title or meta.id}: {payload.get('message') or ''}",
+                                    item_current=index,
+                                    item_total=total,
+                                    paper_id=meta.id,
+                                    paper_title=meta.title or meta.id,
+                                    page_current=payload.get("current"),
+                                    page_total=payload.get("total"),
+                                )) if progress_callback is not None else None
+                            ),
+                        )
                     else:
                         ingest_pdf_auto(a.pdf_path, meta_json, processed_dir)
                     ingested_ids.append(meta.id)
                 except Exception as e:
                     console.print(f"[yellow]Ingest failed for {meta.id}: {e}[/yellow]")
 
+            _emit_progress(progress_callback, stage="records", current=6, total=total_stages, message="Собираю записи публикаций для temporal KG")
             processed_records = load_papers_from_processed(processed_dir)
             processed_by_id = {p.paper_id: p for p in processed_records}
             paper_records: List[PaperRecord] = []
@@ -1230,6 +1323,7 @@ def prepare_task2_validation_bundle(
                 encoding="utf-8",
             )
 
+            _emit_progress(progress_callback, stage="kg", current=7, total=total_stages, message="Строю temporal knowledge graph")
             kg = build_temporal_kg(
                 paper_records,
                 domain=domain_cfg,
@@ -1248,10 +1342,12 @@ def prepare_task2_validation_bundle(
             (review_dir / "graph_review_prefill.json").write_text(json.dumps(prefill_review, ensure_ascii=False, indent=2), encoding="utf-8")
             (review_dir / "temporal_corrections_template.json").write_text(json.dumps(_empty_temporal_corrections(doc), ensure_ascii=False, indent=2), encoding="utf-8")
 
+            _emit_progress(progress_callback, stage="compare", current=8, total=total_stages, message="Сравниваю automatic graph с reference graph")
             comparison = _compare_graphs(reference_graph, automatic_rows, resolved)
             (out / "comparison_summary.json").write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding="utf-8")
 
             if suggest_links:
+                _emit_progress(progress_callback, stage="scout", current=9, total=total_stages, message="Генерирую reference scout и кандидатов на дополнительные ссылки")
                 suggestions = suggest_link_candidates(
                     doc,
                     known_papers=resolved,
@@ -1293,5 +1389,6 @@ def prepare_task2_validation_bundle(
                 "review_design_note": "Task 2 review now captures semantic, evidence, temporal, scope and hypothesis-readiness signals.",
                 },
             }
+            _emit_progress(progress_callback, stage="finalize", current=total_stages, total=total_stages, message="Bundle собран, сохраняю manifest")
             (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
             return out

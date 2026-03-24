@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 from rich.console import Console
 
 from .pipeline import ingest_pdf, ingest_pdf_auto
@@ -10,7 +10,7 @@ from ..mm.pdf_mm_extract import extract_pages
 console = Console()
 
 
-def ingest_pdf_multimodal(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, run_vlm: bool = True) -> Path:
+def ingest_pdf_multimodal(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, run_vlm: bool = True, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Path:
     """1) Текст/таблицы/формулы: PaddleOCR PP-StructureV3 -> chunks (как в базовом пайплайне)
     2) Мультимодальность: PyMuPDF -> страницы + картинки (+ опционально VLM)
 
@@ -30,12 +30,13 @@ def ingest_pdf_multimodal(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, r
         out_dir=paper_dir,
         prompt_context=prompt_context,
         run_vlm=run_vlm,
+        progress_callback=progress_callback,
     )
     console.print(f"[green]MM stored:[/green] {paper_dir / 'mm'}")
     return paper_dir
 
 
-def ingest_pdf_multimodal_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, run_vlm: bool = True) -> Path:
+def ingest_pdf_multimodal_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Path, run_vlm: bool = True, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Path:
     """Multimodal ingest with automatic fallback for PDF->text.
 
     Uses `ingest_pdf_auto()` for document parsing (PaddleOCR -> PyMuPDF fallback), then runs the multimodal stage.
@@ -51,6 +52,7 @@ def ingest_pdf_multimodal_auto(pdf_path: Path, meta: Dict[str, Any], out_dir: Pa
         out_dir=paper_dir,
         prompt_context=prompt_context,
         run_vlm=run_vlm,
+        progress_callback=progress_callback,
     )
     console.print(f"[green]MM stored:[/green] {paper_dir / 'mm'}")
     return paper_dir

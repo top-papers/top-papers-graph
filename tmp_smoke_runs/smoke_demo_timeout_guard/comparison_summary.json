@@ -1,0 +1,14 @@
+{
+  "reference_steps": 1,
+  "reference_edges": 0,
+  "automatic_edges": 0,
+  "automatic_unique_terms": 0,
+  "resolved_papers": 1,
+  "papers_reaching_automatic_graph": 0,
+  "trajectory_claim_examples": [
+    "Шаг 1"
+  ],
+  "automatic_term_examples": [],
+  "cutoff_year": "",
+  "review_focus": "Prefer edges that can seed temporally valid, condition-aware hypotheses."
+}

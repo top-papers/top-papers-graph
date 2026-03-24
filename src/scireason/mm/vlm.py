@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import importlib.util
 import os
+import threading
 from pathlib import Path
 from typing import Optional, Literal
 
@@ -16,6 +17,7 @@ from ..config import settings
 console = Console()
 
 _G4F_AUTH_DISABLED = False
+_G4F_TIMEOUT_DISABLED = False
 
 
 Backend = Literal["auto", "none", "qwen2_vl", "qwen3_vl", "llava", "phi3_vision", "g4f"]
@@ -129,11 +131,40 @@ def _missing_auth_error(exc: Exception) -> bool:
     return "missingautherror" in msg or "api key is required" in msg or "add a \"api_key\"" in msg
 
 
+def _run_with_timeout(timeout_seconds: float, fn, /, *args, **kwargs):
+    """Run a blocking function in a daemon thread and fail fast on timeout.
+
+    This protects notebook/CLI execution from hanging forever on flaky remote VLM
+    providers (most notably g4f-backed multimodal calls).
+    """
+
+    timeout_seconds = float(timeout_seconds or 0)
+    if timeout_seconds <= 0:
+        return fn(*args, **kwargs)
+
+    state: dict[str, object] = {}
+
+    def _target() -> None:
+        try:
+            state["result"] = fn(*args, **kwargs)
+        except Exception as exc:  # pragma: no cover - exercised via caller tests
+            state["error"] = exc
+
+    thread = threading.Thread(target=_target, name=f"vlm-timeout:{getattr(fn, '__name__', 'call')}", daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    if thread.is_alive():
+        raise TimeoutError(f"VLM call exceeded {timeout_seconds:g}s")
+    if "error" in state:
+        raise state["error"]  # type: ignore[misc]
+    return state.get("result")
+
+
 def _resolve_backend(backend: Optional[Backend], model_id: Optional[str]) -> Backend:
-    global _G4F_AUTH_DISABLED
+    global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED
     requested = str(backend or getattr(settings, "vlm_backend", "none") or "none").strip().lower()
 
-    if requested == "g4f" and _G4F_AUTH_DISABLED:
+    if requested == "g4f" and (_G4F_AUTH_DISABLED or _G4F_TIMEOUT_DISABLED):
         if _has_local_vlm_stack():
             return "qwen2_vl"
         return "none"
@@ -311,6 +342,7 @@ def describe_image(
     """Описывает изображение (страница PDF / figure / table) через VL-модель.
 
     Никогда не роняет общий ingest из-за отсутствия опционального VLM backend.
+    Дополнительно защищён от бесконечного ожидания ответа remote VLM.
     """
     requested_model_id = model_id or settings.vlm_model_id  # type: ignore[attr-defined]
     effective_backend = _resolve_backend(backend or settings.vlm_backend, requested_model_id)  # type: ignore[attr-defined]
@@ -321,7 +353,14 @@ def describe_image(
 
     try:
         if effective_backend == "g4f":
-            return _describe_image_g4f(image_path=image_path, prompt=prompt, model_id=effective_model_id)
+            timeout_seconds = float(getattr(settings, "vlm_request_timeout_seconds", 45) or 45)
+            return _run_with_timeout(
+                timeout_seconds,
+                _describe_image_g4f,
+                image_path=image_path,
+                prompt=prompt,
+                model_id=effective_model_id,
+            )
 
         return _describe_image_qwen(
             image_path=image_path,
@@ -330,7 +369,7 @@ def describe_image(
             max_new_tokens=max_new_tokens,
         )
     except Exception as e:
-        global _G4F_AUTH_DISABLED
+        global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED
         if effective_backend == "g4f" and _missing_auth_error(e):
             _G4F_AUTH_DISABLED = True
             if _has_local_vlm_stack():
@@ -352,6 +391,30 @@ def describe_image(
                     return VLMResult(caption="")
             console.print(
                 f"[yellow]g4f требует API key или другой provider; отключаю g4f-captioning для оставшихся страниц после {image_path.name}.[/yellow]"
+            )
+            return VLMResult(caption="")
+
+        if effective_backend == "g4f" and isinstance(e, TimeoutError):
+            _G4F_TIMEOUT_DISABLED = True
+            if _has_local_vlm_stack():
+                console.print(
+                    f"[yellow]g4f не ответил вовремя на {image_path.name}; переключаю VLM на локальный Transformers backend для оставшихся страниц.[/yellow]"
+                )
+                try:
+                    fallback_model = _resolve_model_id_for_backend("qwen2_vl", None)
+                    return _describe_image_qwen(
+                        image_path=image_path,
+                        prompt=prompt,
+                        model_id=fallback_model,
+                        max_new_tokens=max_new_tokens,
+                    )
+                except Exception as inner_e:
+                    console.print(
+                        f"[yellow]Локальный VLM fallback для {image_path.name} тоже недоступен: {type(inner_e).__name__}: {inner_e}. Продолжаю без caption/tables/equations.[/yellow]"
+                    )
+                    return VLMResult(caption="")
+            console.print(
+                f"[yellow]g4f не ответил вовремя на {image_path.name}; отключаю g4f-captioning для оставшихся страниц.[/yellow]"
             )
             return VLMResult(caption="")
 

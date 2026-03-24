@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..config import settings
 from rich.console import Console
@@ -38,6 +38,7 @@ def extract_pages(
     prompt_context: str = "",
     dpi: Optional[int] = None,
     run_vlm: bool = True,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> List[PageRecord]:
     """Извлекает из PDF:
     - текст по страницам
@@ -60,9 +61,21 @@ def extract_pages(
     pages: List[PageRecord] = []
     zoom = dpi / 72.0
     matrix = fitz.Matrix(zoom, zoom)
+    total_pages = len(doc)
 
-    for i in range(len(doc)):
+    if progress_callback is not None:
+        progress_callback({
+            "event": "start",
+            "paper_id": paper_id,
+            "pdf_path": str(pdf_path),
+            "current": 0,
+            "total": total_pages,
+            "message": f"Страницы PDF: 0/{total_pages}",
+        })
+
+    for i in range(total_pages):
         page = doc.load_page(i)
+        console.print(f"[cyan]MM page {i + 1}/{total_pages}:[/cyan] {pdf_path.name}")
         text = (page.get_text("text") or "").strip()
 
         pix = page.get_pixmap(matrix=matrix, alpha=False)
@@ -92,6 +105,16 @@ def extract_pages(
                 )
 
         pages.append(rec)
+
+        if progress_callback is not None:
+            progress_callback({
+                "event": "page",
+                "paper_id": paper_id,
+                "pdf_path": str(pdf_path),
+                "current": i + 1,
+                "total": total_pages,
+                "message": f"Страницы PDF: {i + 1}/{total_pages}",
+            })
 
     # save
     (mm_root / "pages.jsonl").write_text(

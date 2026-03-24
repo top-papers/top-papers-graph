@@ -5,7 +5,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import yaml  # type: ignore
 
@@ -270,6 +270,7 @@ def build_task2_validation_bundle(
     local_model: str | None = None,
     vlm_backend: str | None = None,
     vlm_model_id: str | None = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> BundleResult:
     trajectory_path = Path(trajectory_path)
     out_dir = Path(out_dir)
@@ -295,8 +296,11 @@ def build_task2_validation_bundle(
             local_model=local_model,
             vlm_backend=vlm_backend,
             vlm_model_id=vlm_model_id,
+            progress_callback=progress_callback,
         )
     else:
+        if progress_callback is not None:
+            progress_callback({"stage": "manual", "current": 1, "total": 3, "percent": 33, "message": "Готовлю bundle без автоматического pipeline"})
         bundle_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(trajectory_path, bundle_dir / trajectory_path.name)
 
@@ -311,6 +315,8 @@ def build_task2_validation_bundle(
         )
 
         if enable_reference_scout:
+            if progress_callback is not None:
+                progress_callback({"stage": "scout", "current": 2, "total": 3, "percent": 67, "message": "Генерирую reference scout"})
             try:
                 resolved = resolve_papers_from_trajectory(doc, enable_remote_lookup=enable_remote_lookup)
                 suggestions = suggest_link_candidates(
@@ -386,6 +392,9 @@ def build_task2_validation_bundle(
         for key in ("llm_effective_provider", "llm_effective_model", "vlm_effective_backend", "vlm_effective_model"):
             if runtime_payload.get(key) not in (None, ""):
                 manifest[key] = runtime_payload.get(key)
+
+    if progress_callback is not None:
+        progress_callback({"stage": "manifest", "current": 3, "total": 3, "percent": 100, "message": "Сохраняю notebook manifest"})
 
     manifest_path = bundle_dir / "task2_notebook_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     open_clip_model: str = "ViT-B-32"
     open_clip_pretrained: str = "laion2b_s34b_b79k"
     pdf_render_dpi: int = 150
+    vlm_request_timeout_seconds: int = 45
 
     # ===== Temporal GraphRAG =====
     temporal_default_granularity: str = "year"
