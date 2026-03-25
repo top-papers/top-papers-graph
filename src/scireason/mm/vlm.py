@@ -220,9 +220,18 @@ def _describe_image_qwen_worker(image_path: Path, prompt: str, model_id: str, ma
     )
 
 
+def _local_vlm_mode() -> str:
+    return str(os.environ.get("SCIREASON_LOCAL_VLM_MODE", "worker") or "worker").strip().lower()
+
+
 def _prefer_isolated_local_vlm() -> bool:
-    raw = str(os.environ.get("SCIREASON_LOCAL_VLM_MODE", "worker") or "worker").strip().lower()
+    raw = _local_vlm_mode()
     return raw not in {"0", "false", "off", "inprocess", "direct"}
+
+
+def _allow_inprocess_fallback_after_worker_failure() -> bool:
+    raw = _local_vlm_mode()
+    return raw in {"hybrid", "fallback", "worker+fallback", "worker_fallback"}
 
 
 @lru_cache(maxsize=16)
@@ -549,7 +558,7 @@ def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_t
                 max_new_tokens=max_new_tokens,
             )
         except Exception as exc:
-            if _local_stack_available(model_id=model_id):
+            if _allow_inprocess_fallback_after_worker_failure() and _local_stack_available(model_id=model_id):
                 console.print(
                     f"[yellow]Isolated local VLM worker failed for {image_path.name}: {type(exc).__name__}: {exc}. "
                     "Пробую in-process fallback.[/yellow]"

@@ -24,11 +24,11 @@ def test_describe_image_prefers_worker_path(monkeypatch, tmp_path: Path) -> None
     assert res.caption == 'worker-ok'
 
 
-def test_worker_failure_falls_back_to_inprocess_when_stack_available(monkeypatch, tmp_path: Path) -> None:
+def test_worker_failure_falls_back_to_inprocess_when_hybrid_mode_enabled(monkeypatch, tmp_path: Path) -> None:
     image_path = tmp_path / 'page.png'
     Image.new('RGB', (8, 8), color='white').save(image_path)
 
-    monkeypatch.setenv('SCIREASON_LOCAL_VLM_MODE', 'worker')
+    monkeypatch.setenv('SCIREASON_LOCAL_VLM_MODE', 'hybrid')
 
     def _boom(**kwargs):
         raise RuntimeError('worker failed')
