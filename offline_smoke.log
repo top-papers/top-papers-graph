@@ -1,0 +1,13 @@
+[Task2 1/9] Читаю YAML и готовлю рабочую директорию
+[Task2 2/9] Строю reference graph из YAML
+[Task2 3/9] Резолвлю публикации и идентификаторы
+[Task2 4/9] Скачиваю PDF и сохраняю метаданные: 0/0
+[Task2 5/9] Парсю PDF и строю multimodal представление: 0/0
+[Task2 6/9] Собираю записи публикаций для temporal KG
+[Task2 7/9] Строю temporal knowledge graph
+[Task2 8/9] Сравниваю automatic graph с reference graph
+[Task2 9/9] Генерирую reference scout и кандидатов на дополнительные ссылки
+[Task2 9/9] Bundle собран, сохраняю manifest
+tmp_e2e_vlm_smoke/sample_validation_demo
+True
+True

@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import threading
+import tempfile
 from pathlib import Path
 from typing import Optional, Literal
 
@@ -124,6 +125,22 @@ def _run_isolated_python(code: str, *args: str, timeout: int = 180) -> subproces
 
 
 
+def _tail_worker_stderr(worker, limit: int = 8000) -> str:
+    stderr_file = getattr(worker, "_scireason_stderr_file", None)
+    if stderr_file is None:
+        return ""
+    try:
+        stderr_file.flush()
+        stderr_file.seek(0)
+        data = stderr_file.read()
+    except Exception:
+        return ""
+    data = str(data or "")
+    if len(data) <= limit:
+        return data.strip()
+    return data[-limit:].strip()
+
+
 def _close_local_vlm_worker() -> None:
     global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID
     worker = _LOCAL_VLM_WORKER
@@ -148,6 +165,12 @@ def _close_local_vlm_worker() -> None:
             worker.kill()
         except Exception:
             pass
+    stderr_file = getattr(worker, "_scireason_stderr_file", None)
+    if stderr_file is not None:
+        try:
+            stderr_file.close()
+        except Exception:
+            pass
 
 
 def _ensure_local_vlm_worker(model_id: str):
@@ -159,15 +182,20 @@ def _ensure_local_vlm_worker(model_id: str):
             return worker
         _close_local_vlm_worker()
         cmd = [sys.executable, "-m", "scireason.mm.vlm_worker", model_id]
+        env = os.environ.copy()
+        env.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+        env.setdefault("TOKENIZERS_PARALLELISM", "false")
+        stderr_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
         worker = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=stderr_file,
             text=True,
             bufsize=1,
-            env=os.environ.copy(),
+            env=env,
         )
+        setattr(worker, "_scireason_stderr_file", stderr_file)
         _LOCAL_VLM_WORKER = worker
         _LOCAL_VLM_WORKER_MODEL_ID = model_id
         return worker
@@ -194,12 +222,7 @@ def _describe_image_qwen_worker(image_path: Path, prompt: str, model_id: str, ma
         raise RuntimeError(f"local_vlm_worker_io_error: {type(exc).__name__}: {exc}") from exc
 
     if not line:
-        stderr = ""
-        try:
-            if worker.stderr is not None:
-                stderr = worker.stderr.read().strip()
-        except Exception:
-            stderr = ""
+        stderr = _tail_worker_stderr(worker)
         _close_local_vlm_worker()
         detail = stderr or f"worker_exited={worker.poll()}"
         raise RuntimeError(f"local_vlm_worker_no_response: {detail}")
@@ -220,18 +243,19 @@ def _describe_image_qwen_worker(image_path: Path, prompt: str, model_id: str, ma
     )
 
 
-def _local_vlm_mode() -> str:
-    return str(os.environ.get("SCIREASON_LOCAL_VLM_MODE", "worker") or "worker").strip().lower()
-
-
 def _prefer_isolated_local_vlm() -> bool:
-    raw = _local_vlm_mode()
+    raw = str(os.environ.get("SCIREASON_LOCAL_VLM_MODE", "worker") or "worker").strip().lower()
     return raw not in {"0", "false", "off", "inprocess", "direct"}
 
 
-def _allow_inprocess_fallback_after_worker_failure() -> bool:
-    raw = _local_vlm_mode()
-    return raw in {"hybrid", "fallback", "worker+fallback", "worker_fallback"}
+def _allow_inprocess_local_vlm_fallback() -> bool:
+    raw = os.environ.get("SCIREASON_LOCAL_VLM_ALLOW_INPROCESS_FALLBACK")
+    if raw is None:
+        try:
+            return bool(getattr(settings, "local_vlm_allow_inprocess_fallback", False))
+        except Exception:
+            return False
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 @lru_cache(maxsize=16)
@@ -558,7 +582,7 @@ def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_t
                 max_new_tokens=max_new_tokens,
             )
         except Exception as exc:
-            if _allow_inprocess_fallback_after_worker_failure() and _local_stack_available(model_id=model_id):
+            if _allow_inprocess_local_vlm_fallback() and _local_stack_available(model_id=model_id):
                 console.print(
                     f"[yellow]Isolated local VLM worker failed for {image_path.name}: {type(exc).__name__}: {exc}. "
                     "Пробую in-process fallback.[/yellow]"
