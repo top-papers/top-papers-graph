@@ -9,6 +9,7 @@ from scireason.config import settings
 from scireason.ingest import pipeline as ingest_pipeline
 from scireason.mm import vlm
 from scireason.task2_validation import (
+    build_task2_offline_review_package,
     get_task2_review_state_paths,
     load_task2_review_state,
     save_task2_review_state,
@@ -84,6 +85,37 @@ def test_review_state_roundtrip(tmp_path: Path) -> None:
     assert paths["draft_dir"].exists()
 
 
+def test_offline_review_package_contains_embedded_graphs_and_records(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "expert_validation" / "drafts").mkdir(parents=True)
+    (bundle_dir / "reference_triplets.csv").write_text(
+        "assertion_id,subject,predicate,object,start_date,end_date\n"
+        "g1,A,relates_to,B,2021,2022\n",
+        encoding="utf-8",
+    )
+    (bundle_dir / "reference_graph.json").write_text(
+        json.dumps({"nodes": [{"id": "A", "label": "A"}, {"id": "B", "label": "B"}], "edges": [{"source": "A", "target": "B", "predicate": "relates_to"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (bundle_dir / "reference_graph.html").write_text("<html><body>graph</body></html>", encoding="utf-8")
+
+    manifest = {
+        "bundle_dir": str(bundle_dir),
+        "gold_graph": str(bundle_dir / "reference_graph.json"),
+        "gold_graph_html": str(bundle_dir / "reference_graph.html"),
+        "gold_triplets_csv": str(bundle_dir / "reference_triplets.csv"),
+    }
+    task1_doc = {"topic": "demo topic", "submission_id": "demo-submission", "cutoff_year": 2024}
+    html_path = build_task2_offline_review_package(manifest, task1_doc)
+    assert html_path.exists()
+    html_text = html_path.read_text(encoding="utf-8")
+    assert "Task 2 — автономная форма экспертной валидации" in html_text
+    assert "demo-submission" in html_text
+    assert "relates_to" in html_text
+    assert "Скачать результаты ZIP" in html_text
+
+
 def test_notebook_defaults_to_g4f_and_has_draft_controls() -> None:
     nb = nbformat.read("notebooks/task2_temporal_graph_validation_colab.ipynb", as_version=4)
     cell3 = nb.cells[3].source
@@ -95,3 +127,4 @@ def test_notebook_defaults_to_g4f_and_has_draft_controls() -> None:
     assert "Сохранить черновик" in cell3
     assert "Загрузить черновик" in cell3
     assert "Автосохранение черновика" in cell3
+    assert "Скачать автономную форму" in cell3

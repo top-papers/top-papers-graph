@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import yaml  # type: ignore
 
+from .task2_offline_review import build_task2_offline_review_package
 from .pipeline.task2_validation import (
     build_reference_graph,
     prepare_task2_validation_bundle,
@@ -362,7 +363,7 @@ def build_task2_validation_bundle(
         "gold_graph": str(gold_graph_json),
         "gold_graph_html": str(gold_graph_html),
         "gold_triplets_csv": str(gold_triplets_csv),
-        "manifest_version": 5,
+        "manifest_version": 6,
         "review_state_dir": str(review_state_paths["draft_dir"]),
         "review_state_latest": str(review_state_paths["latest"]),
     }
@@ -392,6 +393,9 @@ def build_task2_validation_bundle(
         for key in ("llm_effective_provider", "llm_effective_model", "vlm_effective_backend", "vlm_effective_model"):
             if runtime_payload.get(key) not in (None, ""):
                 manifest[key] = runtime_payload.get(key)
+
+    offline_review_html = build_task2_offline_review_package(manifest, doc)
+    manifest["offline_review_html"] = str(offline_review_html)
 
     if progress_callback is not None:
         progress_callback({"stage": "manifest", "current": 3, "total": 3, "percent": 100, "message": "Сохраняю notebook manifest"})

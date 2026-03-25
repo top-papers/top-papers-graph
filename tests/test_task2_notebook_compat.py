@@ -54,6 +54,10 @@ def test_prepare_task2_bundle_offline_first_creates_artifacts(tmp_path: Path) ->
     assert (bundle_dir / 'automatic_triplets.csv').exists()
     assert (bundle_dir / 'comparison_summary.json').exists()
     assert (bundle_dir / 'scout' / 'suggested_links.json').exists()
+    assert (bundle_dir / 'expert_validation' / 'offline_review' / 'task2_expert_validation_offline.html').exists()
+
+    notebook_manifest = json.loads((bundle_dir / 'task2_notebook_manifest.json').read_text(encoding='utf-8'))
+    assert notebook_manifest['offline_review_html'].endswith('task2_expert_validation_offline.html')
 
     manifest = json.loads((bundle_dir / 'manifest.json').read_text(encoding='utf-8'))
     assert manifest['remote_lookup_enabled'] is False
