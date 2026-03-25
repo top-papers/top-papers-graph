@@ -22,6 +22,29 @@ def _json_default(o: Any) -> Any:
     return str(o)
 
 
+def _safe_path_component(value: str, *, max_len: int = 160) -> str:
+    """Return a filesystem-safe single path component.
+
+    Important: paper ids may contain `/` (for DOI suffixes) and `:`. Those values
+    must not be used directly as directory names, otherwise `Path(output_dir) / pid`
+    creates nested directories like `processed_papers/doi:10.1070/...`, which breaks
+    later scans that expect each paper to live under exactly one direct child folder.
+    """
+
+    raw = str(value or "").strip()
+    if not raw:
+        return "unknown"
+
+    safe = raw.replace("/", "_").replace(":", "_").replace("\\", "_")
+    safe = "".join(ch for ch in safe if ch.isalnum() or ch in {"_", "-", "."})
+    safe = safe.strip("._") or "unknown"
+    if len(safe) <= max_len:
+        return safe
+
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    return safe[: max_len - 11].rstrip("._") + "_" + digest
+
+
 def _normalize_chunk_records(pid: str, chunks: Iterable[str | Dict[str, Any] | ChunkRecord]) -> List[ChunkRecord]:
     out: List[ChunkRecord] = []
     for idx, item in enumerate(chunks):
@@ -54,7 +77,7 @@ def save_paper(output_dir: Path, meta: Dict[str, Any], chunks: List[str | Dict[s
 
     output_dir.mkdir(parents=True, exist_ok=True)
     pid = meta.get("id") or stable_id(meta.get("title", "unknown"))
-    paper_dir = output_dir / pid
+    paper_dir = output_dir / _safe_path_component(str(pid))
     paper_dir.mkdir(parents=True, exist_ok=True)
 
     (paper_dir / "meta.json").write_text(
