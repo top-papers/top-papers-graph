@@ -24,6 +24,9 @@ _G4F_AUTH_DISABLED = False
 _G4F_TIMEOUT_DISABLED = False
 _LOCAL_VLM_DISABLED = False
 _LOCAL_VLM_DISABLE_REASON = ""
+_LOCAL_VLM_WORKER = None
+_LOCAL_VLM_WORKER_MODEL_ID = ""
+_LOCAL_VLM_WORKER_LOCK = threading.Lock()
 
 
 Backend = Literal["auto", "none", "qwen2_vl", "qwen3_vl", "llava", "phi3_vision", "g4f"]
@@ -119,6 +122,109 @@ def _run_isolated_python(code: str, *args: str, timeout: int = 180) -> subproces
     )
 
 
+
+
+def _close_local_vlm_worker() -> None:
+    global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID
+    worker = _LOCAL_VLM_WORKER
+    _LOCAL_VLM_WORKER = None
+    _LOCAL_VLM_WORKER_MODEL_ID = ""
+    if worker is None:
+        return
+    try:
+        if getattr(worker, "stdin", None):
+            worker.stdin.write(json.dumps({"cmd": "shutdown"}, ensure_ascii=False) + "\n")
+            worker.stdin.flush()
+    except Exception:
+        pass
+    try:
+        worker.terminate()
+    except Exception:
+        pass
+    try:
+        worker.wait(timeout=5)
+    except Exception:
+        try:
+            worker.kill()
+        except Exception:
+            pass
+
+
+def _ensure_local_vlm_worker(model_id: str):
+    global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID
+    model_id = str(model_id or "").strip()
+    with _LOCAL_VLM_WORKER_LOCK:
+        worker = _LOCAL_VLM_WORKER
+        if worker is not None and worker.poll() is None and _LOCAL_VLM_WORKER_MODEL_ID == model_id:
+            return worker
+        _close_local_vlm_worker()
+        cmd = [sys.executable, "-m", "scireason.mm.vlm_worker", model_id]
+        worker = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=os.environ.copy(),
+        )
+        _LOCAL_VLM_WORKER = worker
+        _LOCAL_VLM_WORKER_MODEL_ID = model_id
+        return worker
+
+
+def _describe_image_qwen_worker(image_path: Path, prompt: str, model_id: str, max_new_tokens: int) -> VLMResult:
+    worker = _ensure_local_vlm_worker(model_id)
+    if worker.stdin is None or worker.stdout is None:
+        raise RuntimeError("local_vlm_worker_pipes_unavailable")
+
+    payload = {
+        "cmd": "describe",
+        "image_path": str(image_path),
+        "prompt": prompt,
+        "model_id": model_id,
+        "max_new_tokens": int(max_new_tokens),
+    }
+    try:
+        worker.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        worker.stdin.flush()
+        line = worker.stdout.readline()
+    except Exception as exc:
+        _close_local_vlm_worker()
+        raise RuntimeError(f"local_vlm_worker_io_error: {type(exc).__name__}: {exc}") from exc
+
+    if not line:
+        stderr = ""
+        try:
+            if worker.stderr is not None:
+                stderr = worker.stderr.read().strip()
+        except Exception:
+            stderr = ""
+        _close_local_vlm_worker()
+        detail = stderr or f"worker_exited={worker.poll()}"
+        raise RuntimeError(f"local_vlm_worker_no_response: {detail}")
+
+    try:
+        reply = json.loads(line)
+    except Exception as exc:
+        _close_local_vlm_worker()
+        raise RuntimeError(f"local_vlm_worker_bad_json: {line[:500]}") from exc
+
+    if not bool(reply.get("ok")):
+        raise RuntimeError(str(reply.get("error") or "local_vlm_worker_failed"))
+
+    return VLMResult(
+        caption=str(reply.get("caption") or ""),
+        extracted_tables_md=reply.get("extracted_tables_md") or None,
+        extracted_equations_md=reply.get("extracted_equations_md") or None,
+    )
+
+
+def _prefer_isolated_local_vlm() -> bool:
+    raw = str(os.environ.get("SCIREASON_LOCAL_VLM_MODE", "worker") or "worker").strip().lower()
+    return raw not in {"0", "false", "off", "inprocess", "direct"}
+
+
 @lru_cache(maxsize=16)
 def _local_vlm_runtime_check(model_id: Optional[str] = None) -> tuple[bool, str]:
     """Return whether the local VLM runtime is really importable.
@@ -189,6 +295,7 @@ def reset_vlm_runtime_state() -> None:
     _G4F_TIMEOUT_DISABLED = False
     _LOCAL_VLM_DISABLED = False
     _LOCAL_VLM_DISABLE_REASON = ""
+    _close_local_vlm_worker()
     try:
         _local_vlm_runtime_check.cache_clear()  # type: ignore[attr-defined]
     except Exception:
@@ -359,7 +466,7 @@ def _describe_image_g4f(image_path: Path, prompt: str, model_id: str) -> VLMResu
     return VLMResult(caption=str(text).strip())
 
 
-def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_tokens: int) -> VLMResult:
+def _describe_image_qwen_inprocess(image_path: Path, prompt: str, model_id: str, max_new_tokens: int) -> VLMResult:
     try:
         import torch  # type: ignore
         from PIL import Image  # type: ignore
@@ -428,6 +535,33 @@ def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_t
             tables_md = rest
 
     return VLMResult(caption=caption, extracted_tables_md=tables_md, extracted_equations_md=equations_md)
+
+
+
+
+def _describe_image_qwen(image_path: Path, prompt: str, model_id: str, max_new_tokens: int) -> VLMResult:
+    if _prefer_isolated_local_vlm():
+        try:
+            return _describe_image_qwen_worker(
+                image_path=image_path,
+                prompt=prompt,
+                model_id=model_id,
+                max_new_tokens=max_new_tokens,
+            )
+        except Exception as exc:
+            if _local_stack_available(model_id=model_id):
+                console.print(
+                    f"[yellow]Isolated local VLM worker failed for {image_path.name}: {type(exc).__name__}: {exc}. "
+                    "Пробую in-process fallback.[/yellow]"
+                )
+            else:
+                raise
+    return _describe_image_qwen_inprocess(
+        image_path=image_path,
+        prompt=prompt,
+        model_id=model_id,
+        max_new_tokens=max_new_tokens,
+    )
 
 
 @contextmanager
