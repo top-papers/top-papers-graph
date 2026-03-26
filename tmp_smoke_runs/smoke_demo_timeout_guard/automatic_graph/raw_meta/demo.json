@@ -1,0 +1,26 @@
+{
+  "id": "doi:10.1234/smoke.demo",
+  "source": "unknown",
+  "title": "Smoke Demo Paper",
+  "abstract": null,
+  "authors": [],
+  "venue": null,
+  "year": 2024,
+  "published_date": null,
+  "url": "https://doi.org/10.1234/smoke.demo",
+  "pdf_url": null,
+  "citation_count": null,
+  "ids": {
+    "doi": "10.1234/smoke.demo",
+    "pmid": null,
+    "pmcid": null,
+    "arxiv": null,
+    "openalex": null,
+    "semantic_scholar": null
+  },
+  "raw": {
+    "acquire_hints": [
+      "doi:10.1234/smoke.demo"
+    ]
+  }
+}
