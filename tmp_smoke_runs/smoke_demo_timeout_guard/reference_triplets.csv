@@ -1,3 +1,0 @@
-assertion_id,subject,predicate,object,start_date,end_date,valid_from,valid_to,time_source,time_interval,evidence,verdict,rationale
-manual-step-1,step:1,states,,2024,2024,2024,+inf,metadata,evidence:2024..2024|valid:2024..+inf,"{'page': None, 'figure_or_table': None, 'snippet_or_summary': 'Demo inference for timeout guard.'}",accepted,Reference step reconstructed from Task 1 trajectory YAML.
-manual-source-1-1,doi:10.1234/smoke.demo,supports_step,step:1,2024,2024,2024,2024,metadata,evidence:2024..2024|valid:2024..2024,"{'page': None, 'figure_or_table': None, 'snippet_or_summary': ''}",accepted,Evidence link reconstructed from Task 1 trajectory YAML.

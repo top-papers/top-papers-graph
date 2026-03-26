@@ -1,9 +1,0 @@
-model_id: Qwen/Qwen3-VL-4B-Instruct
-trainer: sft
-mode: text_then_vlm
-adapter: lora
-learning_rate: 1e-4
-num_train_epochs: 2
-gradient_accumulation_steps: 16
-per_device_train_batch_size: 1
-notes: Main pilot adapter run on expert SFT mixture.
