@@ -5,12 +5,10 @@ import re
 from pydantic import TypeAdapter
 
 from ..config import settings
-from ..llm import chat_json, _resolve_auto_provider
+from ..llm import chat_json, _resolve_auto_provider, temporary_llm_selection
 from ..demos.render import render_demos_block
 from .schemas import TemporalTriplet
 from .time_parse import default_time_from_paper_year
-
-
 
 
 _STOPWORDS = {
@@ -34,11 +32,24 @@ def _sentence_spans(text: str) -> list[str]:
 
 
 def _time_from_sentence(sentence: str, paper_year: Optional[int]):
-    m = re.search(r'(19\d{2}|20\d{2}|2100)', sentence)
-    year = m.group(1) if m else (str(paper_year) if paper_year else None)
-    if not year:
-        return None
-    return {'start': year, 'end': year, 'granularity': 'year'}
+    m = re.search(r'(19\d{2}|20\d{2}|2100)(?:-(\d{2})(?:-(\d{2}))?)?', sentence)
+    if m:
+        year = m.group(1)
+        month = m.group(2)
+        day = m.group(3)
+        if day:
+            value = f'{year}-{month}-{day}'
+            granularity = 'day'
+        elif month:
+            value = f'{year}-{month}'
+            granularity = 'month'
+        else:
+            value = year
+            granularity = 'year'
+        return {'start': value, 'end': value, 'granularity': granularity}
+    if paper_year:
+        return {'start': str(paper_year), 'end': str(paper_year), 'granularity': 'year'}
+    return None
 
 
 def _rule_based_triplets(chunk_text: str, paper_year: Optional[int] = None) -> List[TemporalTriplet]:
@@ -67,13 +78,23 @@ def _rule_based_triplets(chunk_text: str, paper_year: Optional[int] = None) -> L
                     continue
                 seen.add(key)
                 time = _time_from_sentence(sent, paper_year)
-                out.append(TemporalTriplet(subject=subj, predicate=pred, object=obj, confidence=0.72 if polarity == 'supports' else 0.58, polarity=polarity, evidence_quote=sent[:200], time=time))
+                out.append(
+                    TemporalTriplet(
+                        subject=subj,
+                        predicate=pred,
+                        object=obj,
+                        confidence=0.72 if polarity == 'supports' else 0.58,
+                        polarity=polarity,
+                        evidence_quote=sent[:200],
+                        time=time,
+                        time_source='extracted' if time and str(time.get('start') or '') != str(paper_year or '') else 'paper_year_fallback',
+                    )
+                )
                 if len(out) >= 10:
                     return out
     if out:
         return out
 
-    # Best-effort co-occurrence fallback from capitalized / technical phrases in the first sentences.
     candidates: list[str] = []
     for sentence in _sentence_spans(chunk_text)[:4]:
         for phrase in re.findall(r'[A-Za-z][A-Za-z0-9_\-]{2,}(?:\s+[A-Za-z0-9_\-]{2,}){0,3}', sentence):
@@ -93,7 +114,18 @@ def _rule_based_triplets(chunk_text: str, paper_year: Optional[int] = None) -> L
             if s.lower() == o.lower():
                 continue
             time = _time_from_sentence(chunk_text, paper_year)
-            out.append(TemporalTriplet(subject=s, predicate='relates_to', object=o, confidence=0.41, polarity='unknown', evidence_quote=' '.join(_sentence_spans(chunk_text)[:1])[:200], time=time))
+            out.append(
+                TemporalTriplet(
+                    subject=s,
+                    predicate='relates_to',
+                    object=o,
+                    confidence=0.41,
+                    polarity='unknown',
+                    evidence_quote=' '.join(_sentence_spans(chunk_text)[:1])[:200],
+                    time=time,
+                    time_source='extracted' if time and str(time.get('start') or '') != str(paper_year or '') else 'paper_year_fallback',
+                )
+            )
             if len(out) >= 5:
                 return out
     return out
@@ -113,6 +145,7 @@ TEMPORAL_TRIPLET_SCHEMA_HINT = """Ожидается JSON массив объе�
 ]
 Правила:
 - НЕ выдумывай факты. Если не уверен — polarity="unknown" и confidence <= 0.5.
+- Если в тексте есть точная дата/месяц/период — обязательно сохрани её с максимально доступной гранулярностью.
 - Время: если в фрагменте явно указан период — заполни time.
   Если времени нет в тексте — оставь null (мы подставим год публикации из meta).
 - evidence_quote: возьми дословный кусок из фрагмента (можно укоротить), не придумывай.
@@ -125,14 +158,19 @@ def extract_temporal_triplets(
     paper_year: Optional[int] = None,
     *,
     use_demos: Optional[bool] = None,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
 ) -> List[TemporalTriplet]:
     """Extract temporal triplets from a chunk.
 
     If use_demos is True (or settings.demo_enabled), the function injects retrieval-few-shot
     examples from Qdrant demo store (task=temporal_triplets) to improve format and accuracy.
+
+    `llm_provider` / `llm_model` are explicit overrides for this extraction call. This makes
+    notebook/CLI overrides deterministic instead of relying on ambient repo defaults.
     """
     system = f"""Ты — помощник исследователя в области {domain}.
-Твоя задача — извлечь из фрагмента текста научные утверждения в виде триплетов (S-P-O) и (если возможно) временные метки.
+Твоя задача — извлечь из фрагмента текста научные утверждения в виде триплетов (S-P-O) и сохранить временные метки с максимально возможной точностью.
 """
 
     enabled = getattr(settings, "demo_enabled", True) if use_demos is None else use_demos
@@ -140,7 +178,6 @@ def extract_temporal_triplets(
     if enabled:
         k = int(getattr(settings, "demo_top_k_triplets", 3))
         try:
-            # Lazy import: demos require Qdrant client/service, but the extractor itself shouldn't.
             from ..demos.retriever import retrieve_demos  # type: ignore
 
             demos = retrieve_demos(task="temporal_triplets", domain=domain, query=chunk_text, k=k)
@@ -152,26 +189,29 @@ def extract_temporal_triplets(
         except Exception:
             demo_block = ""
 
-    provider = (settings.llm_provider or '').lower().strip() or 'auto'
-    if provider == 'auto':
-        provider = _resolve_auto_provider()
-
     user = f"""{demo_block}Фрагмент:
 {chunk_text}
 
 Извлеки 3-10 самых важных утверждений."""
 
-    if provider == 'mock':
-        triplets = _rule_based_triplets(chunk_text=chunk_text, paper_year=paper_year)
-    else:
-        data = chat_json(system=system, user=user, schema_hint=TEMPORAL_TRIPLET_SCHEMA_HINT, temperature=0.0)
-        adapter = TypeAdapter(List[TemporalTriplet])
-        triplets = adapter.validate_python(data)
+    with temporary_llm_selection(llm_provider=llm_provider, llm_model=llm_model):
+        provider = (settings.llm_provider or '').lower().strip() or 'auto'
+        if provider == 'auto':
+            provider = _resolve_auto_provider()
 
-    # если time не найден, подставляем год публикации как «суррогат» времени
+        if provider == 'mock':
+            triplets = _rule_based_triplets(chunk_text=chunk_text, paper_year=paper_year)
+        else:
+            data = chat_json(system=system, user=user, schema_hint=TEMPORAL_TRIPLET_SCHEMA_HINT, temperature=0.0)
+            adapter = TypeAdapter(List[TemporalTriplet])
+            triplets = adapter.validate_python(data)
+
     fallback = default_time_from_paper_year(paper_year)
     if fallback:
         for t in triplets:
             if t.time is None:
                 t.time = fallback
+                t.time_source = 'paper_year_fallback'
+            elif not getattr(t, 'time_source', None):
+                t.time_source = 'extracted'
     return triplets

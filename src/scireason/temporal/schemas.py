@@ -34,6 +34,7 @@ class TemporalTriplet(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=0.6)
     polarity: Literal["supports", "contradicts", "unknown"] = "unknown"
     time: Optional[TimeInterval] = None
+    time_source: Literal["extracted", "paper_year_fallback"] = "extracted"
     # Provenance (MVP): a short quote/snippet from the input chunk/page that supports the assertion.
     evidence_quote: Optional[str] = Field(
         default=None,

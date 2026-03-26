@@ -972,6 +972,7 @@ def _paperrecord_from_metadata(meta: PaperMetadata) -> PaperRecord:
         text=text,
         url=meta.url or "",
         source=str(meta.source.value if hasattr(meta.source, "value") else meta.source),
+        evidence_units=[],
     )
 
 
@@ -981,16 +982,40 @@ def _load_domain_from_trajectory(doc: Dict[str, Any]) -> DomainConfig:
 
 
 def _flatten_automatic_graph(kg: TemporalKnowledgeGraph) -> List[Dict[str, Any]]:
+    def _time_sort_key(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return "9999-99-99"
+        parts = raw.split("-")
+        if len(parts) == 1:
+            return f"{parts[0]}-99-99"
+        if len(parts) == 2:
+            return f"{parts[0]}-{parts[1]}-99"
+        return raw
+
     rows: List[Dict[str, Any]] = []
     kg_json = kg.to_json_dict()
     for idx, edge in enumerate(kg_json.get("edges", []) or [], start=1):
-        years = []
-        try:
-            years = sorted(int(y) for y in (edge.get("yearly_count") or {}).keys())
-        except Exception:
+        intervals = [item for item in (edge.get("time_intervals") or []) if isinstance(item, dict)]
+        extracted_intervals = [item for item in intervals if str(item.get("source") or "") == "extracted"]
+        selected_intervals = extracted_intervals or intervals
+
+        if selected_intervals:
+            starts = [str(item.get("start") or "").strip() for item in selected_intervals if str(item.get("start") or "").strip()]
+            ends = [str(item.get("end") or item.get("start") or "").strip() for item in selected_intervals if str(item.get("end") or item.get("start") or "").strip()]
+            start_date = min(starts, key=_time_sort_key) if starts else "unknown"
+            end_date = max(ends, key=_time_sort_key) if ends else start_date
+            time_source = "triplet_extractor" if extracted_intervals else "paper_year_fallback"
+        else:
             years = []
-        start_date = str(years[0]) if years else "unknown"
-        end_date = str(years[-1]) if years else "unknown"
+            try:
+                years = sorted(int(y) for y in (edge.get("yearly_count") or {}).keys())
+            except Exception:
+                years = []
+            start_date = str(years[0]) if years else "unknown"
+            end_date = str(years[-1]) if years else "unknown"
+            time_source = "metadata"
+
         quotes = edge.get("evidence_quotes") or []
         first_quote = quotes[0] if quotes else {}
         rows.append(
@@ -1002,17 +1027,20 @@ def _flatten_automatic_graph(kg: TemporalKnowledgeGraph) -> List[Dict[str, Any]]
                 "start_date": start_date,
                 "end_date": end_date,
                 "valid_from": start_date,
-                "valid_to": "+inf" if start_date != "unknown" else "unknown",
-                "time_source": "metadata",
-                "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{'+inf' if start_date != 'unknown' else 'unknown'}",
+                "valid_to": end_date if end_date != "unknown" else ("+inf" if start_date != "unknown" else "unknown"),
+                "time_source": time_source,
+                "time_interval": f"evidence:{start_date}..{end_date}|valid:{start_date}..{(end_date if end_date != 'unknown' else ('+inf' if start_date != 'unknown' else 'unknown'))}",
+                "time_candidates": selected_intervals[:10],
                 "score": edge.get("score"),
                 "mean_confidence": edge.get("mean_confidence"),
                 "papers": edge.get("papers") or [],
                 "evidence": {
-                    "page": None,
+                    "page": first_quote.get("page"),
                     "figure_or_table": None,
                     "snippet_or_summary": str(first_quote.get("quote") or ""),
                     "paper_id": str(first_quote.get("paper_id") or ""),
+                    "source_kind": str(first_quote.get("source_kind") or ""),
+                    "image_path": str(first_quote.get("image_path") or ""),
                 },
             }
         )
@@ -1338,6 +1366,8 @@ def prepare_task2_validation_bundle(
                 query=str(doc.get("topic") or ""),
                 edge_mode=edge_mode,  # type: ignore[arg-type]
                 expert_overrides_path=None,
+                llm_provider=str(settings.llm_provider or "") or None,
+                llm_model=str(settings.llm_model or "") or None,
             )
             kg.dump_json(out / "automatic_graph" / "temporal_kg.json")
 
