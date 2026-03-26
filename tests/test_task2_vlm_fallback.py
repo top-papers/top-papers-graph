@@ -55,3 +55,21 @@ def test_describe_image_disables_g4f_after_missing_auth(monkeypatch, tmp_path: P
     res = vlm.describe_image(image_path=image_path, prompt="demo", backend="g4f", model_id="auto")
     assert res.caption == ""
     assert vlm._G4F_AUTH_DISABLED is True
+
+
+def test_describe_image_disables_g4f_after_provider_failure(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (16, 16), color="white").save(image_path)
+
+    monkeypatch.setattr(vlm, "_has_g4f", lambda: True)
+    monkeypatch.setattr(vlm, "_has_local_vlm_stack", lambda: False)
+    monkeypatch.setattr(vlm, "_G4F_AUTH_DISABLED", False)
+
+    def _boom(**kwargs):
+        raise RuntimeError("All providers failed: Response 403: {'detail': {'error': 'Not authenticated'}}")
+
+    monkeypatch.setattr(vlm, "_describe_image_g4f", _boom)
+
+    res = vlm.describe_image(image_path=image_path, prompt="demo", backend="g4f", model_id="auto")
+    assert res.caption == ""
+    assert vlm._G4F_AUTH_DISABLED is True

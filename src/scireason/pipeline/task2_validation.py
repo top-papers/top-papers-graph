@@ -69,6 +69,15 @@ DEFAULT_SEARCH_SOURCES = [
 ]
 
 
+def acquire_pdfs(resolved: Sequence[PaperMetadata], *, raw_dir: Path, meta_dir: Path) -> List[AcquireResult]:
+    """Acquire PDFs for a resolved paper list.
+
+    Kept as a small wrapper so tests and notebook code can monkeypatch the whole
+    acquisition step without reaching into per-paper internals.
+    """
+    return [acquire_pdf(meta, raw_dir=raw_dir, meta_dir=meta_dir) for meta in resolved]
+
+
 def _slugify(text: str) -> str:
     s = re.sub(r"[^a-z0-9\-\s_]+", "", (text or "").strip().lower())
     s = re.sub(r"\s+", "-", s).strip("-")
@@ -1233,7 +1242,6 @@ def prepare_task2_validation_bundle(
             processed_dir.mkdir(parents=True, exist_ok=True)
 
             _emit_progress(progress_callback, stage="acquire", current=4, total=total_stages, message=f"Скачиваю PDF и сохраняю метаданные: 0/{len(resolved)}")
-            acq: List[AcquireResult] = []
             total_resolved = len(resolved)
             for idx, meta in enumerate(resolved, start=1):
                 title_hint = meta.title or meta.id
@@ -1248,7 +1256,7 @@ def prepare_task2_validation_bundle(
                     paper_id=meta.id,
                     paper_title=title_hint,
                 )
-                acq.append(acquire_pdf(meta, raw_dir=raw_dir, meta_dir=meta_dir))
+            acq: List[AcquireResult] = list(acquire_pdfs(resolved, raw_dir=raw_dir, meta_dir=meta_dir))
             (out / "acquire_results.json").write_text(
                 json.dumps(
                     [asdict(a) | {"pdf_path": str(a.pdf_path) if a.pdf_path else None, "meta_path": str(a.meta_path)} for a in acq],

@@ -7,6 +7,8 @@ src/scireason/contracts.py
 src/scireason/domain.py
 src/scireason/llm.py
 src/scireason/schemas.py
+src/scireason/task1_offline_form.py
+src/scireason/task2_offline_review.py
 src/scireason/task2_validation.py
 src/scireason/agentic/code_agent.py
 src/scireason/agentic/graph_tools.py
@@ -71,6 +73,7 @@ src/scireason/mm/__init__.py
 src/scireason/mm/mm_embed.py
 src/scireason/mm/pdf_mm_extract.py
 src/scireason/mm/vlm.py
+src/scireason/mm/vlm_worker.py
 src/scireason/net/__init__.py
 src/scireason/net/cache.py
 src/scireason/net/http.py
@@ -113,6 +116,7 @@ tests/test_charging_profiles.py
 tests/test_chunk_contracts.py
 tests/test_debate_smoke.py
 tests/test_gnn_optional.py
+tests/test_local_vlm_worker.py
 tests/test_memory_regressions.py
 tests/test_paddle_langchain_compat.py
 tests/test_paddle_out_of_box_install.py
@@ -121,6 +125,7 @@ tests/test_qdrant_hybrid.py
 tests/test_qdrant_store.py
 tests/test_qdrant_store_compat.py
 tests/test_smolagents_backend_integration.py
+tests/test_task1_offline_form.py
 tests/test_task2_llm_selection.py
 tests/test_task2_notebook_compat.py
 tests/test_task2_notebook_full_pipeline_guard.py
@@ -128,5 +133,8 @@ tests/test_task2_out_of_box_defaults.py
 tests/test_task2_pdf_resolution.py
 tests/test_task2_progress_and_timeout.py
 tests/test_task2_vlm_fallback.py
+tests/test_task2_vlm_local_runtime_guard.py
+tests/test_task2_vlm_state_reset.py
 tests/test_templates_exist.py
 tests/test_tgnn.py
+tests/test_vlm_worker_stderr_tail.py

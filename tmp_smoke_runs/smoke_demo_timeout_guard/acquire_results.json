@@ -1,9 +1,0 @@
-[
-  {
-    "paper_id": "doi:10.1234/smoke.demo",
-    "pdf_path": "/mnt/data/top-papers-graph-main_paddle_textsplit_g4f_fixed/top-papers-graph-main/tmp_smoke_demo.pdf",
-    "meta_path": "/mnt/data/top-papers-graph-main_paddle_textsplit_g4f_fixed/top-papers-graph-main/tmp_smoke_runs/smoke_demo_timeout_guard/automatic_graph/raw_meta/demo.json",
-    "used_pdf_url": "local-demo",
-    "error": null
-  }
-]

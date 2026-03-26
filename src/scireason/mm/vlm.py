@@ -366,7 +366,39 @@ def _resolve_model_id_for_backend(backend: Backend, model_id: Optional[str]) -> 
 
 def _missing_auth_error(exc: Exception) -> bool:
     msg = str(exc).lower()
-    return "missingautherror" in msg or "api key is required" in msg or "add a \"api_key\"" in msg
+    indicators = (
+        "missingautherror",
+        "api key is required",
+        "add a \"api_key\"",
+        "not authenticated",
+        "unauthorized",
+        "no yupp accounts configured",
+        "set yupp_api_key",
+        "set openai_api_key",
+        "set gemini_api_key",
+        "set groq_api_key",
+        "set openrouter_api_key",
+        "requires a .har file",
+        "requires authentication",
+    )
+    return any(token in msg for token in indicators)
+
+
+def _provider_unavailable_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    indicators = (
+        "all providers failed",
+        "no provider",
+        "no providers",
+        "provider not found",
+        "provider is not available",
+        "provider init",
+        "retryprovider",
+        "best_provider",
+        "model is not supported by provider",
+        "not supported by provider",
+    )
+    return any(token in msg for token in indicators)
 
 
 def _run_with_timeout(timeout_seconds: float, fn, /, *args, **kwargs):
@@ -654,11 +686,11 @@ def describe_image(
         )
     except Exception as e:
         global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED, _LOCAL_VLM_DISABLED
-        if effective_backend == "g4f" and _missing_auth_error(e):
+        if effective_backend == "g4f" and (_missing_auth_error(e) or _provider_unavailable_error(e)):
             _G4F_AUTH_DISABLED = True
             if _has_local_vlm_stack():
                 console.print(
-                    f"[yellow]g4f требует аутентификацию для текущего provider/model; переключаю VLM на локальный Transformers backend начиная с {image_path.name}.[/yellow]"
+                    f"[yellow]g4f требует аутентификацию или не нашёл рабочий provider/model; переключаю VLM на локальный Transformers backend начиная с {image_path.name}.[/yellow]"
                 )
                 try:
                     fallback_model = _resolve_model_id_for_backend("qwen2_vl", None)

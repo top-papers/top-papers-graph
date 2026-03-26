@@ -1,0 +1,23 @@
+name: An et al. 2019 G9 multi-stage fast charge 0-80% SOC
+source: An et al. 2019
+chemistry: Li-ion
+temperature_C: 25
+soc_window:
+  from: 0.0
+  to: 0.8
+stages:
+  - mode: CC
+    soc_from: 0.0
+    soc_to: 0.3
+    c_rate: 2.0
+  - mode: CC
+    soc_from: 0.3
+    soc_to: 0.6
+    c_rate: 1.5
+  - mode: CC
+    soc_from: 0.6
+    soc_to: 0.8
+    c_rate: 0.9
+rests:
+  - after: charge
+    duration_min: 10
