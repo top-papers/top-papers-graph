@@ -16,6 +16,7 @@ Both backends produce a unified in-memory representation that can be exported to
 from dataclasses import dataclass, field
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Set, Tuple
 
@@ -131,6 +132,7 @@ class TemporalKnowledgeGraph:
                     "time_intervals": e.time_intervals[:20],
                     "features": e.features,
                     "score": e.score,
+                    "importance_score": float(e.features.get("importance_score", 0.0) or 0.0),
                 }
                 for e in self.edges
             ],
@@ -155,6 +157,32 @@ def _year_from_triplet(tr: TemporalTriplet, paper_year: Optional[int]) -> Option
         except Exception:
             pass
     return paper_year
+
+
+def _topic_terms(text: str) -> Set[str]:
+    raw_tokens = re.findall(r"[\w-]+", str(text or "").lower(), flags=re.UNICODE)
+    out: Set[str] = set()
+    for tok in raw_tokens:
+        token = tok.strip("-_")
+        if len(token) < 3:
+            continue
+        if token.isdigit():
+            continue
+        out.add(token)
+    return out
+
+
+def _edge_topic_relevance(edge: EdgeStats, query_terms: Set[str]) -> float:
+    if not query_terms:
+        return 0.0
+    edge_terms = _topic_terms(" ".join([edge.source, edge.predicate, edge.target]))
+    if not edge_terms:
+        return 0.0
+    overlap = len(edge_terms & query_terms) / float(max(1, len(query_terms)))
+    source_overlap = len(_topic_terms(edge.source) & query_terms) / float(max(1, len(query_terms)))
+    target_overlap = len(_topic_terms(edge.target) & query_terms) / float(max(1, len(query_terms)))
+    predicate_overlap = len(_topic_terms(edge.predicate) & query_terms) / float(max(1, len(query_terms)))
+    return max(0.0, min(1.0, 0.45 * overlap + 0.25 * source_overlap + 0.25 * target_overlap + 0.05 * predicate_overlap))
 
 
 def _stream_chunk_units(chunks_path: Path, *, max_chars_per_paper: int) -> tuple[list[PaperEvidenceUnit], str]:
@@ -710,12 +738,15 @@ def build_temporal_kg(
 
     _apply_expert_overrides(edges, expert_overrides_path)
 
+    query_terms = _topic_terms(query)
     edge_list: List[EdgeStats] = []
     for e in edges.values():
         e.features.setdefault("pmi", pmi(e))
         e.features.setdefault("trend", trend(e))
         e.features.setdefault("log_count", math.log1p(float(e.total_count)))
         e.features.setdefault("mean_conf", e.mean_confidence)
+        e.features.setdefault("topic_relevance", _edge_topic_relevance(e, query_terms))
+        e.features.setdefault("paper_support_ratio", float(len(e.papers)) / float(max(1, n_docs)))
         if e.time_intervals:
             extracted_count = sum(1 for item in e.time_intervals if str(item.get("source") or "") == "extracted")
             e.features.setdefault("time_signal_count", float(len(e.time_intervals)))
@@ -735,7 +766,24 @@ def build_temporal_kg(
         )
         edge_list.append(e)
 
-    edge_list.sort(key=lambda x: x.score, reverse=True)
+    scores = [float(e.score) for e in edge_list]
+    min_score = min(scores) if scores else 0.0
+    max_score = max(scores) if scores else 0.0
+    for e in edge_list:
+        if max_score > min_score:
+            score_norm = (float(e.score) - min_score) / float(max_score - min_score)
+        else:
+            score_norm = 1.0 if edge_list else 0.0
+        e.features["score_norm"] = score_norm
+        importance = (
+            0.45 * float(e.features.get("topic_relevance", 0.0) or 0.0)
+            + 0.25 * score_norm
+            + 0.15 * float(e.features.get("mean_conf", 0.0) or 0.0)
+            + 0.15 * float(e.features.get("paper_support_ratio", 0.0) or 0.0)
+        )
+        e.features["importance_score"] = max(0.0, min(1.0, float(importance)))
+
+    edge_list.sort(key=lambda x: (float(x.features.get("importance_score", 0.0) or 0.0), x.score), reverse=True)
 
     return TemporalKnowledgeGraph(
         nodes=nodes,

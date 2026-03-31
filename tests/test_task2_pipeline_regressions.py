@@ -182,3 +182,56 @@ def test_flatten_automatic_graph_preserves_precise_time_intervals() -> None:
     assert rows[0]["time_candidates"][0]["granularity"] == "day"
     assert rows[0]["evidence"]["page"] == 3
     assert rows[0]["evidence"]["source_kind"] == "multimodal_page"
+
+
+
+def test_build_temporal_kg_assigns_importance_score_in_unit_interval(monkeypatch) -> None:
+    def _fake_extract(*, domain, chunk_text, paper_year, **kwargs):
+        return [
+            TemporalTriplet(
+                subject="hexatic phase",
+                predicate="appears_in",
+                object="dusty plasma",
+                confidence=0.84,
+                polarity="supports",
+                evidence_quote="hexatic phase appears in dusty plasma in 2021.",
+                time=TimeInterval(start="2021", end="2021", granularity="year"),
+            )
+        ]
+
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.extract_temporal_triplets", _fake_extract)
+
+    kg = build_temporal_kg(
+        [PaperRecord(paper_id="p1", title="Hexatic phase in dusty plasma", year=2021, text="hexatic phase appears in dusty plasma")],
+        domain=load_domain_config("science"),
+        query="hexatic phase dusty plasma",
+        edge_mode="auto",
+    )
+
+    assert kg.edges
+    score = kg.edges[0].features.get("importance_score")
+    assert isinstance(score, float)
+    assert 0.0 <= score <= 1.0
+
+
+
+def test_flatten_automatic_graph_exposes_importance_score() -> None:
+    kg = TemporalKnowledgeGraph(
+        edges=[
+            EdgeStats(
+                source="hexatic phase",
+                target="dusty plasma",
+                predicate="appears_in",
+                papers={"paper-1"},
+                evidence_quotes=[{"paper_id": "paper-1", "quote": "demo quote"}],
+                time_intervals=[{"start": "2021", "end": "2021", "granularity": "year", "source": "extracted", "paper_id": "paper-1"}],
+                yearly_count={2021: 1},
+                features={"importance_score": 0.73, "topic_relevance": 0.91},
+            )
+        ]
+    )
+
+    rows = _flatten_automatic_graph(kg)
+
+    assert rows[0]["importance_score"] == 0.73
+    assert rows[0]["topic_relevance"] == 0.91

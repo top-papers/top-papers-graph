@@ -227,8 +227,11 @@ def _normalize_assertions(rows: List[Dict[str, Any]], graph_kind: str) -> List[D
             "evidence_locator": locator,
             "papers_text": papers_text or "",
             "papers_text_short": _truncate_text(papers_text or "", 180),
+            "paper_ids": papers_text if isinstance(papers_text, list) else _parse_maybe_object(_pick_first(row_dict, ["paper_ids", "papers"], [])),
+            "paper_titles": _parse_maybe_object(_pick_first(row_dict, ["paper_titles"], [])),
             "score": _pick_first(row_dict, ["score"], ""),
             "mean_confidence": _pick_first(row_dict, ["mean_confidence"], ""),
+            "importance_score": _pick_first(row_dict, ["importance_score"], 0),
             "verdict": str(_pick_first(row_dict, ["verdict"], "")),
             "rationale": str(_pick_first(row_dict, ["rationale"], "")),
             "time_source_note": str(_pick_first(row_dict, ["time_source_note"], "")),
@@ -239,6 +242,93 @@ def _normalize_assertions(rows: List[Dict[str, Any]], graph_kind: str) -> List[D
         normalized_row["default_review_state"] = _default_review_state(normalized_row)
         normalized.append(normalized_row)
     return normalized
+
+
+def _graph_analytics_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        import networkx as nx
+    except Exception:
+        return {"nodes": {}, "summary": {"n_communities": 0, "n_cliques": 0, "max_clique_size": 0}}
+
+    nodes = [node for node in (payload.get("nodes") or []) if isinstance(node, dict)]
+    edges = [edge for edge in (payload.get("edges") or []) if isinstance(edge, dict)]
+    directed = True
+    if any(not bool(edge.get("directed", True)) for edge in edges):
+        directed = False
+    G = nx.DiGraph() if directed else nx.Graph()
+    for node in nodes:
+        node_id = node.get("id") or node.get("term") or node.get("label")
+        if node_id is None:
+            continue
+        G.add_node(str(node_id), **dict(node))
+    for edge in edges:
+        src = edge.get("source")
+        tgt = edge.get("target") or edge.get("object")
+        if src is None or tgt is None:
+            continue
+        G.add_edge(str(src), str(tgt), **dict(edge))
+    if G.number_of_nodes() == 0:
+        return {"nodes": {}, "summary": {"n_communities": 0, "n_cliques": 0, "max_clique_size": 0}}
+
+    U = G.to_undirected() if hasattr(G, "to_undirected") else G
+    degree = nx.degree_centrality(U)
+    try:
+        closeness = nx.closeness_centrality(U)
+    except Exception:
+        closeness = {node: 0.0 for node in G.nodes()}
+    try:
+        betweenness = nx.betweenness_centrality(U) if U.number_of_nodes() <= 250 else {node: 0.0 for node in G.nodes()}
+    except Exception:
+        betweenness = {node: 0.0 for node in G.nodes()}
+    try:
+        pagerank = nx.pagerank(G if G.number_of_edges() else U)
+    except Exception:
+        pagerank = {node: 0.0 for node in G.nodes()}
+    try:
+        communities = list(nx.community.louvain_communities(U, seed=42)) if U.number_of_edges() else [{node} for node in U.nodes()]
+    except Exception:
+        try:
+            communities = list(nx.community.greedy_modularity_communities(U)) if U.number_of_edges() else [{node} for node in U.nodes()]
+        except Exception:
+            communities = [{node} for node in U.nodes()]
+    community_by_node: Dict[str, int] = {}
+    for idx, members in enumerate(communities, start=1):
+        for node in members:
+            community_by_node[str(node)] = idx
+    cliques = []
+    try:
+        if U.number_of_nodes() <= 120:
+            cliques = list(nx.find_cliques(U))
+    except Exception:
+        cliques = []
+    clique_counts: Dict[str, int] = {str(node): 0 for node in U.nodes()}
+    max_clique_size_by_node: Dict[str, int] = {str(node): 0 for node in U.nodes()}
+    for clique in cliques:
+        size = len(clique)
+        for node in clique:
+            key = str(node)
+            clique_counts[key] = clique_counts.get(key, 0) + 1
+            max_clique_size_by_node[key] = max(max_clique_size_by_node.get(key, 0), size)
+
+    return {
+        "nodes": {
+            str(node): {
+                "degree_centrality": float(degree.get(node, 0.0) or 0.0),
+                "betweenness_centrality": float(betweenness.get(node, 0.0) or 0.0),
+                "closeness_centrality": float(closeness.get(node, 0.0) or 0.0),
+                "pagerank": float(pagerank.get(node, 0.0) or 0.0),
+                "community_id": int(community_by_node.get(str(node), 0) or 0),
+                "clique_count": int(clique_counts.get(str(node), 0) or 0),
+                "max_clique_size": int(max_clique_size_by_node.get(str(node), 0) or 0),
+            }
+            for node in G.nodes()
+        },
+        "summary": {
+            "n_communities": len(communities),
+            "n_cliques": len(cliques),
+            "max_clique_size": max((len(c) for c in cliques), default=0),
+        },
+    }
 
 
 _HTML_TEMPLATE = r"""<!doctype html>
@@ -327,6 +417,35 @@ _HTML_TEMPLATE = r"""<!doctype html>
     @media (max-width: 1100px) {
       .graph-shell { grid-template-columns: 1fr; }
     }
+    .graph-controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+      align-items: end;
+    }
+    .graph-controls label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .graph-controls input, .graph-controls select, .graph-controls textarea {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font: inherit;
+      background: #fff;
+      color: var(--text);
+    }
+    .metric-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .metric-strip .pill { background: #ecfeff; color: #155e75; }
     svg.graph {
       width: 100%;
       min-height: 520px;
@@ -401,9 +520,23 @@ _HTML_TEMPLATE = r"""<!doctype html>
   };
 
   const STORAGE_KEY = `task2-offline-review:${APP.meta.submission_id || APP.meta.topic || 'bundle'}`;
+  const defaultExcludedText = Array.isArray(APP.meta.excluded_papers_applied) ? APP.meta.excluded_papers_applied.join('
+') : '';
   const state = {
     reviewer_id: APP.meta.reviewer_default || '',
-    filters: { graph: 'all', verdict: 'pending', search: '', pageSize: 5, page: 1 },
+    filters: {
+      graph: 'all',
+      verdict: 'pending',
+      search: '',
+      pageSize: 5,
+      page: 1,
+      importanceThreshold: Number(APP.meta.default_importance_threshold || 0) || 0,
+      excludedPapersText: defaultExcludedText,
+    },
+    graphControls: {
+      gold: { colorMode: 'type', sizeMode: 'none', minCliqueSize: 3 },
+      auto: { colorMode: 'community', sizeMode: 'pagerank', minCliqueSize: 3 },
+    },
     reviewState: Object.fromEntries(APP.records.map((row) => [row.edge_uid, clone(row.default_review_state)])),
   };
 
@@ -428,12 +561,38 @@ _HTML_TEMPLATE = r"""<!doctype html>
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
   }
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+  function normalizedPaperIds(text) {
+    return String(text || '')
+      .split(/[
+,;]+/)
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean);
+  }
+  function graphAnalytics(kind) {
+    return (APP.graph_analytics && APP.graph_analytics[kind]) || { nodes: {}, summary: {} };
+  }
+  function rowPaperIds(row) {
+    const value = row && row.paper_ids;
+    if (Array.isArray(value)) return value.map((x) => String(x || '').trim().toLowerCase()).filter(Boolean);
+    if (typeof value === 'string') return normalizedPaperIds(value);
+    return normalizedPaperIds(row?.papers_text || '');
+  }
+  function edgePaperIds(edge) {
+    const value = edge && edge.paper_ids;
+    if (Array.isArray(value)) return value.map((x) => String(x || '').trim().toLowerCase()).filter(Boolean);
+    if (typeof value === 'string') return normalizedPaperIds(value);
+    return [];
+  }
   function snapshot(reason = 'manual') {
     return {
-      artifact_version: 1,
+      artifact_version: 2,
       reason,
       reviewer_id: state.reviewer_id,
       filters: clone(state.filters),
+      graph_controls: clone(state.graphControls),
       review_state: clone(state.reviewState),
     };
   }
@@ -446,6 +605,17 @@ _HTML_TEMPLATE = r"""<!doctype html>
     if (typeof filters.search === 'string') state.filters.search = filters.search;
     state.filters.pageSize = toNumber(filters.page_size || filters.pageSize, state.filters.pageSize);
     state.filters.page = toNumber(filters.page, state.filters.page);
+    state.filters.importanceThreshold = clamp(toNumber(filters.importance_threshold || filters.importanceThreshold, state.filters.importanceThreshold), 0, 1);
+    if (typeof (filters.excluded_papers_text || filters.excludedPapersText) === 'string') {
+      state.filters.excludedPapersText = String(filters.excluded_papers_text || filters.excludedPapersText || '');
+    }
+    const graphControls = payload.graph_controls || payload.graphControls || {};
+    ['gold', 'auto'].forEach((kind) => {
+      const src = graphControls[kind] || {};
+      if (src.colorMode) state.graphControls[kind].colorMode = String(src.colorMode);
+      if (src.sizeMode) state.graphControls[kind].sizeMode = String(src.sizeMode);
+      state.graphControls[kind].minCliqueSize = Math.max(2, toNumber(src.minCliqueSize || src.min_clique_size, state.graphControls[kind].minCliqueSize));
+    });
     const loaded = payload.review_state || payload.reviewState || {};
     Object.entries(loaded).forEach(([edge, value]) => {
       if (!state.reviewState[edge] || !value || typeof value !== 'object') return;
@@ -592,14 +762,57 @@ _HTML_TEMPLATE = r"""<!doctype html>
     if (node.term || ['term','entity','concept'].includes(rawType)) return 'term';
     return 'default';
   }
-  function renderGraphSvg(target, payload) {
-    const nodes = graphNodes(payload);
-    const edges = graphEdges(payload);
+  function renderGraphSvg(target, payload, analytics, controls, kind) {
+    const allNodes = graphNodes(payload);
+    const allEdges = graphEdges(payload);
+    const excluded = new Set(normalizedPaperIds(state.filters.excludedPapersText));
+    const threshold = clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1);
+    let edges = allEdges.slice();
+    if (kind === 'auto') {
+      edges = edges.filter((edge) => {
+        const score = Number(edge.importance_score || 0) || 0;
+        if (score < threshold) return false;
+        if (!excluded.size) return true;
+        const pids = edgePaperIds(edge);
+        return !pids.some((pid) => excluded.has(pid));
+      });
+    }
+    const activeNodeIds = new Set();
+    edges.forEach((edge) => {
+      activeNodeIds.add(String(edge.source || edge.subject || edge.from || ''));
+      activeNodeIds.add(String(edge.target || edge.object || edge.to || ''));
+    });
+    let nodes = allNodes.filter((node, idx) => activeNodeIds.has(String(node.id || node.term || node.label || `node-${idx}`)));
+    if (!nodes.length) nodes = allNodes.slice();
+
     target.innerHTML = '';
     if (!nodes.length) {
       target.appendChild(el('div', { class: 'note muted', text: 'Граф пустой или не был построен.' }));
       return;
     }
+
+    const nodeInfo = (analytics && analytics.nodes) || {};
+    const communityPalette = ['#2563eb','#7c3aed','#059669','#dc2626','#d97706','#0891b2','#9333ea','#4f46e5','#ca8a04','#0f766e'];
+    const colorForNode = (node, idx) => {
+      const nodeId = String(node.id || node.term || node.label || `node-${idx}`);
+      const group = nodeGroup(node);
+      if ((controls.colorMode || 'type') === 'community') {
+        const cid = Number((nodeInfo[nodeId] || {}).community_id || 0) || 0;
+        return communityPalette[Math.abs(cid) % communityPalette.length];
+      }
+      return graphColors[group] || graphColors.default;
+    };
+    const sizeForNode = (node, idx) => {
+      const nodeId = String(node.id || node.term || node.label || `node-${idx}`);
+      const info = nodeInfo[nodeId] || {};
+      const metric = String(controls.sizeMode || 'none');
+      const raw = metric === 'degree' ? Number(info.degree_centrality || 0) :
+        metric === 'closeness' ? Number(info.closeness_centrality || 0) :
+        metric === 'betweenness' ? Number(info.betweenness_centrality || 0) :
+        metric === 'pagerank' ? Number(info.pagerank || 0) : 0;
+      return 10 + (metric === 'none' ? 1 : Math.round(raw * 42));
+    };
+
     const width = 980;
     const height = 620;
     const cx = width / 2;
@@ -614,38 +827,53 @@ _HTML_TEMPLATE = r"""<!doctype html>
         y: cy + radius * Math.sin(angle),
       };
     });
-    const svg = el('svg', { class: 'graph', viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': 'Graph visualization' });
-    const defs = el('defs');
-    const marker = el('marker', { id: 'arrowhead', markerWidth: '10', markerHeight: '7', refX: '9', refY: '3.5', orient: 'auto' },
-      el('polygon', { points: '0 0, 10 3.5, 0 7', fill: '#94a3b8' })
-    );
-    defs.appendChild(marker);
-    svg.appendChild(defs);
+    const svg = el('svg', { class: 'graph', viewBox: `0 0 ${width} ${height}` });
+    svg.appendChild(el('defs', null,
+      el('marker', { id: 'arrowhead', markerWidth: '10', markerHeight: '7', refX: '10', refY: '3.5', orient: 'auto' },
+        el('polygon', { points: '0 0, 10 3.5, 0 7', fill: '#94a3b8' })
+      )
+    ));
     edges.forEach((edge, idx) => {
-      const src = pos[String(edge.source || '')];
-      const tgt = pos[String(edge.target || edge.object || '')];
+      const src = pos[String(edge.source || edge.subject || edge.from || '')];
+      const tgt = pos[String(edge.target || edge.object || edge.to || '')];
       if (!src || !tgt) return;
+      const weight = kind === 'auto' ? (1.2 + (Number(edge.importance_score || 0) || 0) * 4.5) : 1.6;
       const line = el('line', {
         x1: src.x, y1: src.y, x2: tgt.x, y2: tgt.y,
-        stroke: '#94a3b8', 'stroke-width': '1.4', 'marker-end': 'url(#arrowhead)', opacity: '0.85'
+        stroke: '#94a3b8', 'stroke-width': String(weight.toFixed(2)), 'marker-end': 'url(#arrowhead)', opacity: '0.85'
       });
       svg.appendChild(line);
       const mx = (src.x + tgt.x) / 2;
       const my = (src.y + tgt.y) / 2;
+      const label = kind === 'auto'
+        ? `${truncate(edge.predicate || edge.label || 'related_to', 18)} · imp ${(Number(edge.importance_score || 0) || 0).toFixed(2)}`
+        : truncate(edge.predicate || edge.label || 'related_to', 26);
       svg.appendChild(el('text', {
         x: mx + ((idx % 2 === 0) ? 6 : -6),
         y: my + ((idx % 3) - 1) * 10,
         fill: '#475569', 'font-size': '10', 'text-anchor': 'middle'
-      }, truncate(edge.predicate || edge.label || 'related_to', 28)));
+      }, label));
     });
     nodes.forEach((node, idx) => {
       const nodeId = String(node.id || node.term || node.label || `node-${idx}`);
       const { x, y } = pos[nodeId];
-      const group = nodeGroup(node);
-      const color = graphColors[group] || graphColors.default;
-      svg.appendChild(el('circle', { cx: x, cy: y, r: 11, fill: color, opacity: '0.92' }));
+      const info = nodeInfo[nodeId] || {};
+      const color = colorForNode(node, idx);
+      const r = sizeForNode(node, idx);
+      const cliqueOk = Number(info.max_clique_size || 0) >= Math.max(2, Number(controls.minCliqueSize || 3) || 3);
+      svg.appendChild(el('circle', { cx: x, cy: y, r, fill: color, opacity: cliqueOk ? '0.98' : '0.88', stroke: cliqueOk ? '#0f172a' : '#ffffff', 'stroke-width': cliqueOk ? '2.2' : '1.2' }));
+      svg.appendChild(el('title', { text: [
+        `node: ${node.label || node.term || nodeId}`,
+        `community: ${info.community_id ?? '0'}`,
+        `degree: ${Number(info.degree_centrality || 0).toFixed(3)}`,
+        `closeness: ${Number(info.closeness_centrality || 0).toFixed(3)}`,
+        `betweenness: ${Number(info.betweenness_centrality || 0).toFixed(3)}`,
+        `pagerank: ${Number(info.pagerank || 0).toFixed(3)}`,
+        `cliques: ${info.clique_count || 0} / max size ${info.max_clique_size || 0}`,
+      ].join('
+') }));
       svg.appendChild(el('text', {
-        x, y: y + 26,
+        x, y: y + r + 15,
         fill: '#111827', 'font-size': '11', 'text-anchor': 'middle'
       }, truncate(node.label || node.term || nodeId, 26)));
     });
@@ -654,20 +882,27 @@ _HTML_TEMPLATE = r"""<!doctype html>
 
   function filteredRecords() {
     const query = state.filters.search.trim().toLowerCase();
+    const threshold = clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1);
+    const excluded = new Set(normalizedPaperIds(state.filters.excludedPapersText));
     return APP.records.filter((row) => {
       if (state.filters.graph !== 'all' && row.graph_kind !== state.filters.graph) return false;
+      if (row.graph_kind === 'auto') {
+        if ((Number(row.importance_score || 0) || 0) < threshold) return false;
+        if (excluded.size && rowPaperIds(row).some((pid) => excluded.has(pid))) return false;
+      }
       const verdict = (state.reviewState[row.edge_uid] || {}).verdict || '';
       if (state.filters.verdict !== 'all') {
         if (state.filters.verdict === 'pending' && verdict) return false;
         if (state.filters.verdict !== 'pending' && verdict !== state.filters.verdict) return false;
       }
       if (!query) return true;
-      const hay = [row.subject, row.predicate, row.object, row.evidence_text, row.papers_text].join(' ').toLowerCase();
+      const hay = [row.subject, row.predicate, row.object, row.evidence_text, row.papers_text, (row.paper_titles || []).join(' ')].join(' ').toLowerCase();
       return hay.includes(query);
     });
   }
 
   function buildExportFrames() {
+
     const now = new Date().toISOString();
     const reviewRows = [];
     const correctionRows = [];
@@ -743,6 +978,8 @@ _HTML_TEMPLATE = r"""<!doctype html>
       high_hypothesis_relevance_edges: reviewRows.filter((r) => String(r.hypothesis_relevance) === '2').length,
       multimodal_needs_fix_edges: reviewRows.filter((r) => r.mm_verdict === 'needs_fix').length,
       temporal_corrections: correctionRows.length,
+      importance_threshold: clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1),
+      excluded_paper_ids: normalizedPaperIds(state.filters.excludedPapersText),
     };
     return { reviewRows, correctionRows, summary };
   }
@@ -764,39 +1001,71 @@ _HTML_TEMPLATE = r"""<!doctype html>
     host.innerHTML = '';
     ['gold', 'auto'].forEach((kind) => {
       const graph = APP.graphs[kind];
+      const analytics = graphAnalytics(kind);
       const rows = APP.records.filter((row) => row.graph_kind === kind);
       if (!graph && !rows.length) return;
       const title = kind === 'gold' ? 'Эталонный граф' : 'Авто-граф';
+      const controls = state.graphControls[kind];
       const section = el('div', { class: 'card' });
       section.appendChild(el('h2', { text: title }));
       section.appendChild(el('div', { class: 'muted', text: `Assertions: ${rows.length} · nodes: ${graphNodes(graph || {}).length} · edges: ${graphEdges(graph || {}).length}` }));
+      const metricStrip = el('div', { class: 'metric-strip' });
+      [
+        `communities: ${analytics.summary?.n_communities || 0}`,
+        `cliques: ${analytics.summary?.n_cliques || 0}`,
+        `max clique: ${analytics.summary?.max_clique_size || 0}`,
+        kind === 'auto' ? `threshold: ${clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1).toFixed(2)}` : null,
+      ].filter(Boolean).forEach((text) => metricStrip.appendChild(el('span', { class: 'pill', text })));
+      section.appendChild(metricStrip);
+      const controlsGrid = el('div', { class: 'graph-controls' });
+      const colorSelect = el('select');
+      [['type','Цвет: по типу'], ['community','Цвет: по сообществу']].forEach(([value, label]) => colorSelect.appendChild(el('option', { value, text: label })));
+      colorSelect.value = controls.colorMode;
+      colorSelect.addEventListener('change', (e) => { state.graphControls[kind].colorMode = e.target.value; autosave(); renderGraphs(); });
+      const sizeSelect = el('select');
+      [['none','Размер: одинаковый'], ['degree','Размер: degree'], ['closeness','Размер: closeness'], ['betweenness','Размер: betweenness'], ['pagerank','Размер: pagerank']].forEach(([value, label]) => sizeSelect.appendChild(el('option', { value, text: label })));
+      sizeSelect.value = controls.sizeMode;
+      sizeSelect.addEventListener('change', (e) => { state.graphControls[kind].sizeMode = e.target.value; autosave(); renderGraphs(); });
+      const cliqueInput = el('input', { type: 'number', min: '2', max: '12', step: '1', value: String(controls.minCliqueSize || 3) });
+      cliqueInput.addEventListener('input', (e) => { state.graphControls[kind].minCliqueSize = Math.max(2, toNumber(e.target.value, 3)); autosave(); renderGraphs(); });
+      controlsGrid.append(
+        el('label', null, el('span', { text: 'Раскраска узлов' }), colorSelect),
+        el('label', null, el('span', { text: 'Масштаб размера узлов' }), sizeSelect),
+        el('label', null, el('span', { text: 'Минимальный размер клики для подсветки' }), cliqueInput),
+      );
+      section.appendChild(controlsGrid);
       const legend = el('div', { class: 'legend' });
       Object.entries(graphColors).forEach(([name, color]) => legend.appendChild(el('span', { html: `<i style="background:${color}"></i>${htmlEscape(name)}` })));
       section.appendChild(legend);
       const shell = el('div', { class: 'graph-shell' });
       const graphCard = el('div');
       const graphMount = el('div');
-      renderGraphSvg(graphMount, graph || {});
+      renderGraphSvg(graphMount, graph || {}, analytics, controls, kind);
       graphCard.appendChild(graphMount);
       shell.appendChild(graphCard);
 
       const tableCard = el('div');
-      tableCard.appendChild(el('div', { class: 'muted', text: 'Ниже — данные assertions, встроенные в офлайн-форму.' }));
+      tableCard.appendChild(el('div', { class: 'muted', text: 'Ниже — assertions и признаки, встроенные в офлайн-форму.' }));
       const tableWrap = el('div', { class: 'table-wrap' });
       const table = el('table');
       const thead = el('thead');
       thead.appendChild(el('tr', null,
         el('th', { text: 'Assertion' }),
-        el('th', { text: 'Временные поля' }),
-        el('th', { text: 'Evidence' })
+        el('th', { text: 'Время / score' }),
+        el('th', { text: 'Evidence / papers' })
       ));
       table.appendChild(thead);
       const tbody = el('tbody');
       rows.forEach((row) => {
+        if (kind === 'auto') {
+          const excluded = new Set(normalizedPaperIds(state.filters.excludedPapersText));
+          if ((Number(row.importance_score || 0) || 0) < clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1)) return;
+          if (excluded.size && rowPaperIds(row).some((pid) => excluded.has(pid))) return;
+        }
         tbody.appendChild(el('tr', null,
           el('td', { html: `<b>${htmlEscape(truncate(row.subject, 60))}</b><br><span class="muted">${htmlEscape(truncate(row.predicate, 40))} → ${htmlEscape(truncate(row.object, 90))}</span>` }),
-          el('td', { html: `<b>start:</b> ${htmlEscape(row.start_date || '—')}<br><b>end:</b> ${htmlEscape(row.end_date || '—')}<br><b>valid:</b> ${htmlEscape(row.valid_from || '—')} → ${htmlEscape(row.valid_to || '—')}<br><b>source:</b> ${htmlEscape(row.time_source || '—')}` }),
-          el('td', { html: `${htmlEscape(truncate(row.evidence_text_short || row.evidence_text, 180))}<br><span class="muted">papers: ${htmlEscape(truncate(row.papers_text, 90) || '—')}</span>` })
+          el('td', { html: `<b>start:</b> ${htmlEscape(row.start_date || '—')}<br><b>end:</b> ${htmlEscape(row.end_date || '—')}<br><b>valid:</b> ${htmlEscape(row.valid_from || '—')} → ${htmlEscape(row.valid_to || '—')}<br><b>score:</b> ${htmlEscape(String(row.score || '—'))}<br><b>importance:</b> ${htmlEscape(Number(row.importance_score || 0).toFixed ? Number(row.importance_score || 0).toFixed(2) : String(row.importance_score || '0'))}` }),
+          el('td', { html: `${htmlEscape(truncate(row.evidence_text_short || row.evidence_text, 160))}<br><span class="muted">papers: ${htmlEscape(truncate(row.papers_text, 90) || '—')}</span>${Array.isArray(row.paper_titles) && row.paper_titles.length ? `<br><span class="muted">titles: ${htmlEscape(truncate(row.paper_titles.join('; '), 110))}</span>` : ''}` })
         ));
       });
       table.appendChild(tbody);
@@ -842,6 +1111,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
       const raw = await file.text();
       mergeLoaded(JSON.parse(raw));
       autosave('import');
+      renderGraphs();
       renderValidation();
       renderSummary();
     });
@@ -852,7 +1122,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
       const { reviewRows, correctionRows, summary } = buildExportFrames();
       const reviewColumns = [
         'graph_kind','assertion_id','edge_uid','subject','predicate','object','start_date','end_date','valid_from','valid_to','time_source','time_interval',
-        'score','mean_confidence','reviewer_id','review_timestamp','expert_verdict','expert_rationale','expert_time_source_note','semantic_correctness',
+        'score','mean_confidence','importance_score','paper_ids','paper_titles','reviewer_id','review_timestamp','expert_verdict','expert_rationale','expert_time_source_note','semantic_correctness',
         'evidence_sufficiency','scope_match','system_match','environment_match','protocol_match','scope_overgeneralized','corrected_scope_note',
         'hypothesis_role','hypothesis_relevance','testability_signal','causal_status','severity','evidence_before_cutoff','leakage_risk','time_type',
         'time_granularity','time_confidence','mm_verdict','mm_rationale','corrected_start_date','corrected_end_date','corrected_valid_from','corrected_valid_to',
@@ -899,23 +1169,54 @@ _HTML_TEMPLATE = r"""<!doctype html>
     );
     host.appendChild(toolbar);
 
+    const controlsCard = el('div', { class: 'card' });
+    controlsCard.appendChild(el('h3', { text: 'Фильтры авто-графа для защиты от temporal leakage' }));
+    controlsCard.appendChild(el('div', { class: 'muted', text: 'Можно исключить статьи по canonical id и задать нижний порог importance_score. Эти фильтры влияют на отображение, экспорт и статистику авто-графа.' }));
+    const controlsGrid = el('div', { class: 'graph-controls' });
+    const importanceInput = el('input', { type: 'range', min: '0', max: '1', step: '0.01', value: String(clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1)) });
+    const importanceValue = el('span', { class: 'pill', text: clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1).toFixed(2) });
+    importanceInput.addEventListener('input', (e) => {
+      state.filters.importanceThreshold = clamp(toNumber(e.target.value, 0), 0, 1);
+      autosave();
+      renderGraphs();
+      renderValidation();
+      renderSummary();
+    });
+    const excludedArea = el('textarea', { text: state.filters.excludedPapersText || '' });
+    excludedArea.value = state.filters.excludedPapersText || '';
+    excludedArea.addEventListener('input', (e) => {
+      state.filters.excludedPapersText = e.target.value;
+      state.filters.page = 1;
+      autosave();
+      renderGraphs();
+      renderValidation();
+      renderSummary();
+    });
+    controlsGrid.append(
+      el('label', null, el('span', { text: 'Порог importance_score для авто-графа' }), importanceInput, importanceValue),
+      el('label', null, el('span', { text: 'Canonical id исключаемых статей (по одному на строку)' }), excludedArea),
+    );
+    controlsCard.appendChild(controlsGrid);
+    host.appendChild(controlsCard);
+
     const rows = filteredRecords();
     const totalPages = Math.max(1, Math.ceil(rows.length / state.filters.pageSize));
     if (state.filters.page > totalPages) state.filters.page = totalPages;
     const start = (state.filters.page - 1) * state.filters.pageSize;
     const visible = rows.slice(start, start + state.filters.pageSize);
     const summaryRow = el('div', { class: 'stats' });
-    const decided = APP.records.filter((row) => String((state.reviewState[row.edge_uid] || {}).verdict || '').trim()).length;
-    const corrected = APP.records.filter((row) => {
+    const decided = filteredRecords().filter((row) => String((state.reviewState[row.edge_uid] || {}).verdict || '').trim()).length;
+    const corrected = filteredRecords().filter((row) => {
       const s = state.reviewState[row.edge_uid] || {};
       return [s.corrected_start_date, s.corrected_end_date, s.corrected_valid_from, s.corrected_valid_to, s.corrected_time_source, s.correction_comment].some(Boolean);
     }).length;
     [
-      `всего: ${APP.records.length}`,
+      `всего после фильтров: ${rows.length}`,
       `с оценкой: ${decided}`,
-      `без оценки: ${APP.records.length - decided}`,
+      `без оценки: ${rows.length - decided}`,
       `с правками: ${corrected}`,
-      `фильтровано: ${rows.length}`,
+      `порог importance: ${clamp(toNumber(state.filters.importanceThreshold, 0), 0, 1).toFixed(2)}`,
+      `excluded papers: ${normalizedPaperIds(state.filters.excludedPapersText).length}`,
       `страница: ${state.filters.page}/${totalPages}`,
     ].forEach((text) => summaryRow.appendChild(el('span', { class: 'pill', text })));
     host.appendChild(summaryRow);
@@ -939,7 +1240,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
       const review = state.reviewState[row.edge_uid] || {};
       const card = el('div', { class: 'card' });
       card.appendChild(el('div', { class: 'card-title', text: `[${row.graph_kind}] ${truncate(row.subject, 80)} — ${truncate(row.predicate, 50)} → ${truncate(row.object, 120)}` }));
-      const meta = el('div', { class: 'muted', html: `<b>assertion_id:</b> ${htmlEscape(row.assertion_id)} · <b>time:</b> ${htmlEscape(row.start_date || '—')} → ${htmlEscape(row.end_date || '—')} · <b>valid:</b> ${htmlEscape(row.valid_from || '—')} → ${htmlEscape(row.valid_to || '—')} · <b>papers:</b> ${htmlEscape(truncate(row.papers_text, 80) || '—')}` });
+      const meta = el('div', { class: 'muted', html: `<b>assertion_id:</b> ${htmlEscape(row.assertion_id)} · <b>time:</b> ${htmlEscape(row.start_date || '—')} → ${htmlEscape(row.end_date || '—')} · <b>valid:</b> ${htmlEscape(row.valid_from || '—')} → ${htmlEscape(row.valid_to || '—')} · <b>score:</b> ${htmlEscape(String(row.score || '—'))} · <b>importance:</b> ${htmlEscape(Number(row.importance_score || 0).toFixed ? Number(row.importance_score || 0).toFixed(2) : String(row.importance_score || '0'))} · <b>papers:</b> ${htmlEscape(truncate(row.papers_text, 80) || '—')}` });
       card.appendChild(meta);
       card.appendChild(el('details', null,
         el('summary', { text: 'Полный текст и provenance' }),
@@ -947,11 +1248,19 @@ _HTML_TEMPLATE = r"""<!doctype html>
           `subject: ${row.subject || ''}`,
           `predicate: ${row.predicate || ''}`,
           `object: ${row.object || ''}`,
-          `evidence_text:\n${row.evidence_text || ''}`,
+          `paper_ids: ${Array.isArray(row.paper_ids) ? row.paper_ids.join(', ') : (row.paper_ids || '')}`,
+          `paper_titles: ${Array.isArray(row.paper_titles) ? row.paper_titles.join('; ') : (row.paper_titles || '')}`,
+          `importance_score: ${row.importance_score || 0}`,
+          `evidence_text:
+${row.evidence_text || ''}`,
           `papers: ${row.papers_text || ''}`,
-          row.evidence_payload_full ? `evidence_payload:\n${row.evidence_payload_full}` : '',
-          row.raw_record_json ? `raw_record_json:\n${row.raw_record_json}` : '',
-        ].filter(Boolean).join('\n\n') })
+          row.evidence_payload_full ? `evidence_payload:
+${row.evidence_payload_full}` : '',
+          row.raw_record_json ? `raw_record_json:
+${row.raw_record_json}` : '',
+        ].filter(Boolean).join('
+
+') })
       ));
 
       function field(label, key, type, options) {
@@ -1027,6 +1336,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
   }
 
   function renderSummary() {
+
     const host = document.getElementById('section-summary');
     host.innerHTML = '';
     const { reviewRows, correctionRows, summary } = buildExportFrames();
@@ -1108,11 +1418,18 @@ def build_task2_offline_review_package(
             "domain": str(task1_doc.get("domain") or ""),
             "bundle_dir": str(bundle_dir),
             "reviewer_default": str((task1_doc.get("expert") or {}).get("latin_slug") or (task1_doc.get("expert") or {}).get("full_name") or "") if isinstance(task1_doc.get("expert"), dict) else "",
+            "default_importance_threshold": float(manifest.get("default_importance_threshold") or 0.0),
+            "excluded_papers_applied": list(manifest.get("excluded_papers_applied") or []),
+            "task2_controls": dict(manifest.get("task2_controls") or {}),
         },
         "records": records,
         "graphs": {
             "gold": _safe_json_load(Path(manifest["gold_graph"])) if manifest.get("gold_graph") and Path(manifest["gold_graph"]).exists() else {},
             "auto": _safe_json_load(Path(manifest["auto_graph_json"])) if manifest.get("auto_graph_json") and Path(manifest["auto_graph_json"]).exists() else {},
+        },
+        "graph_analytics": {
+            "gold": _graph_analytics_payload(_safe_json_load(Path(manifest["gold_graph"]))) if manifest.get("gold_graph") and Path(manifest["gold_graph"]).exists() else {"nodes": {}, "summary": {}},
+            "auto": _graph_analytics_payload(_safe_json_load(Path(manifest["auto_graph_json"]))) if manifest.get("auto_graph_json") and Path(manifest["auto_graph_json"]).exists() else {"nodes": {}, "summary": {}},
         },
         "comparison_summary": _safe_json_load(Path(manifest["comparison_summary"])) if manifest.get("comparison_summary") and Path(manifest["comparison_summary"]).exists() else None,
     }

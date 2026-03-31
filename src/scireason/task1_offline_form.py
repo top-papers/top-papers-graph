@@ -27,6 +27,10 @@ def _default_state() -> dict[str, Any]:
         "selected_step_index": 0,
         "filename": "",
         "github": {"repo": "", "branch": "main", "path": "", "message": ""},
+        "task2_validation": {
+            "exclusions": {"paper_ids": [], "paper_titles": [], "title_contains": []},
+            "ranking": {"min_importance": 0.0},
+        },
     }
 
 
@@ -299,6 +303,28 @@ _HTML_TEMPLATE = r'''<!doctype html>
     <section class="card">
       <div class="section-head">
         <div>
+          <h2>Настройки Task 2 temporal graph validation</h2>
+          <p>Эти поля сохраняются прямо в YAML и используются вторым заданием для защиты от утечки из будущего в прошлое и для пороговой фильтрации auto-графа.</p>
+        </div>
+        <span class="pill info">task2 config</span>
+      </div>
+      <div class="grid cols-2">
+        <label class="field"><span>Исключить paper ids (по одному на строку)</span><textarea id="task2ExcludePaperIds" placeholder="doi:...
+pmid:...
+arxiv:..."></textarea></label>
+        <label class="field"><span>Исключить paper titles / canonical titles</span><textarea id="task2ExcludePaperTitles" placeholder="Exact title 1
+Exact title 2"></textarea></label>
+      </div>
+      <div class="grid cols-2" style="margin-top:12px;">
+        <label class="field"><span>Исключить по подстроке в title</span><textarea id="task2ExcludeTitleContains" placeholder="Nature 2026
+review article"></textarea></label>
+        <label class="field"><span>Минимальный importance_score для task2</span><input type="number" id="task2MinImportance" min="0" max="1" step="0.01" placeholder="0.00"></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
           <h2>Публикации</h2>
           <p>Для каждой публикации заполните <code>id</code>, <code>year</code> и <code>title</code>.</p>
         </div>
@@ -377,6 +403,10 @@ _HTML_TEMPLATE = r'''<!doctype html>
     domainQid: document.getElementById('domainQid'),
     requiredConditions: document.getElementById('requiredConditions'),
     domainBadge: document.getElementById('domainBadge'),
+    task2ExcludePaperIds: document.getElementById('task2ExcludePaperIds'),
+    task2ExcludePaperTitles: document.getElementById('task2ExcludePaperTitles'),
+    task2ExcludeTitleContains: document.getElementById('task2ExcludeTitleContains'),
+    task2MinImportance: document.getElementById('task2MinImportance'),
     papersContainer: document.getElementById('papersContainer'),
     addPaperBtn: document.getElementById('addPaperBtn'),
     stepsContainer: document.getElementById('stepsContainer'),
@@ -427,6 +457,10 @@ _HTML_TEMPLATE = r'''<!doctype html>
       selected_step_index: 0,
       filename: '',
       github: { repo: '', branch: 'main', path: '', message: '' },
+      task2_validation: {
+        exclusions: { paper_ids: [], paper_titles: [], title_contains: [] },
+        ranking: { min_importance: 0.0 },
+      },
     };
   }
 
@@ -488,6 +522,15 @@ _HTML_TEMPLATE = r'''<!doctype html>
     state.steps = Array.isArray(state.steps) && state.steps.length ? state.steps.map((step, idx) => normalizeStep(step, idx + 1, state.domain_qid)) : [defaultStep(1)];
     state.edges = normalizeEdges(state.edges, state.steps.length);
     state.selected_step_index = Number.isInteger(state.selected_step_index) ? state.selected_step_index : 0;
+    state.task2_validation = Object.assign({}, base.task2_validation, state.task2_validation || {});
+    state.task2_validation.exclusions = Object.assign({}, base.task2_validation.exclusions, state.task2_validation.exclusions || {});
+    state.task2_validation.ranking = Object.assign({}, base.task2_validation.ranking, state.task2_validation.ranking || {});
+    ['paper_ids', 'paper_titles', 'title_contains'].forEach((key) => {
+      const value = state.task2_validation.exclusions[key];
+      state.task2_validation.exclusions[key] = Array.isArray(value) ? value.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    });
+    const rawMinImportance = Number(state.task2_validation.ranking.min_importance || 0);
+    state.task2_validation.ranking.min_importance = Number.isFinite(rawMinImportance) ? Math.min(1, Math.max(0, rawMinImportance)) : 0;
     state._schema = FORM_SCHEMA;
     return state;
   }
@@ -543,6 +586,17 @@ _HTML_TEMPLATE = r'''<!doctype html>
     state.domain_query = dom.domainQuery.value;
     state.domain_language = dom.domainLanguage.value;
     state.domain_qid = String(dom.domainQid.value || DEFAULT_DOMAIN_QID || 'Q336').trim();
+    state.task2_validation = state.task2_validation || { exclusions: { paper_ids: [], paper_titles: [], title_contains: [] }, ranking: { min_importance: 0 } };
+    state.task2_validation.exclusions = state.task2_validation.exclusions || { paper_ids: [], paper_titles: [], title_contains: [] };
+    state.task2_validation.ranking = state.task2_validation.ranking || { min_importance: 0 };
+    state.task2_validation.exclusions.paper_ids = String(dom.task2ExcludePaperIds.value || '').split(/
++/).map((x) => x.trim()).filter(Boolean);
+    state.task2_validation.exclusions.paper_titles = String(dom.task2ExcludePaperTitles.value || '').split(/
++/).map((x) => x.trim()).filter(Boolean);
+    state.task2_validation.exclusions.title_contains = String(dom.task2ExcludeTitleContains.value || '').split(/
++/).map((x) => x.trim()).filter(Boolean);
+    const minImportance = Number(dom.task2MinImportance.value || 0);
+    state.task2_validation.ranking.min_importance = Number.isFinite(minImportance) ? Math.min(1, Math.max(0, minImportance)) : 0;
   }
 
   function syncStateToTopFields() {
@@ -806,6 +860,19 @@ _HTML_TEMPLATE = r'''<!doctype html>
         last_name: String(state.expert.last_name || '').trim(),
         first_name: String(state.expert.first_name || '').trim(),
         patronymic: String(state.expert.patronymic || '').trim(),
+      },
+      task2_validation: {
+        exclusions: {
+          paper_ids: (((state.task2_validation || {}).exclusions || {}).paper_ids || []).map((x) => String(x || '').trim()).filter(Boolean),
+          paper_titles: (((state.task2_validation || {}).exclusions || {}).paper_titles || []).map((x) => String(x || '').trim()).filter(Boolean),
+          title_contains: (((state.task2_validation || {}).exclusions || {}).title_contains || []).map((x) => String(x || '').trim()).filter(Boolean),
+        },
+        ranking: {
+          min_importance: (() => {
+            const value = Number((((state.task2_validation || {}).ranking || {}).min_importance ?? 0));
+            return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+          })(),
+        },
       },
     };
   }

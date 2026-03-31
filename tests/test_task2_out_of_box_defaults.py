@@ -114,6 +114,9 @@ def test_offline_review_package_contains_embedded_graphs_and_records(tmp_path: P
     assert "demo-submission" in html_text
     assert "relates_to" in html_text
     assert "Скачать результаты ZIP" in html_text
+    assert "importance_score" in html_text
+    assert "Canonical id исключаемых статей" in html_text
+    assert "communities:" in html_text
 
 
 def test_notebook_defaults_to_g4f_and_has_draft_controls() -> None:

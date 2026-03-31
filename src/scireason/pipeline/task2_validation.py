@@ -99,6 +99,173 @@ def _norm_title(text: str) -> str:
     return s.strip()
 
 
+def _coerce_float_01(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        num = float(value)
+    except Exception:
+        return None
+    if num < 0:
+        num = 0.0
+    if num > 1:
+        num = 1.0
+    return num
+
+
+def _coerce_text_list(value: Any) -> List[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        parts = re.split(r"[\n,;]+", value)
+        return [str(item).strip() for item in parts if str(item).strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def _unique_lowered(values: Iterable[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def _normalize_task2_controls(
+    doc: Dict[str, Any],
+    *,
+    excluded_paper_ids: Optional[Sequence[str]] = None,
+    excluded_paper_titles: Optional[Sequence[str]] = None,
+    excluded_title_contains: Optional[Sequence[str]] = None,
+    min_importance: Optional[float] = None,
+) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for key in ("task2_validation", "task2_review", "task2", "validation_overrides"):
+        raw = doc.get(key)
+        if isinstance(raw, dict):
+            merged.update(raw)
+
+    exclusions = merged.get("exclusions") if isinstance(merged.get("exclusions"), dict) else {}
+    ranking = merged.get("ranking") if isinstance(merged.get("ranking"), dict) else {}
+
+    ids = _unique_lowered([
+        *_coerce_text_list(exclusions.get("paper_ids")),
+        *_coerce_text_list(exclusions.get("papers")),
+        *_coerce_text_list(merged.get("excluded_paper_ids")),
+        *_coerce_text_list(merged.get("exclude_papers")),
+        *list(excluded_paper_ids or []),
+    ])
+    titles_exact = _unique_lowered([
+        *_coerce_text_list(exclusions.get("paper_titles")),
+        *_coerce_text_list(merged.get("excluded_paper_titles")),
+        *list(excluded_paper_titles or []),
+    ])
+    titles_contains = _unique_lowered([
+        *_coerce_text_list(exclusions.get("paper_title_contains")),
+        *_coerce_text_list(exclusions.get("title_contains")),
+        *_coerce_text_list(merged.get("excluded_title_contains")),
+        *list(excluded_title_contains or []),
+    ])
+
+    threshold = _coerce_float_01(min_importance)
+    if threshold is None:
+        threshold = _coerce_float_01(ranking.get("min_importance"))
+    if threshold is None:
+        threshold = _coerce_float_01(merged.get("min_importance"))
+    if threshold is None:
+        threshold = _coerce_float_01(merged.get("importance_threshold"))
+    if threshold is None:
+        threshold = 0.0
+
+    return {
+        "excluded_paper_ids": ids,
+        "excluded_paper_titles": titles_exact,
+        "excluded_title_contains": titles_contains,
+        "min_importance": threshold,
+    }
+
+
+def _paper_identity_candidates(meta: PaperMetadata) -> set[str]:
+    keys = {str(meta.id or "").strip().lower()}
+    if meta.ids:
+        canonical = meta.ids.best_canonical()
+        if canonical:
+            keys.add(str(canonical).strip().lower())
+        for name in ("doi", "pmid", "pmcid", "arxiv", "openalex", "semantic_scholar"):
+            value = getattr(meta.ids, name, None)
+            if value:
+                prefix = {"doi": "doi", "pmid": "pmid", "pmcid": "pmcid", "arxiv": "arxiv", "openalex": "openalex", "semantic_scholar": "s2"}[name]
+                keys.add(f"{prefix}:{str(value).strip().lower()}")
+    if meta.url:
+        keys.add(str(meta.url).strip().lower())
+    if meta.pdf_url:
+        keys.add(str(meta.pdf_url).strip().lower())
+    return {k for k in keys if k}
+
+
+def _paper_is_excluded(meta: PaperMetadata, controls: Dict[str, Any]) -> bool:
+    id_keys = {str(item).strip().lower() for item in (controls.get("excluded_paper_ids") or []) if str(item).strip()}
+    if id_keys and (_paper_identity_candidates(meta) & id_keys):
+        return True
+    title_norm = _norm_title(meta.title or "")
+    exact_titles = {_norm_title(item) for item in (controls.get("excluded_paper_titles") or []) if str(item).strip()}
+    if title_norm and title_norm in exact_titles:
+        return True
+    for snippet in (controls.get("excluded_title_contains") or []):
+        snippet_norm = _norm_title(snippet)
+        if snippet_norm and snippet_norm in title_norm:
+            return True
+    return False
+
+
+def _filter_resolved_papers(resolved: Sequence[PaperMetadata], controls: Dict[str, Any]) -> List[PaperMetadata]:
+    return [meta for meta in resolved if not _paper_is_excluded(meta, controls)]
+
+
+def _row_matches_excluded_papers(row: Dict[str, Any], controls: Dict[str, Any]) -> bool:
+    id_keys = {str(item).strip().lower() for item in (controls.get("excluded_paper_ids") or []) if str(item).strip()}
+    row_papers = row.get("paper_ids") or row.get("papers") or []
+    if isinstance(row_papers, str):
+        row_papers = _coerce_text_list(row_papers)
+    row_keys = {str(item).strip().lower() for item in row_papers if str(item).strip()}
+    if id_keys and (row_keys & id_keys):
+        return True
+    paper_titles = row.get("paper_titles") or []
+    if isinstance(paper_titles, str):
+        paper_titles = _coerce_text_list(paper_titles)
+    exact_titles = {_norm_title(item) for item in (controls.get("excluded_paper_titles") or []) if str(item).strip()}
+    for paper_title in paper_titles:
+        title_norm = _norm_title(str(paper_title or ""))
+        if title_norm and title_norm in exact_titles:
+            return True
+        for snippet in (controls.get("excluded_title_contains") or []):
+            snippet_norm = _norm_title(snippet)
+            if snippet_norm and snippet_norm in title_norm:
+                return True
+    return False
+
+
+def _filter_rows_by_controls(rows: Sequence[Dict[str, Any]], controls: Dict[str, Any], *, apply_threshold: bool = False) -> List[Dict[str, Any]]:
+    threshold = float(controls.get("min_importance") or 0.0)
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        row_dict = dict(row)
+        if _row_matches_excluded_papers(row_dict, controls):
+            continue
+        if apply_threshold and float(row_dict.get("importance_score") or 0.0) < threshold:
+            continue
+        filtered.append(row_dict)
+    return filtered
+
+
 def _looks_like_url(text: str) -> bool:
     try:
         u = urlparse((text or "").strip())
@@ -1033,7 +1200,11 @@ def _flatten_automatic_graph(kg: TemporalKnowledgeGraph) -> List[Dict[str, Any]]
                 "time_candidates": selected_intervals[:10],
                 "score": edge.get("score"),
                 "mean_confidence": edge.get("mean_confidence"),
+                "importance_score": float(edge.get("importance_score") or (edge.get("features") or {}).get("importance_score") or 0.0),
+                "topic_relevance": float((edge.get("features") or {}).get("topic_relevance") or 0.0),
                 "papers": edge.get("papers") or [],
+                "paper_ids": edge.get("papers") or [],
+                "paper_titles": [],
                 "evidence": {
                     "page": first_quote.get("page"),
                     "figure_or_table": None,
@@ -1224,6 +1395,10 @@ def prepare_task2_validation_bundle(
     local_model: str | None = None,
     vlm_backend: str | None = None,
     vlm_model_id: str | None = None,
+    excluded_paper_ids: Optional[Sequence[str]] = None,
+    excluded_paper_titles: Optional[Sequence[str]] = None,
+    excluded_title_contains: Optional[Sequence[str]] = None,
+    min_importance: Optional[float] = None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Path:
     with temporary_llm_selection(
@@ -1239,6 +1414,13 @@ def prepare_task2_validation_bundle(
             doc = yaml.safe_load(trajectory_yaml.read_text(encoding="utf-8")) or {}
             if not isinstance(doc, dict):
                 raise ValueError("Trajectory YAML must contain a top-level object.")
+            task2_controls = _normalize_task2_controls(
+                doc,
+                excluded_paper_ids=excluded_paper_ids,
+                excluded_paper_titles=excluded_paper_titles,
+                excluded_title_contains=excluded_title_contains,
+                min_importance=min_importance,
+            )
 
             run_name = str(doc.get("submission_id") or _slugify(str(doc.get("topic") or trajectory_yaml.stem)))
             out = out_dir / run_name
@@ -1257,6 +1439,7 @@ def prepare_task2_validation_bundle(
             resolved = resolve_papers_from_trajectory(doc, enable_remote_lookup=enable_remote_lookup, progress_callback=progress_callback)
             if max_papers and max_papers > 0:
                 resolved = resolved[:max_papers]
+            resolved = _filter_resolved_papers(resolved, task2_controls)
 
             (out / "papers_resolved.json").write_text(
                 json.dumps([p.model_dump(mode="json") for p in resolved], ensure_ascii=False, indent=2),
@@ -1372,7 +1555,13 @@ def prepare_task2_validation_bundle(
             kg.dump_json(out / "automatic_graph" / "temporal_kg.json")
 
             automatic_rows = _flatten_automatic_graph(kg)
+            title_by_id = {meta.id: meta.title for meta in resolved}
+            for row in automatic_rows:
+                row["paper_titles"] = [title_by_id.get(pid, "") for pid in (row.get("paper_ids") or [])]
+            automatic_rows = _filter_rows_by_controls(automatic_rows, task2_controls, apply_threshold=False)
             (out / "automatic_triplets.json").write_text(json.dumps(automatic_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+            thresholded_rows = _filter_rows_by_controls(automatic_rows, task2_controls, apply_threshold=True)
+            (out / "automatic_triplets_thresholded.json").write_text(json.dumps(thresholded_rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
             prefill_review = _prefill_graph_review(doc, automatic_rows)
             review_dir = out / "review_templates"
@@ -1416,15 +1605,19 @@ def prepare_task2_validation_bundle(
                 "vlm_effective_model": str(getattr(settings, "vlm_model_id", "") or ""),
                 "review_state_dir": str(review_state_dir),
                 "review_state_latest": str(review_state_dir / "review_state_latest.json"),
+                "task2_controls": task2_controls,
+                "default_importance_threshold": float(task2_controls.get("min_importance") or 0.0),
+                "excluded_papers_applied": list(task2_controls.get("excluded_paper_ids") or []),
                 "artifacts": {
                     "reference_graph": "reference_graph.json",
                     "reference_triplets": "reference_triplets.json",
                     "automatic_graph": "automatic_graph/temporal_kg.json",
                     "automatic_triplets": "automatic_triplets.json",
+                    "automatic_triplets_thresholded": "automatic_triplets_thresholded.json",
                     "papers_resolved": "papers_resolved.json",
                     "comparison_summary": "comparison_summary.json",
                     "review_prefill": "review_templates/graph_review_prefill.json",
-                "review_design_note": "Task 2 review now captures semantic, evidence, temporal, scope and hypothesis-readiness signals.",
+                    "review_design_note": "Task 2 review now captures semantic, evidence, temporal, scope and hypothesis-readiness signals, article exclusions and importance ranking.",
                 },
             }
             _emit_progress(progress_callback, stage="finalize", current=total_stages, total=total_stages, message="Bundle собран, сохраняю manifest")

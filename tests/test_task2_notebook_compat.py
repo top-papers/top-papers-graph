@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import nbformat
 import pytest
 
 from scireason.pipeline import task2_validation as pipeline
@@ -52,6 +53,7 @@ def test_prepare_task2_bundle_offline_first_creates_artifacts(tmp_path: Path) ->
     assert (bundle_dir / 'reference_triplets.csv').exists()
     assert (bundle_dir / 'automatic_graph' / 'temporal_kg.json').exists()
     assert (bundle_dir / 'automatic_triplets.csv').exists()
+    assert (bundle_dir / 'automatic_triplets_thresholded.json').exists()
     assert (bundle_dir / 'comparison_summary.json').exists()
     assert (bundle_dir / 'scout' / 'suggested_links.json').exists()
     assert (bundle_dir / 'expert_validation' / 'offline_review' / 'task2_expert_validation_offline.html').exists()
@@ -62,6 +64,20 @@ def test_prepare_task2_bundle_offline_first_creates_artifacts(tmp_path: Path) ->
     manifest = json.loads((bundle_dir / 'manifest.json').read_text(encoding='utf-8'))
     assert manifest['remote_lookup_enabled'] is False
     assert manifest['resolved_papers'] >= 1
+    assert 'task2_controls' in manifest
+    assert 'default_importance_threshold' in manifest
 
     scout = json.loads((bundle_dir / 'scout' / 'suggested_links.json').read_text(encoding='utf-8'))
     assert scout == []
+
+
+
+def test_task2_notebook_exposes_exclusion_and_importance_controls() -> None:
+    nb = nbformat.read("notebooks/task2_temporal_graph_validation_colab.ipynb", as_version=4)
+    source = nb.cells[4].source
+    assert "excluded_paper_ids = W.Textarea" in source
+    assert "excluded_paper_titles = W.Textarea" in source
+    assert "excluded_title_contains = W.Textarea" in source
+    assert "min_importance = W.FloatSlider" in source
+    assert "'excluded_paper_ids': [x.strip()" in source
+    assert "'min_importance': float(min_importance.value or 0.0)" in source

@@ -607,6 +607,10 @@ def prepare_task2_validation(
     vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
     llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
     llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
+    exclude_paper_id: list[str] = typer.Option([], "--exclude-paper-id", help="Исключить статьи по canonical id (можно повторять опцию)."),
+    exclude_paper_title: list[str] = typer.Option([], "--exclude-paper-title", help="Исключить статьи по полному title (можно повторять опцию)."),
+    exclude_title_contains: list[str] = typer.Option([], "--exclude-title-contains", help="Исключить статьи по фрагменту title (можно повторять опцию)."),
+    min_importance: float = typer.Option(0.0, "--min-importance", min=0.0, max=1.0, help="Дефолтный порог importance_score для review UI (0..1)."),
 ) -> None:
     """Task 2 orchestrator: trajectory YAML -> reference graph + automatic temporal KG + review templates.
 
@@ -628,6 +632,10 @@ def prepare_task2_validation(
         local_model=local_model,
         vlm_backend=vlm_backend,
         vlm_model_id=vlm_model_id,
+        excluded_paper_ids=exclude_paper_id,
+        excluded_paper_titles=exclude_paper_title,
+        excluded_title_contains=exclude_title_contains,
+        min_importance=min_importance,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
 
@@ -649,6 +657,10 @@ def task2_bundle(
     vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
     llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
     llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
+    exclude_paper_id: list[str] = typer.Option([], "--exclude-paper-id", help="Исключить статьи по canonical id (можно повторять опцию)."),
+    exclude_paper_title: list[str] = typer.Option([], "--exclude-paper-title", help="Исключить статьи по полному title (можно повторять опцию)."),
+    exclude_title_contains: list[str] = typer.Option([], "--exclude-title-contains", help="Исключить статьи по фрагменту title (можно повторять опцию)."),
+    min_importance: float = typer.Option(0.0, "--min-importance", min=0.0, max=1.0, help="Дефолтный порог importance_score для review UI (0..1)."),
 ) -> None:
     """Alias for prepare-task2-validation, kept for notebook and legacy automation compatibility."""
     bundle_dir = prepare_task2_validation_bundle(
@@ -667,6 +679,10 @@ def task2_bundle(
         local_model=local_model,
         vlm_backend=vlm_backend,
         vlm_model_id=vlm_model_id,
+        excluded_paper_ids=exclude_paper_id,
+        excluded_paper_titles=exclude_paper_title,
+        excluded_title_contains=exclude_title_contains,
+        min_importance=min_importance,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
 
