@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 — Task 2 form-first expert filters
+
+### Changed
+- Task 2 expert-facing filters for temporal KG validation are now form-first in the notebook/offline review flow.
+- `importance_score` threshold and paper-exclusion controls stay in UI form elements instead of notebook CLI params, so experts configure them from the menu and not from the command line.
+
 ## 0.4.1 — Optional GNN mode (PyTorch Geometric)
 
 ### Added

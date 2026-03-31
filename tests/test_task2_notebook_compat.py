@@ -81,3 +81,11 @@ def test_task2_notebook_exposes_exclusion_and_importance_controls() -> None:
     assert "min_importance = W.FloatSlider" in source
     assert "'excluded_paper_ids': [x.strip()" in source
     assert "'min_importance': float(min_importance.value or 0.0)" in source
+
+def test_task2_notebook_keeps_expert_filters_out_of_cli_path() -> None:
+    nb = nbformat.read("notebooks/task2_temporal_graph_validation_colab.ipynb", as_version=4)
+    source = "\n\n".join(cell.source for cell in nb.cells if getattr(cell, "cell_type", "") == "code")
+    assert "CLI_MIN_IMPORTANCE" not in source
+    assert "CLI_EXCLUDE_PAPER_IDS" not in source
+    assert "CLI_EXCLUDE_PAPER_TITLES" not in source
+    assert "CLI_EXCLUDE_TITLE_CONTAINS" not in source
