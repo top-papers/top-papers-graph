@@ -10,6 +10,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import yaml  # type: ignore
 
 from .task2_offline_review import build_task2_offline_review_package
+from .task2_graph_viz import compute_graph_analytics, networkx_from_payload, write_graph_html
+from .task2_filters import score_triplet_importance, topic_profile_from_doc, serialize_exclusion_spec, normalize_exclusion_spec
 from .pipeline.task2_validation import (
     build_reference_graph,
     prepare_task2_validation_bundle,
@@ -87,184 +89,14 @@ def _write_triplets_csv(json_path: Path, csv_path: Path) -> Path:
     return csv_path
 
 
-def _balanced_graph_palette() -> Dict[str, str]:
-    return {
-        "step": "#4c78a8",
-        "paper": "#7f8c8d",
-        "term": "#72b7b2",
-        "time": "#e0ac2b",
-        "assertion": "#b279a2",
-        "default": "#9aa5b1",
-        "edge": "#94a3b8",
-        "edge_temporal": "#7c8ba1",
-        "edge_support": "#6ba292",
-        "edge_warning": "#c28e6a",
-    }
-
-
-def _node_visual_style(attrs: Dict[str, Any]) -> Dict[str, Any]:
-    palette = _balanced_graph_palette()
-    raw_type = str(attrs.get("type") or attrs.get("node_type") or "").lower()
-    label = str(attrs.get("label") or attrs.get("term") or attrs.get("id") or "")
-
-    group = "default"
-    if "trajectory" in raw_type or "step" in raw_type:
-        group = "step"
-    elif "paper" in raw_type or attrs.get("paper_id") or attrs.get("papers"):
-        group = "paper"
-    elif "time" in raw_type or any(k in attrs for k in ("yearly_doc_freq", "valid_from", "valid_to")):
-        group = "time"
-    elif "assertion" in raw_type:
-        group = "assertion"
-    elif attrs.get("term") or raw_type in {"term", "entity", "concept"}:
-        group = "term"
-
-    return {
-        "group": group,
-        "color": palette.get(group, palette["default"]),
-        "label": label,
-    }
-
-
-def _edge_visual_style(attrs: Dict[str, Any]) -> Dict[str, Any]:
-    palette = _balanced_graph_palette()
-    predicate = str(attrs.get("predicate") or attrs.get("label") or "").lower()
-    color = palette["edge"]
-    if "time" in predicate or "valid" in predicate:
-        color = palette["edge_temporal"]
-    elif any(tok in predicate for tok in ("support", "influence", "relate", "correl")):
-        color = palette["edge_support"]
-    elif any(tok in predicate for tok in ("contrad", "conflict", "reject")):
-        color = palette["edge_warning"]
-    return {"color": color}
-
-
-def _networkx_from_payload(payload: Dict[str, Any]):
-    import networkx as nx
-
-    directed = True
-    edges = payload.get("edges") or []
-    if any(not bool(e.get("directed", True)) for e in edges if isinstance(e, dict)):
-        directed = False
-
-    G = nx.DiGraph() if directed else nx.Graph()
-
-    for node in payload.get("nodes", []) or []:
-        if not isinstance(node, dict):
-            continue
-        node_id = node.get("id") or node.get("term") or node.get("label")
-        if node_id is None:
-            continue
-        attrs = dict(node)
-        attrs.setdefault("label", attrs.get("label") or attrs.get("term") or str(node_id))
-        G.add_node(str(node_id), **attrs)
-
-    for edge in edges:
-        if not isinstance(edge, dict):
-            continue
-        src = edge.get("source")
-        tgt = edge.get("target") or edge.get("object")
-        if src is None or tgt is None:
-            continue
-        if str(src) not in G:
-            G.add_node(str(src), label=str(src))
-        if str(tgt) not in G:
-            G.add_node(str(tgt), label=str(tgt))
-        G.add_edge(str(src), str(tgt), **dict(edge))
-
-    return G
-
-
-def _graph_analytics(G) -> Dict[str, Any]:
-    import networkx as nx
-
-    if G.number_of_nodes() == 0:
-        return {"nodes": {}, "summary": {"n_communities": 0, "n_cliques": 0, "max_clique_size": 0}}
-
-    U = G.to_undirected() if hasattr(G, "to_undirected") else G
-    degree = nx.degree_centrality(U)
-    try:
-        closeness = nx.closeness_centrality(U)
-    except Exception:
-        closeness = {node: 0.0 for node in G.nodes()}
-    try:
-        betweenness = nx.betweenness_centrality(U) if U.number_of_nodes() <= 250 else {node: 0.0 for node in G.nodes()}
-    except Exception:
-        betweenness = {node: 0.0 for node in G.nodes()}
-    try:
-        pagerank = nx.pagerank(G if G.number_of_edges() else U)
-    except Exception:
-        pagerank = {node: 0.0 for node in G.nodes()}
-
-    try:
-        communities = list(nx.community.louvain_communities(U, seed=42)) if U.number_of_edges() else [{node} for node in U.nodes()]
-    except Exception:
-        try:
-            communities = list(nx.community.greedy_modularity_communities(U)) if U.number_of_edges() else [{node} for node in U.nodes()]
-        except Exception:
-            communities = [{node} for node in U.nodes()]
-    community_by_node: Dict[str, int] = {}
-    for idx, members in enumerate(communities, start=1):
-        for node in members:
-            community_by_node[str(node)] = idx
-
-    cliques = []
-    try:
-        if U.number_of_nodes() <= 120:
-            cliques = list(nx.find_cliques(U))
-    except Exception:
-        cliques = []
-    clique_counts: Dict[str, int] = {str(node): 0 for node in U.nodes()}
-    max_clique_size_by_node: Dict[str, int] = {str(node): 0 for node in U.nodes()}
-    for clique in cliques:
-        size = len(clique)
-        for node in clique:
-            key = str(node)
-            clique_counts[key] = clique_counts.get(key, 0) + 1
-            max_clique_size_by_node[key] = max(max_clique_size_by_node.get(key, 0), size)
-
-    node_stats: Dict[str, Any] = {}
-    for node in G.nodes():
-        key = str(node)
-        node_stats[key] = {
-            "degree_centrality": float(degree.get(node, 0.0) or 0.0),
-            "betweenness_centrality": float(betweenness.get(node, 0.0) or 0.0),
-            "closeness_centrality": float(closeness.get(node, 0.0) or 0.0),
-            "pagerank": float(pagerank.get(node, 0.0) or 0.0),
-            "community_id": int(community_by_node.get(key, 0) or 0),
-            "clique_count": int(clique_counts.get(key, 0) or 0),
-            "max_clique_size": int(max_clique_size_by_node.get(key, 0) or 0),
-        }
-
-    return {
-        "nodes": node_stats,
-        "summary": {
-            "n_communities": len(communities),
-            "n_cliques": len(cliques),
-            "max_clique_size": max((len(c) for c in cliques), default=0),
-        },
-    }
-
-
 def make_hvplot_payload(payload: Dict[str, Any]) -> Tuple[Any, Any]:
-    G = _networkx_from_payload(payload)
+    G = networkx_from_payload(payload)
     try:
         import hvplot.networkx as hvnx  # noqa: F401
         import networkx as nx
 
-        node_colors = []
-        for node_id, attrs in G.nodes(data=True):
-            style = _node_visual_style(dict(attrs))
-            G.nodes[node_id]["viz_group"] = style["group"]
-            G.nodes[node_id]["viz_color"] = style["color"]
-            node_colors.append(style["color"])
-
-        edge_colors = []
-        for src, tgt, attrs in G.edges(data=True):
-            style = _edge_visual_style(dict(attrs))
-            G.edges[src, tgt]["viz_color"] = style["color"]
-            edge_colors.append(style["color"])
-
+        node_colors = [str(attrs.get("viz_color") or "#9aa5b1") for _, attrs in G.nodes(data=True)]
+        edge_colors = [str(attrs.get("viz_color") or "#94a3b8") for _, _, attrs in G.edges(data=True)]
         pos = nx.spring_layout(G, seed=7, k=0.9 / max(1, G.number_of_nodes() ** 0.5))
         plot = hvnx.draw(
             G,
@@ -283,89 +115,14 @@ def make_hvplot_payload(payload: Dict[str, Any]) -> Tuple[Any, Any]:
         return G, None
 
 
-def _write_graph_html(graph_json_path: Path, html_path: Path) -> Path:
-    payload = json.loads(graph_json_path.read_text(encoding="utf-8"))
-    G = _networkx_from_payload(payload)
-    analytics = _graph_analytics(G)
-    community_palette = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2", "#ff9da6", "#9d755d", "#bab0ab"]
-
-    try:
-        from pyvis.network import Network  # type: ignore
-
-        net = Network(height="820px", width="100%", directed=bool(getattr(G, "is_directed", lambda: True)()), notebook=False, filter_menu=True)
-        net.barnes_hut()
-        try:
-            net.show_buttons(filter_=["physics", "layout", "interaction"])
-        except Exception:
-            pass
-
-        for node_id, attrs in G.nodes(data=True):
-            label = attrs.get("label") or attrs.get("term") or str(node_id)
-            style = _node_visual_style(dict(attrs))
-            node_metrics = analytics.get("nodes", {}).get(str(node_id), {})
-            community_id = int(node_metrics.get("community_id") or 0)
-            community_color = community_palette[(community_id - 1) % len(community_palette)] if community_id else style["color"]
-            node_size = 14 + 34 * max(float(node_metrics.get("degree_centrality") or 0.0), float(node_metrics.get("pagerank") or 0.0))
-            title_parts = [f"label: {label}"]
-            title_parts.extend(f"{k}: {v}" for k, v in attrs.items() if k != "label")
-            title_parts.extend([
-                f"community_id: {community_id}",
-                f"degree_centrality: {float(node_metrics.get('degree_centrality') or 0.0):.4f}",
-                f"betweenness_centrality: {float(node_metrics.get('betweenness_centrality') or 0.0):.4f}",
-                f"closeness_centrality: {float(node_metrics.get('closeness_centrality') or 0.0):.4f}",
-                f"pagerank: {float(node_metrics.get('pagerank') or 0.0):.4f}",
-                f"clique_count: {int(node_metrics.get('clique_count') or 0)}",
-                f"max_clique_size: {int(node_metrics.get('max_clique_size') or 0)}",
-            ])
-            net.add_node(
-                str(node_id),
-                label=str(label)[:80],
-                title="\n".join(title_parts),
-                color=community_color,
-                group=style["group"],
-                value=node_size,
-                community_id=community_id,
-                degree_centrality=float(node_metrics.get("degree_centrality") or 0.0),
-                betweenness_centrality=float(node_metrics.get("betweenness_centrality") or 0.0),
-                closeness_centrality=float(node_metrics.get("closeness_centrality") or 0.0),
-                pagerank=float(node_metrics.get("pagerank") or 0.0),
-                clique_count=int(node_metrics.get("clique_count") or 0),
-                max_clique_size=int(node_metrics.get("max_clique_size") or 0),
-            )
-
-        for src, tgt, attrs in G.edges(data=True):
-            label = attrs.get("predicate") or attrs.get("label") or ""
-            title = "\n".join(f"{k}: {v}" for k, v in attrs.items())
-            importance = float(attrs.get("importance_score") or 0.0)
-            net.add_edge(str(src), str(tgt), label=str(label), title=title, width=1.0 + 4.0 * importance, importance_score=importance)
-
-        net.write_html(str(html_path), notebook=False)
-    except Exception:
-        title = graph_json_path.stem
-        summary = analytics.get("summary", {})
-        html = [
-            "<html><head><meta charset='utf-8'><title>%s</title></head><body>" % title,
-            "<h2>%s</h2>" % title,
-            "<p>pyvis is not installed, so this fallback HTML shows a compact graph summary with graph analytics.</p>",
-            f"<p><b>Communities:</b> {summary.get('n_communities', 0)} · <b>Cliques:</b> {summary.get('n_cliques', 0)} · <b>Max clique size:</b> {summary.get('max_clique_size', 0)}</p>",
-            "<h3>Nodes</h3><ul>",
-        ]
-        for node_id, attrs in G.nodes(data=True):
-            label = attrs.get("label") or attrs.get("term") or str(node_id)
-            node_metrics = analytics.get("nodes", {}).get(str(node_id), {})
-            html.append(
-                f"<li><b>{label}</b> <code>{node_id}</code> — community {int(node_metrics.get('community_id') or 0)}, "
-                f"degree {float(node_metrics.get('degree_centrality') or 0.0):.3f}, pagerank {float(node_metrics.get('pagerank') or 0.0):.3f}, "
-                f"max clique {int(node_metrics.get('max_clique_size') or 0)}</li>"
-            )
-        html.append("</ul><h3>Edges</h3><ul>")
-        for src, tgt, attrs in G.edges(data=True):
-            label = attrs.get("predicate") or attrs.get("label") or "related_to"
-            importance = float(attrs.get("importance_score") or 0.0)
-            html.append(f"<li><code>{src}</code> — <b>{label}</b> → <code>{tgt}</code> (importance={importance:.3f})</li>")
-        html.append("</ul></body></html>")
-        html_path.write_text("".join(html), encoding="utf-8")
-    return html_path
+def _score_triplet_rows(rows: list[dict[str, Any]], doc: Dict[str, Any], *, analytics: Dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    profile = topic_profile_from_doc(doc)
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item.update(score_triplet_importance(item, profile, graph_metrics=analytics))
+        out.append(item)
+    return out
 
 
 def build_task2_validation_bundle(
@@ -386,10 +143,8 @@ def build_task2_validation_bundle(
     local_model: str | None = None,
     vlm_backend: str | None = None,
     vlm_model_id: str | None = None,
-    excluded_paper_ids: Optional[list[str]] = None,
-    excluded_paper_titles: Optional[list[str]] = None,
-    excluded_title_contains: Optional[list[str]] = None,
-    min_importance: Optional[float] = None,
+    exclusion_spec: Dict[str, Any] | str | Path | None = None,
+    importance_threshold: float = 0.0,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> BundleResult:
     trajectory_path = Path(trajectory_path)
@@ -416,10 +171,7 @@ def build_task2_validation_bundle(
             local_model=local_model,
             vlm_backend=vlm_backend,
             vlm_model_id=vlm_model_id,
-            excluded_paper_ids=excluded_paper_ids,
-            excluded_paper_titles=excluded_paper_titles,
-            excluded_title_contains=excluded_title_contains,
-            min_importance=min_importance,
+            exclusion_spec=exclusion_spec,
             progress_callback=progress_callback,
         )
     else:
@@ -463,19 +215,35 @@ def build_task2_validation_bundle(
     gold_triplets_json = bundle_dir / "reference_triplets.json"
     gold_triplets_csv = bundle_dir / "reference_triplets.csv"
     gold_graph_html = bundle_dir / "reference_graph.html"
+    gold_graph_analytics = bundle_dir / "reference_graph_analytics.json"
 
+    gold_payload = json.loads(gold_graph_json.read_text(encoding="utf-8")) if gold_graph_json.exists() else {}
+    gold_analytics = compute_graph_analytics(gold_payload) if gold_payload else {}
+    if gold_triplets_json.exists():
+        gold_rows = json.loads(gold_triplets_json.read_text(encoding="utf-8"))
+        gold_rows = gold_rows if isinstance(gold_rows, list) else []
+        gold_rows = _score_triplet_rows(gold_rows, doc, analytics=gold_analytics)
+        gold_triplets_json.write_text(json.dumps(gold_rows, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_triplets_csv(gold_triplets_json, gold_triplets_csv)
-    _write_graph_html(gold_graph_json, gold_graph_html)
+    write_graph_html(gold_graph_json, gold_graph_html, analytics_path=gold_graph_analytics)
 
     auto_graph_json = bundle_dir / "automatic_graph" / "temporal_kg.json"
     auto_triplets_json = bundle_dir / "automatic_triplets.json"
     auto_triplets_csv = bundle_dir / "automatic_triplets.csv"
     auto_graph_html = bundle_dir / "automatic_graph.html"
+    auto_graph_analytics = bundle_dir / "automatic_graph_analytics.json"
 
-    if auto_triplets_json.exists():
-        _write_triplets_csv(auto_triplets_json, auto_triplets_csv)
+    auto_analytics = {}
     if auto_graph_json.exists():
-        _write_graph_html(auto_graph_json, auto_graph_html)
+        auto_payload = json.loads(auto_graph_json.read_text(encoding="utf-8"))
+        auto_analytics = compute_graph_analytics(auto_payload) if auto_payload else {}
+        write_graph_html(auto_graph_json, auto_graph_html, analytics_path=auto_graph_analytics)
+    if auto_triplets_json.exists():
+        auto_rows = json.loads(auto_triplets_json.read_text(encoding="utf-8"))
+        auto_rows = auto_rows if isinstance(auto_rows, list) else []
+        auto_rows = _score_triplet_rows(auto_rows, doc, analytics=auto_analytics)
+        auto_triplets_json.write_text(json.dumps(auto_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_triplets_csv(auto_triplets_json, auto_triplets_csv)
 
     review_state_paths = get_task2_review_state_paths(bundle_dir)
     review_state_paths["draft_dir"].mkdir(parents=True, exist_ok=True)
@@ -489,6 +257,11 @@ def build_task2_validation_bundle(
         "manifest_version": 6,
         "review_state_dir": str(review_state_paths["draft_dir"]),
         "review_state_latest": str(review_state_paths["latest"]),
+        "gold_graph_analytics": str(gold_graph_analytics),
+        "filter_defaults": {
+            "importance_threshold": max(0.0, min(1.0, float(importance_threshold or 0.0))),
+            "exclusion_rules": serialize_exclusion_spec(normalize_exclusion_spec(exclusion_spec)),
+        },
     }
 
     if auto_graph_json.exists():
@@ -497,7 +270,7 @@ def build_task2_validation_bundle(
             "auto_graph_json": str(auto_graph_json),
             "auto_graph_html": str(auto_graph_html),
             "auto_triplets_csv": str(auto_triplets_csv),
-            "auto_triplets_json": str(auto_triplets_json),
+            "auto_graph_analytics": str(auto_graph_analytics),
         })
 
     comparison = bundle_dir / "comparison_summary.json"
@@ -514,7 +287,7 @@ def build_task2_validation_bundle(
             runtime_payload = json.loads(runtime_manifest.read_text(encoding="utf-8"))
         except Exception:
             runtime_payload = {}
-        for key in ("llm_effective_provider", "llm_effective_model", "vlm_effective_backend", "vlm_effective_model", "default_importance_threshold", "excluded_papers_applied", "task2_controls"):
+        for key in ("llm_effective_provider", "llm_effective_model", "vlm_effective_backend", "vlm_effective_model"):
             if runtime_payload.get(key) not in (None, ""):
                 manifest[key] = runtime_payload.get(key)
 

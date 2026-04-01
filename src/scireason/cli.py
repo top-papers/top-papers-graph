@@ -41,7 +41,8 @@ from .agents.hypothesis_tester import load_hypothesis_from_json, test_hypothesis
 
 from .pipeline.e2e import run_pipeline
 from .pipeline.demo import run_demo_pipeline
-from .pipeline.task2_validation import prepare_task2_validation_bundle
+from .pipeline.task2_validation import prepare_task2_validation_bundle as prepare_task2_validation_pipeline_bundle
+from .task2_validation import build_task2_validation_bundle
 
 
 app = typer.Typer(help="top-papers-graph CLI (ex SciReason)", add_completion=False)
@@ -607,22 +608,21 @@ def prepare_task2_validation(
     vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
     llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
     llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
-    exclude_paper_id: list[str] = typer.Option([], "--exclude-paper-id", help="Исключить статьи по canonical id (можно повторять опцию)."),
-    exclude_paper_title: list[str] = typer.Option([], "--exclude-paper-title", help="Исключить статьи по полному title (можно повторять опцию)."),
-    exclude_title_contains: list[str] = typer.Option([], "--exclude-title-contains", help="Исключить статьи по фрагменту title (можно повторять опцию)."),
-    min_importance: float = typer.Option(0.0, "--min-importance", min=0.0, max=1.0, help="Дефолтный порог importance_score для review UI (0..1)."),
+    exclude_yaml: Path | None = typer.Option(None, "--exclude-yaml", help="YAML/JSON со списком статей и паттернов для исключения из Task 2 (анти-leakage фильтр)."),
+    importance_threshold: float = typer.Option(0.0, min=0.0, max=1.0, help="Порог важности триплетов: рёбра ниже порога скрываются в review bundle."),
 ) -> None:
     """Task 2 orchestrator: trajectory YAML -> reference graph + automatic temporal KG + review templates.
 
     Command is designed for Google Colab / notebook usage and does not require Neo4j/Qdrant.
     """
-    bundle_dir = prepare_task2_validation_bundle(
+    bundle = build_task2_validation_bundle(
         trajectory,
         out_dir=out_dir,
-        include_multimodal=multimodal,
+        include_auto_pipeline=True,
+        multimodal=multimodal,
         run_vlm=vlm,
         edge_mode=edge_mode,
-        suggest_links=suggest_links,
+        enable_reference_scout=suggest_links,
         max_papers=max_papers,
         max_link_queries=max_link_queries,
         enable_remote_lookup=remote_lookup,
@@ -632,12 +632,10 @@ def prepare_task2_validation(
         local_model=local_model,
         vlm_backend=vlm_backend,
         vlm_model_id=vlm_model_id,
-        excluded_paper_ids=exclude_paper_id,
-        excluded_paper_titles=exclude_paper_title,
-        excluded_title_contains=exclude_title_contains,
-        min_importance=min_importance,
+        exclusion_spec=exclude_yaml,
+        importance_threshold=importance_threshold,
     )
-    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
+    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle.bundle_dir}")
 
 
 @app.command("task2-bundle")
@@ -657,19 +655,18 @@ def task2_bundle(
     vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для мультимодального шага."),
     llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать LLM-провайдера для Task 2."),
     llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать имя LLM-модели для Task 2."),
-    exclude_paper_id: list[str] = typer.Option([], "--exclude-paper-id", help="Исключить статьи по canonical id (можно повторять опцию)."),
-    exclude_paper_title: list[str] = typer.Option([], "--exclude-paper-title", help="Исключить статьи по полному title (можно повторять опцию)."),
-    exclude_title_contains: list[str] = typer.Option([], "--exclude-title-contains", help="Исключить статьи по фрагменту title (можно повторять опцию)."),
-    min_importance: float = typer.Option(0.0, "--min-importance", min=0.0, max=1.0, help="Дефолтный порог importance_score для review UI (0..1)."),
+    exclude_yaml: Path | None = typer.Option(None, "--exclude-yaml", help="YAML/JSON со списком статей и паттернов для исключения из Task 2 (анти-leakage фильтр)."),
+    importance_threshold: float = typer.Option(0.0, min=0.0, max=1.0, help="Порог важности триплетов: рёбра ниже порога скрываются в review bundle."),
 ) -> None:
     """Alias for prepare-task2-validation, kept for notebook and legacy automation compatibility."""
-    bundle_dir = prepare_task2_validation_bundle(
+    bundle = build_task2_validation_bundle(
         trajectory,
         out_dir=out_dir,
-        include_multimodal=multimodal,
+        include_auto_pipeline=True,
+        multimodal=multimodal,
         run_vlm=vlm,
         edge_mode=edge_mode,
-        suggest_links=suggest_links,
+        enable_reference_scout=suggest_links,
         max_papers=max_papers,
         max_link_queries=max_link_queries,
         enable_remote_lookup=remote_lookup,
@@ -679,12 +676,10 @@ def task2_bundle(
         local_model=local_model,
         vlm_backend=vlm_backend,
         vlm_model_id=vlm_model_id,
-        excluded_paper_ids=exclude_paper_id,
-        excluded_paper_titles=exclude_paper_title,
-        excluded_title_contains=exclude_title_contains,
-        min_importance=min_importance,
+        exclusion_spec=exclude_yaml,
+        importance_threshold=importance_threshold,
     )
-    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle_dir}")
+    console.print(f"[green]Task 2 bundle prepared:[/green] {bundle.bundle_dir}")
 
 
 @app.command("pybamm-fastcharge")

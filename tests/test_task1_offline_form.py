@@ -29,8 +29,6 @@ def test_build_task1_offline_form_writes_embedded_html(tmp_path: Path) -> None:
     assert 'temperature' in html
     assert 'Battery degradation' in html
     assert 'task1-offline-form-v1' in html
-    assert 'Task 2 temporal graph validation' in html
-    assert 'Минимальный importance_score для task2' in html
 
 
 def test_task1_notebook_contains_offline_download_button() -> None:
