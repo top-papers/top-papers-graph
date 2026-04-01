@@ -55,7 +55,9 @@ def _load_transformers_vlm(model_id: str):
 
     Qwen2.5-VL имеет собственный класс в Transformers, поэтому для него
     используем официальный путь через `Qwen2_5_VLForConditionalGeneration`.
-    Для остальных backends оставляем AutoModelForVision2Seq fallback.
+    Для остальных backends сначала пробуем актуальный
+    `AutoModelForImageTextToText`, а для старых версий Transformers —
+    `AutoModelForVision2Seq` как backward-compatible fallback.
     """
     try:
         import torch  # type: ignore
@@ -93,12 +95,16 @@ def _load_transformers_vlm(model_id: str):
         )
         return processor, model, "qwen2_5_vl"
 
+    generic_model_cls = None
     try:
-        from transformers import AutoModelForVision2Seq  # type: ignore
+        from transformers import AutoModelForImageTextToText as generic_model_cls  # type: ignore
     except Exception:
-        _require("transformers/torch")
+        try:
+            from transformers import AutoModelForVision2Seq as generic_model_cls  # type: ignore
+        except Exception:
+            _require("transformers image-text runtime (AutoModelForImageTextToText/AutoModelForVision2Seq)")
 
-    model = AutoModelForVision2Seq.from_pretrained(
+    model = generic_model_cls.from_pretrained(
         model_id,
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
@@ -289,7 +295,10 @@ try:
         from transformers import Qwen2_5_VLForConditionalGeneration  # noqa: F401
         import qwen_vl_utils  # noqa: F401
     else:
-        from transformers import AutoModelForVision2Seq  # noqa: F401
+        try:
+            from transformers import AutoModelForImageTextToText  # noqa: F401
+        except Exception:
+            from transformers import AutoModelForVision2Seq  # noqa: F401
 except Exception as e:
     result["reason"] = f"{type(e).__name__}: {e}"
     print(json.dumps(result, ensure_ascii=False))

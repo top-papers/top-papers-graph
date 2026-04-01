@@ -112,8 +112,11 @@ def _load_transformers_vlm(model_id: str, device_mode: str = 'auto'):
         model.eval()
         return processor, model, 'qwen2_5_vl'
 
-    from transformers import AutoModelForVision2Seq  # type: ignore
-    model = AutoModelForVision2Seq.from_pretrained(model_id, trust_remote_code=True, **kwargs)
+    try:
+        from transformers import AutoModelForImageTextToText as _GenericImageTextModel  # type: ignore
+    except Exception:
+        from transformers import AutoModelForVision2Seq as _GenericImageTextModel  # type: ignore
+    model = _GenericImageTextModel.from_pretrained(model_id, trust_remote_code=True, **kwargs)
     model.eval()
     return processor, model, 'generic'
 

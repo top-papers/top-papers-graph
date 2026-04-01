@@ -182,3 +182,39 @@ def test_flatten_automatic_graph_preserves_precise_time_intervals() -> None:
     assert rows[0]["time_candidates"][0]["granularity"] == "day"
     assert rows[0]["evidence"]["page"] == 3
     assert rows[0]["evidence"]["source_kind"] == "multimodal_page"
+
+
+def test_time_interval_accepts_interval_and_range_aliases() -> None:
+    direct = TimeInterval(start="2020", end="2022", granularity="interval")
+    alias = TimeInterval.model_validate({"start": "2020", "end": "2022", "granularity": "range"})
+
+    assert direct.granularity == "interval"
+    assert alias.granularity == "interval"
+
+
+def test_extract_temporal_triplets_normalizes_interval_granularity(monkeypatch) -> None:
+    from scireason.temporal import temporal_triplet_extractor as extractor
+
+    monkeypatch.setattr(extractor.settings, "llm_provider", "g4f")
+    monkeypatch.setattr(extractor, "temporary_llm_selection", lambda **kwargs: __import__("contextlib").nullcontext())
+    monkeypatch.setattr(
+        extractor,
+        "chat_json",
+        lambda **kwargs: [
+            {
+                "subject": "model",
+                "predicate": "improves",
+                "object": "accuracy",
+                "confidence": 0.9,
+                "polarity": "supports",
+                "time": {"start": "2020", "end": "2022", "granularity": "range"},
+            }
+        ],
+    )
+
+    rows = extractor.extract_temporal_triplets(domain="science", chunk_text="demo text", paper_year=2022)
+
+    assert rows[0].time is not None
+    assert rows[0].time.granularity == "interval"
+    assert rows[0].time.start == "2020"
+    assert rows[0].time.end == "2022"

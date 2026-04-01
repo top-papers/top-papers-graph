@@ -1,12 +1,56 @@
 from __future__ import annotations
 
 from hashlib import sha1
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
-Granularity = Literal["year", "month", "day"]
+Granularity = Literal["year", "month", "day", "interval"]
+
+
+def _infer_granularity_from_value(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "year"
+    if text in {"unknown", "+inf", "-inf"}:
+        return "year"
+    if len(text) >= 10 and text[4:5] == "-" and text[7:8] == "-":
+        return "day"
+    if len(text) >= 7 and text[4:5] == "-":
+        return "month"
+    return "year"
+
+
+def normalize_granularity(value: Any, *, start: Any = None, end: Any = None, default: str = "year") -> str:
+    text = str(value or "").strip().lower()
+    aliases = {
+        "": default,
+        "unknown": default,
+        "year": "year",
+        "annual": "year",
+        "month": "month",
+        "monthly": "month",
+        "day": "day",
+        "daily": "day",
+        "interval": "interval",
+        "range": "interval",
+        "period": "interval",
+        "timespan": "interval",
+        "time_span": "interval",
+        "date_range": "interval",
+    }
+    if text in aliases:
+        return aliases[text]
+    inferred_start = _infer_granularity_from_value(start)
+    inferred_end = _infer_granularity_from_value(end)
+    if start not in (None, "") and end not in (None, "") and str(start) != str(end):
+        return "interval"
+    if inferred_start == inferred_end:
+        return inferred_start
+    if start not in (None, "") or end not in (None, ""):
+        return "interval"
+    return default
 EventSplit = Literal["train", "valid", "test"]
 EventType = Literal["extracted", "reviewed", "corrected"]
 
@@ -20,6 +64,20 @@ class TimeInterval(BaseModel):
     start: Optional[str] = Field(default=None, description="ISO дата или год: YYYY / YYYY-MM / YYYY-MM-DD")
     end: Optional[str] = Field(default=None, description="ISO дата/год конца интервала (включительно)")
     granularity: Granularity = "year"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_input(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        payload["granularity"] = normalize_granularity(
+            payload.get("granularity"),
+            start=payload.get("start"),
+            end=payload.get("end"),
+            default="year",
+        )
+        return payload
 
     def key(self) -> str:
         start = self.start or ""
@@ -66,6 +124,21 @@ class TemporalEvent(BaseModel):
     ts_start: Optional[str] = None
     ts_end: Optional[str] = None
     granularity: Granularity = "year"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_input(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        payload["granularity"] = normalize_granularity(
+            payload.get("granularity"),
+            start=payload.get("ts_start"),
+            end=payload.get("ts_end"),
+            default="year",
+        )
+        return payload
+
     confidence: float = Field(ge=0.0, le=1.0, default=0.6)
     polarity: Literal["supports", "contradicts", "unknown"] = "unknown"
     split: Optional[EventSplit] = None

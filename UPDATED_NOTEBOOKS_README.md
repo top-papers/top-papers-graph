@@ -1,0 +1,13 @@
+# Updated expert notebooks bundle
+
+This archive includes synchronized expert notebooks:
+
+- `task1_reasoning_trajectories_onine_offline_forms.ipynb`
+- `task2_temporal_graph_validation.ipynb`
+
+Both copies are aligned with the tested repository notebooks in `notebooks/` and use the current Task 2 pipeline with:
+
+- YAML/JSON exclusion filters for anti-leakage review
+- triplet importance scoring and threshold filtering
+- graph analytics in visualization pages (communities, cliques, centralities, k-core)
+- offline review package generation compatible with downstream VLM fine-tuning datasets

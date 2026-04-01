@@ -33,7 +33,7 @@ EdgeMode = Literal["auto", "llm_triplets", "cooccurrence"]
 
 
 def _granularity_rank(value: str | None) -> int:
-    mapping = {"year": 1, "month": 2, "day": 3}
+    mapping = {"year": 1, "month": 2, "interval": 2, "day": 3}
     return mapping.get(str(value or "year").strip().lower(), 1)
 
 

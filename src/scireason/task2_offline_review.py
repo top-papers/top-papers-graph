@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from .temporal.schemas import normalize_granularity
+
 
 _MANIFEST_LIST_KEYS = ("assertions", "rows", "triplets", "edges", "corrections", "hits")
 
@@ -108,6 +110,14 @@ def _read_rows(path: str | Path) -> List[Dict[str, Any]]:
         return [dict(row) for row in reader]
 
 
+
+
+def _normalize_time_granularity(value: Any, *, start_date: Any = None, end_date: Any = None) -> str:
+    raw = str(value or '').strip().lower()
+    if raw == 'unknown':
+        return 'unknown'
+    return normalize_granularity(raw, start=start_date, end=end_date, default='unknown')
+
 def _infer_hypothesis_role(row: Dict[str, Any]) -> str:
     predicate = str(row.get("predicate") or "").lower()
     subj = str(row.get("subject") or "").lower()
@@ -202,7 +212,7 @@ def _default_review_state(row: Dict[str, Any]) -> Dict[str, Any]:
         "evidence_before_cutoff": str(row.get("evidence_before_cutoff") or ""),
         "leakage_risk": str(row.get("leakage_risk") or "possible"),
         "time_type": str(row.get("time_type") or _default_time_type(row)),
-        "time_granularity": str(row.get("time_granularity") or "unknown"),
+        "time_granularity": _normalize_time_granularity(row.get("time_granularity"), start_date=row.get("start_date"), end_date=row.get("end_date")),
         "time_confidence": str(row.get("time_confidence") or "medium"),
         "mm_verdict": str(row.get("mm_verdict") or ("needs_fix" if bool(row.get("needs_mm_review")) else "")),
         "mm_rationale": str(row.get("mm_rationale") or ""),
@@ -277,6 +287,7 @@ def _normalize_assertions(rows: List[Dict[str, Any]], graph_kind: str) -> List[D
             "raw_record_json": json.dumps(row_dict, ensure_ascii=False, indent=2),
             "cutoff_year": str(_pick_first(row_dict, ["cutoff_year"], "")),
             "needs_mm_review": needs_mm_review,
+            "time_granularity": _normalize_time_granularity(_pick_first(row_dict, ["time_granularity", "granularity"], "unknown"), start_date=start_date, end_date=end_date),
         }
         normalized_row["default_review_state"] = _default_review_state(normalized_row)
         normalized.append(normalized_row)
@@ -479,6 +490,17 @@ _HTML_TEMPLATE = r"""<!doctype html>
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
   }
+  function normalizeTimeGranularity(value, startDate, endDate) {
+    const raw = String(value ?? '').trim().toLowerCase();
+    if (!raw || raw === 'unknown') {
+      if (!startDate && !endDate) return 'unknown';
+      return 'unknown';
+    }
+    if (['range', 'period', 'timespan', 'time_span', 'date_range'].includes(raw)) return 'interval';
+    if (['year', 'month', 'day', 'interval'].includes(raw)) return raw;
+    if (startDate && endDate && String(startDate) !== String(endDate)) return 'interval';
+    return 'unknown';
+  }
   function snapshot(reason = 'manual') {
     return {
       artifact_version: 1,
@@ -503,7 +525,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
     const loaded = payload.review_state || payload.reviewState || {};
     Object.entries(loaded).forEach(([edge, value]) => {
       if (!state.reviewState[edge] || !value || typeof value !== 'object') return;
-      state.reviewState[edge] = Object.assign({}, state.reviewState[edge], value);
+      const merged = Object.assign({}, state.reviewState[edge], value);
+      merged.time_granularity = normalizeTimeGranularity(merged.time_granularity, merged.corrected_start_date || '', merged.corrected_end_date || '');
+      state.reviewState[edge] = merged;
     });
   }
   function autosave(reason = 'autosave') {
@@ -1170,7 +1194,7 @@ match_substrings:
         field('Evidence before cutoff', 'evidence_before_cutoff', 'select', [['','—'],['yes','yes'],['no','no'],['unclear','unclear']]),
         field('Leakage risk', 'leakage_risk', 'select', [['possible','possible'],['low','low'],['high','high']]),
         field('Time type', 'time_type', 'select', [['observation_period','observation_period'],['publication_time','publication_time']]),
-        field('Time granularity', 'time_granularity', 'select', [['unknown','unknown'],['year','year'],['month','month'],['day','day'],['range','range']]),
+        field('Time granularity', 'time_granularity', 'select', [['unknown','unknown'],['year','year'],['month','month'],['day','day'],['interval','interval']]),
         field('Time confidence', 'time_confidence', 'select', [['low','low'],['medium','medium'],['high','high']]),
         field('MM verdict', 'mm_verdict', 'select', [['','—'],['ok','ok'],['needs_fix','needs_fix'],['not_applicable','not_applicable']])
       );
