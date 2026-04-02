@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import nbformat
@@ -116,6 +119,44 @@ def test_offline_review_package_contains_embedded_graphs_and_records(tmp_path: P
     assert "Скачать результаты ZIP" in html_text
 
 
+
+
+def test_offline_review_package_embedded_script_is_valid_javascript(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "expert_validation" / "drafts").mkdir(parents=True)
+    (bundle_dir / "reference_triplets.csv").write_text(
+        "assertion_id,subject,predicate,object,start_date,end_date\n"
+        "g1,A,relates_to,B,2021,2022\n",
+        encoding="utf-8",
+    )
+    (bundle_dir / "reference_graph.json").write_text(
+        json.dumps({"nodes": [{"id": "A", "label": "A"}, {"id": "B", "label": "B"}], "edges": [{"source": "A", "target": "B", "predicate": "relates_to"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (bundle_dir / "reference_graph.html").write_text("<html><body>graph</body></html>", encoding="utf-8")
+
+    manifest = {
+        "bundle_dir": str(bundle_dir),
+        "gold_graph": str(bundle_dir / "reference_graph.json"),
+        "gold_graph_html": str(bundle_dir / "reference_graph.html"),
+        "gold_triplets_csv": str(bundle_dir / "reference_triplets.csv"),
+    }
+    task1_doc = {"topic": "demo topic", "submission_id": "demo-submission", "cutoff_year": 2024}
+    html_path = build_task2_offline_review_package(manifest, task1_doc)
+    html_text = html_path.read_text(encoding="utf-8")
+    match = re.search(r"<script>\s*(.*)\s*</script>", html_text, re.S)
+    assert match, "embedded script not found"
+    node = shutil.which("node")
+    if not node:
+        assert "placeholder: `paper_ids:" in html_text
+        return
+    script_path = tmp_path / "offline_review.js"
+    script_path.write_text(match.group(1), encoding="utf-8")
+    proc = subprocess.run([node, "--check", str(script_path)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
 def test_notebook_defaults_to_g4f_and_has_draft_controls() -> None:
     nb = nbformat.read("notebooks/task2_temporal_graph_validation_colab.ipynb", as_version=4)
     cell3 = nb.cells[3].source
@@ -128,3 +169,45 @@ def test_notebook_defaults_to_g4f_and_has_draft_controls() -> None:
     assert "Загрузить черновик" in cell3
     assert "Автосохранение черновика" in cell3
     assert "Скачать автономную форму" in cell3
+
+
+def test_offline_review_package_supports_runtime_manifest_artifacts_layout(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "expert_validation" / "drafts").mkdir(parents=True)
+    (bundle_dir / "automatic_graph").mkdir(parents=True)
+    (bundle_dir / "reference_triplets.csv").write_text(
+        "assertion_id,subject,predicate,object,start_date,end_date\n"
+        "g1,A,relates_to,B,2021,2022\n",
+        encoding="utf-8",
+    )
+    (bundle_dir / "automatic_triplets.csv").write_text(
+        "assertion_id,subject,predicate,object,start_date,end_date\n"
+        "a1,B,influences,C,2022,2023\n",
+        encoding="utf-8",
+    )
+    (bundle_dir / "reference_graph.json").write_text(
+        json.dumps({"nodes": [{"id": "A", "label": "A"}, {"id": "B", "label": "B"}], "edges": [{"source": "A", "target": "B", "predicate": "relates_to"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (bundle_dir / "automatic_graph" / "temporal_kg.json").write_text(
+        json.dumps({"nodes": [{"id": "B", "label": "B"}, {"id": "C", "label": "C"}], "edges": [{"source": "B", "target": "C", "predicate": "influences"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (bundle_dir / "comparison_summary.json").write_text(json.dumps({"automatic_edges": 1}, ensure_ascii=False), encoding="utf-8")
+
+    manifest = {
+        "bundle_dir": str(bundle_dir),
+        "artifacts": {
+            "reference_graph": "reference_graph.json",
+            "automatic_graph": "automatic_graph/temporal_kg.json",
+            "comparison_summary": "comparison_summary.json",
+        },
+    }
+    task1_doc = {"topic": "demo topic", "submission_id": "demo-submission", "cutoff_year": 2024}
+    html_path = build_task2_offline_review_package(manifest, task1_doc)
+    html_text = html_path.read_text(encoding="utf-8")
+    assert '"graphs": {"gold": {"nodes": [{"id": "A"' in html_text
+    assert '"auto": {"nodes": [{"id": "B"' in html_text
+    assert '"records": [{"graph_kind": "gold"' in html_text
+    assert 'influences' in html_text

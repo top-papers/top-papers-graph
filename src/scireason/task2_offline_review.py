@@ -110,7 +110,26 @@ def _read_rows(path: str | Path) -> List[Dict[str, Any]]:
         return [dict(row) for row in reader]
 
 
-
+def _resolve_bundle_artifact(manifest: Dict[str, Any], bundle_dir: Path, *keys: str, default_rel: str | None = None) -> Path | None:
+    artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), dict) else {}
+    for key in keys:
+        candidate = manifest.get(key)
+        if candidate:
+            p = Path(candidate)
+            if not p.is_absolute():
+                p = bundle_dir / p
+            if p.exists():
+                return p
+        art_candidate = artifacts.get(key)
+        if art_candidate:
+            p = bundle_dir / str(art_candidate)
+            if p.exists():
+                return p
+    if default_rel:
+        p = bundle_dir / default_rel
+        if p.exists():
+            return p
+    return None
 
 def _normalize_time_granularity(value: Any, *, start_date: Any = None, end_date: Any = None) -> str:
     raw = str(value or '').strip().lower()
@@ -376,7 +395,8 @@ _HTML_TEMPLATE = r"""<!doctype html>
     }
     .stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
     .stats .pill { background: #eef2ff; color: #3730a3; }
-    .graph-shell { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
+    .graph-shell { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    .graph-shell > * { min-width: 0; }
     @media (max-width: 1100px) {
       .graph-shell { grid-template-columns: 1fr; }
     }
@@ -390,10 +410,10 @@ _HTML_TEMPLATE = r"""<!doctype html>
     .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
     .legend span { font-size: 12px; color: var(--muted); }
     .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; vertical-align: top; text-align: left; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; vertical-align: top; text-align: left; overflow-wrap: anywhere; word-break: break-word; }
     th { background: #f8fafc; position: sticky; top: 0; }
-    .table-wrap { max-height: 460px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
+    .table-wrap { max-height: 460px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; min-width: 0; }
     .card details { box-shadow: none; border-radius: 10px; margin-top: 8px; }
     .card details > div, .card details > pre { padding: 0 12px 12px 12px; }
     .card summary { cursor: pointer; padding: 10px 12px; font-weight: 600; }
@@ -404,6 +424,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
     code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     pre { white-space: pre-wrap; word-break: break-word; background: #f8fafc; padding: 12px; border-radius: 10px; overflow: auto; }
     .footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+    .graph-label { pointer-events: none; }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -670,6 +691,32 @@ _HTML_TEMPLATE = r"""<!doctype html>
     if (node.term || ['term','entity','concept'].includes(rawType)) return 'term';
     return 'default';
   }
+  function wrapGraphLabel(value, maxLine = 18, maxLines = 2) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) return [''];
+    const words = text.split(' ');
+    const lines = [];
+    let current = '';
+    words.forEach((word) => {
+      if (!current) {
+        current = word;
+        return;
+      }
+      if ((current + ' ' + word).length <= maxLine) {
+        current += ' ' + word;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    });
+    if (current) lines.push(current);
+    if (lines.length <= maxLines) return lines;
+    const clipped = lines.slice(0, maxLines);
+    const last = clipped[maxLines - 1];
+    clipped[maxLines - 1] = last.length > maxLine - 1 ? `${last.slice(0, Math.max(0, maxLine - 1)).trim()}…` : `${last}…`;
+    return clipped;
+  }
+
   function renderGraphSvg(target, payload) {
     const nodes = graphNodes(payload);
     const edges = graphEdges(payload);
@@ -707,25 +754,29 @@ _HTML_TEMPLATE = r"""<!doctype html>
         x1: src.x, y1: src.y, x2: tgt.x, y2: tgt.y,
         stroke: '#94a3b8', 'stroke-width': '1.4', 'marker-end': 'url(#arrowhead)', opacity: '0.85'
       });
+      line.appendChild(el('title', { text: String(edge.predicate || edge.label || 'related_to') }));
       svg.appendChild(line);
-      const mx = (src.x + tgt.x) / 2;
-      const my = (src.y + tgt.y) / 2;
-      svg.appendChild(el('text', {
-        x: mx + ((idx % 2 === 0) ? 6 : -6),
-        y: my + ((idx % 3) - 1) * 10,
-        fill: '#475569', 'font-size': '10', 'text-anchor': 'middle'
-      }, truncate(edge.predicate || edge.label || 'related_to', 28)));
     });
     nodes.forEach((node, idx) => {
       const nodeId = String(node.id || node.term || node.label || `node-${idx}`);
       const { x, y } = pos[nodeId];
       const group = nodeGroup(node);
       const color = graphColors[group] || graphColors.default;
-      svg.appendChild(el('circle', { cx: x, cy: y, r: 11, fill: color, opacity: '0.92' }));
-      svg.appendChild(el('text', {
-        x, y: y + 26,
-        fill: '#111827', 'font-size': '11', 'text-anchor': 'middle'
-      }, truncate(node.label || node.term || nodeId, 26)));
+      const label = String(node.label || node.term || nodeId);
+      const labelLines = wrapGraphLabel(label, 18, 2);
+      const circle = el('circle', { cx: x, cy: y, r: 11, fill: color, opacity: '0.92' });
+      circle.appendChild(el('title', { text: label }));
+      svg.appendChild(circle);
+      labelLines.forEach((lineText, lineIdx) => {
+        svg.appendChild(el('text', {
+          x,
+          y: y + 26 + (lineIdx * 12),
+          fill: '#111827',
+          'font-size': '11',
+          'text-anchor': 'middle',
+          class: 'graph-label'
+        }, lineText));
+      });
     });
     target.appendChild(svg);
   }
@@ -1000,10 +1051,10 @@ _HTML_TEMPLATE = r"""<!doctype html>
 
     const importanceThreshold = el('input', { type: 'number', min: '0', max: '1', step: '0.05', value: String(state.filters.importanceThreshold ?? 0), title: 'Минимальная важность триплета' });
     importanceThreshold.addEventListener('input', (e) => { state.filters.importanceThreshold = Math.max(0, Math.min(1, toNumber(e.target.value, 0))); state.filters.page = 1; autosave(); renderValidation(); });
-    const exclusionInput = el('textarea', { rows: '5', placeholder: 'paper_ids:
+    const exclusionInput = el('textarea', { rows: '5', placeholder: `paper_ids:
   - PMID:12345
 match_substrings:
-  - review after discovery', style: 'min-width:360px;min-height:96px;' });
+  - review after discovery`, style: 'min-width:360px;min-height:96px;' });
     exclusionInput.value = state.filters.exclusionText || '';
     exclusionInput.addEventListener('input', (e) => { state.filters.exclusionText = e.target.value; state.filters.page = 1; autosave(); renderValidation(); });
     const exclusionUpload = el('input', { type: 'file', class: 'hidden', accept: '.yaml,.yml,.json,text/plain' });
@@ -1296,11 +1347,70 @@ def build_task2_offline_review_package(
     output = Path(output_path) if output_path else bundle_dir / "expert_validation" / "offline_review" / "task2_expert_validation_offline.html"
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    gold_triplets_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "gold_triplets_csv",
+        "reference_triplets",
+        default_rel="reference_triplets.csv",
+    )
+    auto_triplets_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "auto_triplets_csv",
+        "automatic_triplets",
+        default_rel="automatic_triplets.csv",
+    )
+    gold_graph_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "gold_graph",
+        "reference_graph",
+        default_rel="reference_graph.json",
+    )
+    auto_graph_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "auto_graph_json",
+        "automatic_graph",
+        default_rel="automatic_graph/temporal_kg.json",
+    )
+    gold_graph_html_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "gold_graph_html",
+        default_rel="reference_graph.html",
+    )
+    auto_graph_html_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "auto_graph_html",
+        default_rel="automatic_graph.html",
+    )
+    gold_graph_analytics_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "gold_graph_analytics",
+        default_rel="reference_graph_analytics.json",
+    )
+    auto_graph_analytics_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "auto_graph_analytics",
+        default_rel="automatic_graph_analytics.json",
+    )
+    comparison_summary_path = _resolve_bundle_artifact(
+        manifest,
+        bundle_dir,
+        "comparison_summary",
+        default_rel="comparison_summary.json",
+    )
+
     records: list[dict[str, Any]] = []
-    records.extend(_normalize_assertions(_read_rows(manifest.get("gold_triplets_csv") or bundle_dir / "reference_triplets.csv"), "gold"))
-    auto_triplets = manifest.get("auto_triplets_csv")
-    if auto_triplets:
-        records.extend(_normalize_assertions(_read_rows(auto_triplets), "auto"))
+    if gold_triplets_path is not None:
+        records.extend(_normalize_assertions(_read_rows(gold_triplets_path), "gold"))
+    if auto_triplets_path is not None:
+        records.extend(_normalize_assertions(_read_rows(auto_triplets_path), "auto"))
 
     app_data = {
         "meta": {
@@ -1314,19 +1424,19 @@ def build_task2_offline_review_package(
         "filter_defaults": manifest.get("filter_defaults") or {"importance_threshold": 0.0, "exclusion_rules": {}},
         "excluded_papers": _safe_json_load(Path(bundle_dir / "excluded_papers.json")) if (bundle_dir / "excluded_papers.json").exists() else [],
         "graph_analytics": {
-            "gold": _safe_json_load(Path(manifest["gold_graph_analytics"])) if manifest.get("gold_graph_analytics") and Path(manifest["gold_graph_analytics"]).exists() else {},
-            "auto": _safe_json_load(Path(manifest["auto_graph_analytics"])) if manifest.get("auto_graph_analytics") and Path(manifest["auto_graph_analytics"]).exists() else {},
+            "gold": _safe_json_load(gold_graph_analytics_path) if gold_graph_analytics_path is not None else {},
+            "auto": _safe_json_load(auto_graph_analytics_path) if auto_graph_analytics_path is not None else {},
         },
         "graph_html_paths": {
-            "gold": str(manifest.get("gold_graph_html") or ""),
-            "auto": str(manifest.get("auto_graph_html") or ""),
+            "gold": str(gold_graph_html_path or ""),
+            "auto": str(auto_graph_html_path or ""),
         },
         "records": records,
         "graphs": {
-            "gold": _safe_json_load(Path(manifest["gold_graph"])) if manifest.get("gold_graph") and Path(manifest["gold_graph"]).exists() else {},
-            "auto": _safe_json_load(Path(manifest["auto_graph_json"])) if manifest.get("auto_graph_json") and Path(manifest["auto_graph_json"]).exists() else {},
+            "gold": _safe_json_load(gold_graph_path) if gold_graph_path is not None else {},
+            "auto": _safe_json_load(auto_graph_path) if auto_graph_path is not None else {},
         },
-        "comparison_summary": _safe_json_load(Path(manifest["comparison_summary"])) if manifest.get("comparison_summary") and Path(manifest["comparison_summary"]).exists() else None,
+        "comparison_summary": _safe_json_load(comparison_summary_path) if comparison_summary_path is not None else None,
     }
 
     app_json = json.dumps(app_data, ensure_ascii=False).replace("</", "<\\/")
