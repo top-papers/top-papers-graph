@@ -90,25 +90,38 @@ def networkx_from_payload(payload: Dict[str, Any]):
     return G
 
 
+def _strip_self_loops_for_metrics(graph):
+    import networkx as nx
+
+    metric_graph = graph.copy()
+    self_loops = list(nx.selfloop_edges(metric_graph))
+    if self_loops:
+        metric_graph.remove_edges_from(self_loops)
+    return metric_graph, len(self_loops)
+
+
 def compute_graph_analytics(payload: Dict[str, Any], *, top_k: int = 20, max_cliques: int = 30) -> Dict[str, Any]:
     import networkx as nx
 
     G = networkx_from_payload(payload)
     H = G.to_undirected() if hasattr(G, 'to_undirected') else G
+    G_metrics, directed_self_loop_count = _strip_self_loops_for_metrics(G)
+    H_metrics, undirected_self_loop_count = _strip_self_loops_for_metrics(H)
+    self_loop_count = max(int(directed_self_loop_count), int(undirected_self_loop_count))
 
-    pagerank = nx.pagerank(G) if G.number_of_nodes() else {}
-    degree = nx.degree_centrality(H) if H.number_of_nodes() > 1 else {n: 0.0 for n in H.nodes()}
-    betweenness = nx.betweenness_centrality(H, normalized=True) if H.number_of_nodes() > 1 else {n: 0.0 for n in H.nodes()}
-    closeness = nx.closeness_centrality(H) if H.number_of_nodes() > 1 else {n: 0.0 for n in H.nodes()}
-    core_numbers = nx.core_number(H) if H.number_of_nodes() and H.number_of_edges() else {n: 0 for n in H.nodes()}
+    pagerank = nx.pagerank(G_metrics) if G_metrics.number_of_nodes() else {}
+    degree = nx.degree_centrality(H_metrics) if H_metrics.number_of_nodes() > 1 else {n: 0.0 for n in H_metrics.nodes()}
+    betweenness = nx.betweenness_centrality(H_metrics, normalized=True) if H_metrics.number_of_nodes() > 1 else {n: 0.0 for n in H_metrics.nodes()}
+    closeness = nx.closeness_centrality(H_metrics) if H_metrics.number_of_nodes() > 1 else {n: 0.0 for n in H_metrics.nodes()}
+    core_numbers = nx.core_number(H_metrics) if H_metrics.number_of_nodes() and H_metrics.number_of_edges() else {n: 0 for n in H_metrics.nodes()}
 
     communities_raw = []
     modularity = None
-    if H.number_of_nodes() and H.number_of_edges():
+    if H_metrics.number_of_nodes() and H_metrics.number_of_edges():
         try:
-            communities_raw = list(nx.algorithms.community.greedy_modularity_communities(H))
+            communities_raw = list(nx.algorithms.community.greedy_modularity_communities(H_metrics))
             if communities_raw:
-                modularity = float(nx.algorithms.community.modularity(H, communities_raw))
+                modularity = float(nx.algorithms.community.modularity(H_metrics, communities_raw))
         except Exception:
             communities_raw = []
 
@@ -121,15 +134,15 @@ def compute_graph_analytics(payload: Dict[str, Any], *, top_k: int = 20, max_cli
         communities.append({'community_id': idx, 'size': len(sorted_members), 'nodes': sorted_members[:80]})
 
     cliques: List[Dict[str, Any]] = []
-    if H.number_of_nodes() and H.number_of_edges():
+    if H_metrics.number_of_nodes() and H_metrics.number_of_edges():
         try:
-            found = sorted((sorted(list(c)) for c in nx.find_cliques(H)), key=lambda c: (len(c), c), reverse=True)
+            found = sorted((sorted(list(c)) for c in nx.find_cliques(H_metrics)), key=lambda c: (len(c), c), reverse=True)
             for clique in found[:max_cliques]:
                 cliques.append({'size': len(clique), 'nodes': clique[:80]})
         except Exception:
             cliques = []
 
-    components_raw = list(nx.connected_components(H)) if H.number_of_nodes() else []
+    components_raw = list(nx.connected_components(H_metrics)) if H_metrics.number_of_nodes() else []
     components = [
         {'component_id': idx, 'size': len(comp), 'nodes': sorted(str(x) for x in list(comp)[:80])}
         for idx, comp in enumerate(sorted(components_raw, key=lambda c: len(c), reverse=True), start=1)
@@ -164,14 +177,15 @@ def compute_graph_analytics(payload: Dict[str, Any], *, top_k: int = 20, max_cli
     summary = {
         'node_count': int(G.number_of_nodes()),
         'edge_count': int(G.number_of_edges()),
-        'density': round(float(nx.density(H)) if H.number_of_nodes() > 1 else 0.0, 6),
+        'self_loop_count': self_loop_count,
+        'density': round(float(nx.density(H_metrics)) if H_metrics.number_of_nodes() > 1 else 0.0, 6),
         'is_directed': bool(G.is_directed()),
         'component_count': len(components),
         'largest_component_size': int(max((c['size'] for c in components), default=0)),
         'community_count': len(communities),
         'modularity': round(float(modularity), 6) if modularity is not None else None,
         'largest_clique_size': int(max((c['size'] for c in cliques), default=0)),
-        'average_clustering': round(float(nx.average_clustering(H)) if H.number_of_nodes() > 1 and H.number_of_edges() else 0.0, 6),
+        'average_clustering': round(float(nx.average_clustering(H_metrics)) if H_metrics.number_of_nodes() > 1 and H_metrics.number_of_edges() else 0.0, 6),
     }
 
     return {

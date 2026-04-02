@@ -6,3 +6,4 @@
 - `src/scireason/temporal/temporal_triplet_extractor.py`: невалидные не-словарные ответы LLM теперь игнорируются, а пустые триплеты фильтруются перед возвратом.
 - `tests/test_task2_pipeline_regressions.py`: добавлен регрессионный тест на нестроковые поля триплета.
 - `task2_temporal_graph_validation.ipynb` и `notebooks/task2_temporal_graph_validation_colab.ipynb`: обновлены на версию с отдельной исполняемой ячейкой запуска и compatibility patch для схем Task 2.
+Self-loop analytics fix: Task2 graph analytics now remove self-loop edges before NetworkX core/community/clique computations, preventing NetworkXNotImplemented during bundle generation.
