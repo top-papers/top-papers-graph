@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import yaml  # type: ignore
 
 from .task2_offline_review import build_task2_offline_review_package
-from .task2_graph_viz import compute_graph_analytics, networkx_from_payload, write_graph_html
+from .task2_graph_viz import build_interactive_graph_view, compute_graph_analytics, networkx_from_payload, write_graph_html
 from .task2_filters import score_triplet_importance, topic_profile_from_doc, serialize_exclusion_spec, normalize_exclusion_spec
 from .pipeline.task2_validation import (
     build_reference_graph,
@@ -90,29 +90,12 @@ def _write_triplets_csv(json_path: Path, csv_path: Path) -> Path:
 
 
 def make_hvplot_payload(payload: Dict[str, Any]) -> Tuple[Any, Any]:
-    G = networkx_from_payload(payload)
+    analytics = {}
     try:
-        import hvplot.networkx as hvnx  # noqa: F401
-        import networkx as nx
-
-        node_colors = [str(attrs.get("viz_color") or "#9aa5b1") for _, attrs in G.nodes(data=True)]
-        edge_colors = [str(attrs.get("viz_color") or "#94a3b8") for _, _, attrs in G.edges(data=True)]
-        pos = nx.spring_layout(G, seed=7, k=0.9 / max(1, G.number_of_nodes() ** 0.5))
-        plot = hvnx.draw(
-            G,
-            pos,
-            node_size=14,
-            node_color=node_colors,
-            edge_color=edge_colors,
-            with_labels=False,
-            arrowhead_length=0.012,
-            edge_line_width=1.2,
-            width=950,
-            height=650,
-        ).opts(bgcolor="#ffffff")
-        return G, plot
+        analytics = compute_graph_analytics(payload) if payload else {}
     except Exception:
-        return G, None
+        analytics = {}
+    return build_interactive_graph_view(payload, analytics=analytics, title='Интерактивный граф')
 
 
 def _score_triplet_rows(rows: list[dict[str, Any]], doc: Dict[str, Any], *, analytics: Dict[str, Any] | None = None) -> list[dict[str, Any]]:

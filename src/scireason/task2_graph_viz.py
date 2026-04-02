@@ -218,6 +218,186 @@ def _spring_positions(payload: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
     return out
 
 
+
+
+
+def _short_text(value: Any, limit: int = 42) -> str:
+    text = ' '.join(str(value or '').split())
+    return text if len(text) <= limit else text[: limit - 1] + '…'
+
+
+def build_interactive_graph_view(
+    payload: Dict[str, Any],
+    *,
+    analytics: Dict[str, Any] | None = None,
+    title: str = 'Интерактивный граф',
+    width: int = 980,
+    height: int = 680,
+):
+    """Return a Panel-based interactive graph view backed by hvPlot/Bokeh.
+
+    Falls back to ``None`` when optional notebook visualization dependencies are
+    unavailable so callers can keep the older HTML/SVG path.
+    """
+    G = networkx_from_payload(payload)
+    try:
+        import networkx as nx
+        import holoviews as hv
+        import hvplot.networkx as hvnx  # noqa: F401
+        import panel as pn
+        import pandas as pd
+    except Exception:
+        return G, None
+
+    hv.extension('bokeh')
+    try:
+        pn.extension(sizing_mode='stretch_width')
+    except Exception:
+        pass
+
+    analytics = analytics or compute_graph_analytics(payload)
+    node_metrics = analytics.get('node_metrics') or {}
+    communities = analytics.get('communities') or []
+    cliques = analytics.get('cliques') or []
+    summary = analytics.get('summary') or {}
+
+    if G.number_of_nodes():
+        try:
+            pos = nx.spring_layout(G.to_undirected(), seed=7, k=0.95 / max(1, G.number_of_nodes() ** 0.5))
+        except Exception:
+            pos = nx.spring_layout(G, seed=7)
+    else:
+        pos = {}
+
+    pagerank_max = max((float((node_metrics.get(str(node_id)) or {}).get('pagerank') or 0.0) for node_id in G.nodes()), default=0.0)
+    pagerank_max = max(pagerank_max, 1e-9)
+
+    for node_id, attrs in G.nodes(data=True):
+        metrics = node_metrics.get(str(node_id)) or {}
+        full_label = str(attrs.get('label') or attrs.get('term') or node_id)
+        attrs['node_id'] = str(node_id)
+        attrs['full_label'] = full_label
+        attrs['short_label'] = _short_text(full_label, 30)
+        attrs['group'] = str(attrs.get('viz_group') or attrs.get('type') or 'default')
+        attrs['community_id'] = '' if metrics.get('community_id') in (None, '') else str(metrics.get('community_id'))
+        attrs['pagerank'] = float(metrics.get('pagerank') or 0.0)
+        attrs['degree'] = float(metrics.get('degree') or 0.0)
+        attrs['betweenness'] = float(metrics.get('betweenness') or 0.0)
+        attrs['closeness'] = float(metrics.get('closeness') or 0.0)
+        attrs['core_number'] = int(metrics.get('core_number') or 0)
+        attrs['node_fill_color'] = str(attrs.get('viz_color') or balanced_graph_palette()['default'])
+        attrs['node_size'] = float(18.0 + 42.0 * attrs['pagerank'] / pagerank_max)
+
+    for src, tgt, attrs in G.edges(data=True):
+        attrs['start_label'] = str(G.nodes[src].get('full_label') or src)
+        attrs['end_label'] = str(G.nodes[tgt].get('full_label') or tgt)
+        attrs['edge_label'] = str(attrs.get('predicate') or attrs.get('label') or '')
+        attrs['confidence'] = float(attrs.get('confidence') or 0.0)
+        attrs['edge_line_color'] = str(attrs.get('viz_color') or balanced_graph_palette()['edge'])
+        attrs['edge_width'] = 1.2 + min(2.2, attrs['confidence'] * 2.0)
+
+    graph = hvnx.draw(
+        G,
+        pos,
+        with_labels=False,
+        node_color='node_fill_color',
+        edge_color='edge_line_color',
+        node_size='node_size',
+        edge_line_width='edge_width',
+        arrows=bool(getattr(G, 'is_directed', lambda: False)()),
+        arrowhead_length=0.018,
+        width=width,
+        height=height,
+    ).opts(
+        bgcolor='#ffffff',
+        responsive=False,
+        xaxis=None,
+        yaxis=None,
+        padding=0.08,
+        show_frame=False,
+        tools=['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save', 'tap', 'hover'],
+        active_tools=['wheel_zoom'],
+        toolbar='above',
+        hover_tooltips=[
+            ('Node', '@full_label'),
+            ('Type', '@group'),
+            ('Community', '@community_id'),
+            ('PageRank', '@pagerank{0.0000}'),
+            ('Degree', '@degree{0.0000}'),
+            ('Betweenness', '@betweenness{0.0000}'),
+            ('Closeness', '@closeness{0.0000}'),
+            ('K-core', '@core_number'),
+        ],
+        inspection_policy='nodes',
+    )
+
+    label_nodes = [
+        (node_id, float((node_metrics.get(str(node_id)) or {}).get('pagerank') or 0.0))
+        for node_id in G.nodes()
+    ]
+    label_nodes = [node_id for node_id, _ in sorted(label_nodes, key=lambda item: item[1], reverse=True)[: min(14, G.number_of_nodes())]]
+    if label_nodes:
+        label_rows = [
+            {
+                'x': float(pos[node_id][0]),
+                'y': float(pos[node_id][1]),
+                'text': str(G.nodes[node_id].get('short_label') or node_id),
+            }
+            for node_id in label_nodes
+            if node_id in pos
+        ]
+        labels = hv.Labels(pd.DataFrame(label_rows), kdims=['x', 'y'], vdims=['text']).opts(
+            text_font_size='9pt',
+            text_color='#0f172a',
+            xoffset=6,
+            yoffset=6,
+        )
+        graph = graph * labels
+
+    summary_md = "\n".join([
+        f"### {title}",
+        "",
+        f"- Nodes: **{summary.get('node_count', G.number_of_nodes())}**",
+        f"- Edges: **{summary.get('edge_count', G.number_of_edges())}**",
+        f"- Communities: **{summary.get('community_count', 0)}**",
+        f"- Largest clique: **{summary.get('largest_clique_size', 0)}**",
+        f"- Density: **{summary.get('density', 0)}**",
+        "",
+        "Наводите курсор на узлы, используйте zoom/pan в toolbar и кнопку Save для сохранения текущего интерактивного вида.",
+    ])
+
+    def _df(rows: List[Dict[str, Any]], columns: List[str]) -> Any:
+        if not rows:
+            return pn.pane.Markdown('_Нет данных_')
+        frame = pd.DataFrame(rows)
+        keep = [col for col in columns if col in frame.columns]
+        frame = frame[keep] if keep else frame
+        return pn.pane.DataFrame(frame, sizing_mode='stretch_width', index=False, height=260)
+
+    centrality_rows: List[Dict[str, Any]] = []
+    for metric_name in ('pagerank', 'degree', 'betweenness', 'closeness'):
+        for row in (analytics.get('centrality') or {}).get(metric_name, [])[:12]:
+            centrality_rows.append({
+                'metric': metric_name,
+                'label': row.get('label') or row.get('node_id'),
+                'score': row.get('score'),
+                'community_id': row.get('community_id'),
+                'group': row.get('group'),
+            })
+
+    tabs = pn.Tabs(
+        ('Top nodes', _df(centrality_rows, ['metric', 'label', 'score', 'community_id', 'group'])),
+        ('Communities', _df(communities, ['community_id', 'size', 'nodes'])),
+        ('Cliques', _df(cliques[:20], ['size', 'nodes'])),
+        dynamic=False,
+    )
+
+    sidebar = pn.Column(
+        pn.pane.Markdown(summary_md, sizing_mode='stretch_width'),
+        tabs,
+        width=360,
+    )
+    return G, pn.Row(sidebar, graph, sizing_mode='stretch_width')
 def write_graph_analytics_json(graph_json_path: Path, analytics_path: Path) -> Path:
     payload = json.loads(graph_json_path.read_text(encoding='utf-8'))
     analytics = compute_graph_analytics(payload)
@@ -430,11 +610,20 @@ def _build_graph_html(payload: Dict[str, Any], analytics: Dict[str, Any], title:
 </html>'''
 
 
+
+
 def write_graph_html(graph_json_path: Path, html_path: Path, *, analytics_path: Path | None = None) -> Path:
     payload = json.loads(graph_json_path.read_text(encoding='utf-8'))
     analytics = compute_graph_analytics(payload)
     if analytics_path is not None:
         analytics_path.write_text(json.dumps(analytics, ensure_ascii=False, indent=2), encoding='utf-8')
     title = graph_json_path.stem.replace('_', ' ')
+    G, interactive_view = build_interactive_graph_view(payload, analytics=analytics, title=title)
+    if interactive_view is not None:
+        try:
+            interactive_view.save(html_path, resources='inline', embed=False, title=title)
+            return html_path
+        except Exception:
+            pass
     html_path.write_text(_build_graph_html(payload, analytics, title), encoding='utf-8')
     return html_path
