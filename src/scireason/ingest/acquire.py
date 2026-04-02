@@ -169,7 +169,7 @@ def _known_pdf_candidates_from_url(url: str) -> tuple[str, ...]:
         out.append(raw)
 
     if host.endswith("wikipedia.org"):
-        return tuple(dedup)
+        return tuple()
 
     if host.endswith("aclanthology.org") and path and not path.lower().endswith(".pdf"):
         out.append(raw.rstrip("/") + ".pdf")

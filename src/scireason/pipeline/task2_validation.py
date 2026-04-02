@@ -35,6 +35,26 @@ OPENALEX_RE = re.compile(r"(?:openalex\.org/)?(W\d+)", re.IGNORECASE)
 PMID_RE = re.compile(r"(?:pubmed(?:\.ncbi\.nlm\.nih\.gov)?/)?(\d{5,10})", re.IGNORECASE)
 PMCID_RE = re.compile(r"(PMC\d+)", re.IGNORECASE)
 DATE_TOKEN_RE = re.compile(r"^(?:\d{4}|\d{4}-\d{2}|\d{4}-\d{2}-\d{2}|unknown|\+inf|-inf)$")
+GENERIC_REFERENCE_HOST_SUFFIXES = (
+    'wikipedia.org',
+    'wikidata.org',
+    'dbpedia.org',
+)
+
+
+def _should_skip_remote_lookup_for_entry(entry: Dict[str, Any]) -> bool:
+    raw_id = str(entry.get('id') or '').strip()
+    if not raw_id or not _looks_like_url(raw_id):
+        return False
+    if any((_extract_doi(raw_id), _extract_arxiv(raw_id), _extract_openalex(raw_id), _extract_pmid(raw_id), _extract_pmcid(raw_id))):
+        return False
+    try:
+        host = urlparse(raw_id).netloc.lower()
+    except Exception:
+        host = ''
+    if any(host.endswith(suffix) for suffix in GENERIC_REFERENCE_HOST_SUFFIXES):
+        return True
+    return False
 
 
 def _emit_progress(
@@ -495,8 +515,9 @@ def resolve_papers_from_trajectory(
             })
         if not isinstance(entry, dict):
             continue
-        meta = _resolve_entry_by_exact_identifier(entry, enable_remote_lookup=enable_remote_lookup)
-        if meta is None and enable_remote_lookup:
+        skip_remote_lookup = _should_skip_remote_lookup_for_entry(entry)
+        meta = _resolve_entry_by_exact_identifier(entry, enable_remote_lookup=enable_remote_lookup and not skip_remote_lookup)
+        if meta is None and enable_remote_lookup and not skip_remote_lookup:
             title = str(entry.get("title") or "").strip()
             if title:
                 try:
