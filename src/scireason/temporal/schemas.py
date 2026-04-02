@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha1
+import json
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -51,6 +52,40 @@ def normalize_granularity(value: Any, *, start: Any = None, end: Any = None, def
     if start not in (None, "") or end not in (None, ""):
         return "interval"
     return default
+
+
+def _stringify_text_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    if isinstance(value, (list, tuple, set)):
+        parts = [_stringify_text_value(item) for item in value]
+        return "; ".join(part for part in parts if part)
+    if isinstance(value, dict):
+        for key in ("text", "label", "name", "title", "value", "subject", "predicate", "object", "id"):
+            if key in value:
+                text = _stringify_text_value(value.get(key))
+                if text:
+                    return text
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            return str(value).strip()
+    return str(value).strip()
+
+
+def _normalize_required_text(value: Any) -> str:
+    return _stringify_text_value(value)
+
+
+def _normalize_optional_text(value: Any) -> Optional[str]:
+    text = _stringify_text_value(value)
+    return text or None
+
+
 EventSplit = Literal["train", "valid", "test"]
 EventType = Literal["extracted", "reviewed", "corrected"]
 
@@ -71,6 +106,8 @@ class TimeInterval(BaseModel):
         if not isinstance(data, dict):
             return data
         payload = dict(data)
+        payload["start"] = _normalize_optional_text(payload.get("start"))
+        payload["end"] = _normalize_optional_text(payload.get("end"))
         payload["granularity"] = normalize_granularity(
             payload.get("granularity"),
             start=payload.get("start"),
@@ -90,6 +127,21 @@ class TemporalTriplet(BaseModel):
     predicate: str
     object: str
     confidence: float = Field(ge=0.0, le=1.0, default=0.6)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_input(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        payload["subject"] = _normalize_required_text(payload.get("subject"))
+        payload["predicate"] = _normalize_required_text(payload.get("predicate"))
+        payload["object"] = _normalize_required_text(payload.get("object"))
+        payload["evidence_quote"] = _normalize_optional_text(payload.get("evidence_quote"))
+        time_payload = payload.get("time")
+        if isinstance(time_payload, dict):
+            payload["time"] = dict(time_payload)
+        return payload
     polarity: Literal["supports", "contradicts", "unknown"] = "unknown"
     time: Optional[TimeInterval] = None
     time_source: Literal["extracted", "paper_year_fallback"] = "extracted"
@@ -131,6 +183,12 @@ class TemporalEvent(BaseModel):
         if not isinstance(data, dict):
             return data
         payload = dict(data)
+        payload["subject"] = _normalize_required_text(payload.get("subject"))
+        payload["predicate"] = _normalize_required_text(payload.get("predicate"))
+        payload["object"] = _normalize_required_text(payload.get("object"))
+        payload["ts_start"] = _normalize_optional_text(payload.get("ts_start"))
+        payload["ts_end"] = _normalize_optional_text(payload.get("ts_end"))
+        payload["evidence_quote"] = _normalize_optional_text(payload.get("evidence_quote"))
         payload["granularity"] = normalize_granularity(
             payload.get("granularity"),
             start=payload.get("ts_start"),

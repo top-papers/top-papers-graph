@@ -8,6 +8,8 @@ src/scireason/domain.py
 src/scireason/llm.py
 src/scireason/schemas.py
 src/scireason/task1_offline_form.py
+src/scireason/task2_filters.py
+src/scireason/task2_graph_viz.py
 src/scireason/task2_offline_review.py
 src/scireason/task2_validation.py
 src/scireason/agentic/code_agent.py
@@ -68,7 +70,16 @@ src/scireason/ingest/tei_to_text.py
 src/scireason/integrations/__init__.py
 src/scireason/integrations/top_papers_import.py
 src/scireason/mcp/__init__.py
+src/scireason/mcp/config.py
+src/scireason/mcp/decorators.py
+src/scireason/mcp/manual.py
+src/scireason/mcp/registry.py
+src/scireason/mcp/runtime.py
 src/scireason/mcp/server.py
+src/scireason/mcp/specs.py
+src/scireason/mcp/toolsets/__init__.py
+src/scireason/mcp/toolsets/demo.py
+src/scireason/mcp/toolsets/papers.py
 src/scireason/mm/__init__.py
 src/scireason/mm/mm_embed.py
 src/scireason/mm/pdf_mm_extract.py
@@ -131,6 +142,7 @@ tests/test_task2_notebook_compat.py
 tests/test_task2_notebook_full_pipeline_guard.py
 tests/test_task2_out_of_box_defaults.py
 tests/test_task2_pdf_resolution.py
+tests/test_task2_pipeline_regressions.py
 tests/test_task2_progress_and_timeout.py
 tests/test_task2_vlm_fallback.py
 tests/test_task2_vlm_local_runtime_guard.py

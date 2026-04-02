@@ -168,6 +168,9 @@ def _known_pdf_candidates_from_url(url: str) -> tuple[str, ...]:
     if _looks_like_pdf_url(raw):
         out.append(raw)
 
+    if host.endswith("wikipedia.org"):
+        return tuple(dedup)
+
     if host.endswith("aclanthology.org") and path and not path.lower().endswith(".pdf"):
         out.append(raw.rstrip("/") + ".pdf")
 
@@ -272,6 +275,15 @@ def candidate_pdf_urls(paper: PaperMetadata) -> List[str]:
         add(raw)
 
     add(paper.pdf_url)
+
+    primary_url = str(paper.url or (paper.id if str(paper.id or '').startswith(("http://", "https://")) else '') or '').strip()
+    if primary_url:
+        try:
+            primary_host = urlparse(primary_url).netloc.lower()
+        except Exception:
+            primary_host = ''
+        if primary_host.endswith('wikipedia.org') and not _looks_like_pdf_url(primary_url):
+            return urls
 
     doi = None
     pmcid = None

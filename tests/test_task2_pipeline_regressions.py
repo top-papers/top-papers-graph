@@ -218,3 +218,46 @@ def test_extract_temporal_triplets_normalizes_interval_granularity(monkeypatch) 
     assert rows[0].time.granularity == "interval"
     assert rows[0].time.start == "2020"
     assert rows[0].time.end == "2022"
+
+
+
+def test_extract_temporal_triplets_coerces_non_string_triplet_fields_and_skips_empty_rows(monkeypatch) -> None:
+    from scireason.temporal import temporal_triplet_extractor as extractor
+
+    monkeypatch.setattr(extractor.settings, "llm_provider", "g4f")
+    monkeypatch.setattr(extractor, "temporary_llm_selection", lambda **kwargs: __import__("contextlib").nullcontext())
+    monkeypatch.setattr(
+        extractor,
+        "chat_json",
+        lambda **kwargs: [
+            {
+                "subject": {"name": "temporal graph network"},
+                "predicate": b"improves",
+                "object": ["forecast accuracy", "latency stability"],
+                "confidence": 0.9,
+                "polarity": "supports",
+                "evidence_quote": ["improves", "forecast accuracy"],
+                "time": {"start": 2020, "end": 2022, "granularity": "range"},
+            },
+            {
+                "subject": None,
+                "predicate": None,
+                "object": None,
+                "confidence": 0.4,
+                "polarity": "unknown",
+            },
+            "unexpected raw row",
+        ],
+    )
+
+    rows = extractor.extract_temporal_triplets(domain="science", chunk_text="demo text", paper_year=2022)
+
+    assert len(rows) == 1
+    assert rows[0].subject == "temporal graph network"
+    assert rows[0].predicate == "improves"
+    assert rows[0].object == "forecast accuracy; latency stability"
+    assert rows[0].evidence_quote == "improves; forecast accuracy"
+    assert rows[0].time is not None
+    assert rows[0].time.start == "2020"
+    assert rows[0].time.end == "2022"
+    assert rows[0].time.granularity == "interval"

@@ -208,7 +208,6 @@ def extract_temporal_triplets(
                 normalized = []
                 for item in data:
                     if not isinstance(item, dict):
-                        normalized.append(item)
                         continue
                     row = dict(item)
                     time_obj = row.get("time")
@@ -234,4 +233,8 @@ def extract_temporal_triplets(
                 t.time_source = 'paper_year_fallback'
             elif not getattr(t, 'time_source', None):
                 t.time_source = 'extracted'
+    triplets = [
+        t for t in triplets
+        if t.subject.strip() and t.predicate.strip() and t.object.strip()
+    ]
     return triplets
