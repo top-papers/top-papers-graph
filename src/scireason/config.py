@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     g4f_api_key: str | None = None
     task2_default_g4f_model: str = "r1-1776"
     task2_default_local_vlm_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    llm_request_timeout_seconds: int = 25
+    g4f_async_enabled: bool = True
+    g4f_async_max_concurrency: int = 3
+    g4f_async_retries: int = 3
+    g4f_async_retry_backoff_seconds: float = 1.0
+    g4f_async_retry_backoff_max_seconds: float = 8.0
+    g4f_async_max_models_per_request: int = 3
 
     # ===== Embeddings =====
     embed_provider: str = "hash"  # hash|sentence-transformers|openai|ollama|...

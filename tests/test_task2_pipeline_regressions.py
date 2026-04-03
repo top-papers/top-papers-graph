@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -34,6 +35,7 @@ def test_build_temporal_kg_passes_explicit_llm_override_to_triplet_extractor(mon
         ]
 
     monkeypatch.setattr("scireason.temporal.temporal_kg_builder.extract_temporal_triplets", _fake_extract)
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.settings.g4f_async_enabled", False)
 
     kg = build_temporal_kg(
         [PaperRecord(paper_id="p1", title="Demo", year=2024, text="Graph neural networks improve link prediction.")],
@@ -261,3 +263,86 @@ def test_extract_temporal_triplets_coerces_non_string_triplet_fields_and_skips_e
     assert rows[0].time.start == "2020"
     assert rows[0].time.end == "2022"
     assert rows[0].time.granularity == "interval"
+
+
+def test_build_temporal_kg_keeps_trying_async_g4f_before_fallback(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def _fake_extract_async(*, chunk_text, **kwargs):
+        calls.append(chunk_text)
+        raise TimeoutError("synthetic timeout")
+
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.extract_temporal_triplets_async", _fake_extract_async)
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.settings.g4f_async_enabled", True)
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.settings.g4f_async_max_concurrency", 2)
+
+    paper = PaperRecord(
+        paper_id="p-timeout",
+        title="Demo",
+        year=2024,
+        text="timeout demo",
+        evidence_units=[
+            PaperEvidenceUnit(unit_id="u1", text="graph signal improves forecast accuracy in production", source_kind="text_chunk"),
+            PaperEvidenceUnit(unit_id="u2", text="temporal model improves latency stability for deployment", source_kind="text_chunk"),
+        ],
+    )
+
+    kg = build_temporal_kg([paper], domain=load_domain_config("science"), query="demo", edge_mode="auto", llm_provider="g4f")
+
+    assert calls == [
+        "graph signal improves forecast accuracy in production",
+        "temporal model improves latency stability for deployment",
+    ]
+    assert kg.meta["g4f_async_batch"] is True
+    assert kg.meta["llm_disabled_after_timeout"] is False
+    assert kg.meta["llm_failures"] == 2
+    assert kg.meta["localized_fallbacks"] >= 2
+    assert any(edge.predicate == "cooccurs_with" for edge in kg.edges)
+
+
+def test_build_temporal_kg_async_g4f_respects_semaphore_limit(monkeypatch) -> None:
+    active = 0
+    max_active = 0
+
+    async def _fake_extract_async(*, chunk_text, semaphore=None, **kwargs):
+        nonlocal active, max_active
+        assert semaphore is not None
+        async with semaphore:
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+        return [
+            TemporalTriplet(
+                subject=chunk_text.split()[0],
+                predicate="improves",
+                object="accuracy",
+                confidence=0.9,
+                polarity="supports",
+                evidence_quote=chunk_text,
+                time=TimeInterval(start="2024", end="2024", granularity="year"),
+            )
+        ]
+
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.extract_temporal_triplets_async", _fake_extract_async)
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.settings.g4f_async_enabled", True)
+    monkeypatch.setattr("scireason.temporal.temporal_kg_builder.settings.g4f_async_max_concurrency", 2)
+
+    paper = PaperRecord(
+        paper_id="p-async",
+        title="Demo Async",
+        year=2024,
+        text="demo",
+        evidence_units=[
+            PaperEvidenceUnit(unit_id="u1", text="alpha improves forecast accuracy", source_kind="text_chunk"),
+            PaperEvidenceUnit(unit_id="u2", text="beta improves forecast accuracy", source_kind="text_chunk"),
+            PaperEvidenceUnit(unit_id="u3", text="gamma improves forecast accuracy", source_kind="text_chunk"),
+        ],
+    )
+
+    kg = build_temporal_kg([paper], domain=load_domain_config("science"), query="demo", edge_mode="auto", llm_provider="g4f")
+
+    assert kg.meta["g4f_async_batch"] is True
+    assert kg.meta["g4f_async_max_concurrency"] == 2
+    assert max_active <= 2
+    assert any(edge.predicate == "improves" for edge in kg.edges)

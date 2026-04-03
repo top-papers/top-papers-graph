@@ -159,16 +159,15 @@ def test_offline_review_package_embedded_script_is_valid_javascript(tmp_path: Pa
 
 def test_notebook_defaults_to_g4f_and_has_draft_controls() -> None:
     nb = nbformat.read("notebooks/task2_temporal_graph_validation_colab.ipynb", as_version=4)
-    cell3 = nb.cells[3].source
-    cell4 = nb.cells[4].source
+    joined = "\n\n".join(cell.source for cell in nb.cells)
 
-    assert "save_task2_review_state" in nb.cells[2].source
-    assert "('g4f (default)', 'g4f')" in cell4
-    assert "value='g4f'" in cell4
-    assert "Сохранить черновик" in cell3
-    assert "Загрузить черновик" in cell3
-    assert "Автосохранение черновика" in cell3
-    assert "Скачать автономную форму" in cell3
+    assert "save_task2_review_state" in joined
+    assert "('g4f (default)', 'g4f')" in joined
+    assert "value='g4f'" in joined
+    assert "Сохранить черновик" in joined
+    assert "Загрузить черновик" in joined
+    assert "Автосохранение черновика" in joined
+    assert "Скачать автономную форму" in joined
 
 
 def test_offline_review_package_supports_runtime_manifest_artifacts_layout(tmp_path: Path) -> None:

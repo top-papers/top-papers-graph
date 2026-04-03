@@ -13,6 +13,7 @@ We support two extraction backends:
 Both backends produce a unified in-memory representation that can be exported to JSON.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 import json
 import math
@@ -23,7 +24,9 @@ from rich.console import Console
 
 from ..domain import DomainConfig
 from ..temporal.schemas import TemporalTriplet
-from ..temporal.temporal_triplet_extractor import extract_temporal_triplets
+from ..config import settings
+from ..llm import _resolve_llm_selection
+from ..temporal.temporal_triplet_extractor import extract_temporal_triplets, extract_temporal_triplets_async
 from .term_extraction import TermCandidate, extract_terms_rake
 
 
@@ -355,6 +358,61 @@ def _sentences(text: str) -> List[str]:
     return parts if parts else [text]
 
 
+def _run_async_sync(awaitable):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+
+    result: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            result["value"] = asyncio.run(awaitable)
+        except BaseException as exc:  # pragma: no cover - forwarded to caller
+            result["error"] = exc
+
+    import threading
+
+    thread = threading.Thread(target=_worker, name="temporal-kg-async-runner", daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
+
+
+async def _extract_triplets_batch_async(
+    *,
+    domain: DomainConfig,
+    pr: PaperRecord,
+    units: Sequence[PaperEvidenceUnit],
+    llm_provider: Optional[str],
+    llm_model: Optional[str],
+) -> list[tuple[PaperEvidenceUnit, list[TemporalTriplet], Exception | None]]:
+    concurrency = max(1, int(getattr(settings, "g4f_async_max_concurrency", 3) or 3))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _worker(unit: PaperEvidenceUnit):
+        try:
+            triplets = await extract_temporal_triplets_async(
+                domain=domain.title,
+                chunk_text=str(unit.text or ""),
+                paper_year=pr.year,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+                semaphore=semaphore,
+            )
+            return unit, triplets, None
+        except Exception as exc:
+            return unit, [], exc
+
+    tasks = [asyncio.create_task(_worker(unit)) for unit in units if str(unit.text or "").strip()]
+    if not tasks:
+        return []
+    return await asyncio.gather(*tasks)
+
+
 def _apply_expert_overrides(edges: Dict[Tuple[str, str, str], EdgeStats], overrides_path: Optional[Path]) -> None:
     """Adjust edge scores using expert graph reviews compiled into JSONL.
 
@@ -621,6 +679,13 @@ def build_temporal_kg(
     base_mode = "llm_triplets" if edge_mode == "auto" else edge_mode
     llm_failures = 0
     localized_fallbacks = 0
+    llm_disabled_after_timeout = False
+    selected_provider, _selected_model = _resolve_llm_selection(llm_provider=llm_provider, llm_model=llm_model)
+    use_g4f_async_batch = (
+        base_mode == "llm_triplets"
+        and selected_provider == "g4f"
+        and bool(getattr(settings, "g4f_async_enabled", True))
+    )
 
     for pr in papers:
         units = _iter_paper_units(pr)
@@ -628,38 +693,28 @@ def build_temporal_kg(
             continue
         paper_term_set: Set[str] = set()
 
-        for unit in units:
-            unit_text = str(unit.text or "").strip()
-            if not unit_text:
-                continue
-            unit_mode = base_mode
+        if use_g4f_async_batch:
+            batch_results = _run_async_sync(
+                _extract_triplets_batch_async(
+                    domain=domain,
+                    pr=pr,
+                    units=units,
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                )
+            )
+            for unit, triplets, error in batch_results:
+                if error is None and triplets:
+                    _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
+                    continue
 
-            if unit_mode == "llm_triplets":
-                try:
-                    triplets = extract_temporal_triplets(
-                        domain=domain.title,
-                        chunk_text=unit_text,
-                        paper_year=pr.year,
-                        llm_provider=llm_provider,
-                        llm_model=llm_model,
-                    )
-                except Exception as e:
+                localized_fallbacks += 1
+                if error is not None:
                     llm_failures += 1
-                    localized_fallbacks += 1
                     console.print(
-                        f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {e}. "
-                        "Using localized co-occurrence fallback for this evidence unit only.[/yellow]"
+                        f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {error}. "
+                        "Using localized co-occurrence fallback for this evidence unit after async g4f retries.[/yellow]"
                     )
-                    triplets = []
-                    unit_mode = "cooccurrence"
-                else:
-                    if triplets:
-                        _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
-                    else:
-                        localized_fallbacks += 1
-                        unit_mode = "cooccurrence"
-
-            if unit_mode == "cooccurrence":
                 _merge_cooccurrence_into_graph(
                     pr=pr,
                     unit=unit,
@@ -669,6 +724,60 @@ def build_temporal_kg(
                     max_terms_per_paper=max_terms_per_paper,
                     language=language,
                 )
+        else:
+            for unit in units:
+                unit_text = str(unit.text or "").strip()
+                if not unit_text:
+                    continue
+                unit_mode = "cooccurrence" if (base_mode == "llm_triplets" and llm_disabled_after_timeout) else base_mode
+
+                if unit_mode == "llm_triplets":
+                    try:
+                        triplets = extract_temporal_triplets(
+                            domain=domain.title,
+                            chunk_text=unit_text,
+                            paper_year=pr.year,
+                            llm_provider=llm_provider,
+                            llm_model=llm_model,
+                        )
+                    except TimeoutError as e:
+                        llm_failures += 1
+                        localized_fallbacks += 1
+                        llm_disabled_after_timeout = True
+                        console.print(
+                            f"[yellow]Temporal triplets timed out for {pr.paper_id}/{unit.unit_id}: {e}. "
+                            "Disabling LLM triplet extraction for the remaining evidence units and switching to co-occurrence fallback.[/yellow]"
+                        )
+                        triplets = []
+                        unit_mode = "cooccurrence"
+                    except Exception as e:
+                        llm_failures += 1
+                        localized_fallbacks += 1
+                        console.print(
+                            f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {e}. "
+                            "Using localized co-occurrence fallback for this evidence unit only.[/yellow]"
+                        )
+                        triplets = []
+                        unit_mode = "cooccurrence"
+                    else:
+                        if triplets:
+                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
+                        else:
+                            localized_fallbacks += 1
+                            unit_mode = "cooccurrence"
+                elif base_mode == "llm_triplets" and llm_disabled_after_timeout:
+                    localized_fallbacks += 1
+
+                if unit_mode == "cooccurrence":
+                    _merge_cooccurrence_into_graph(
+                        pr=pr,
+                        unit=unit,
+                        domain=domain,
+                        edges=edges,
+                        term_set=paper_term_set,
+                        max_terms_per_paper=max_terms_per_paper,
+                        language=language,
+                    )
 
         if paper_term_set:
             paper_term_sets[pr.paper_id] = paper_term_set
@@ -749,6 +858,9 @@ def build_temporal_kg(
             "years": years_all,
             "localized_fallbacks": localized_fallbacks,
             "llm_failures": llm_failures,
+            "llm_disabled_after_timeout": llm_disabled_after_timeout,
+            "g4f_async_batch": use_g4f_async_batch,
+            "g4f_async_max_concurrency": int(getattr(settings, "g4f_async_max_concurrency", 3) or 3) if use_g4f_async_batch else 0,
             "multimodal_enabled": any(bool(getattr(pr, "multimodal_text", "").strip()) for pr in papers),
         },
     )

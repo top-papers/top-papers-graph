@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
 import os
 import random
 import re
+import threading
 from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
@@ -34,9 +36,10 @@ except Exception:  # pragma: no cover
     litellm = None
 
 try:
-    from g4f.client import Client as G4FClient  # type: ignore
+    from g4f.client import Client as G4FClient, AsyncClient as G4FAsyncClient  # type: ignore
 except Exception:  # pragma: no cover
     G4FClient = None
+    G4FAsyncClient = None
 
 
 def _resolve_auto_provider() -> str:
@@ -655,18 +658,43 @@ def _litellm_kwargs(provider: str | None = None) -> dict:
     return {}
 
 
-@lru_cache(maxsize=1)
-def _g4f_client() -> Any:
-    """Create a g4f client.
+def _resolve_llm_selection(*, llm_provider: str | None = None, llm_model: str | None = None) -> tuple[str, str]:
+    provider = (llm_provider or settings.llm_provider or "").lower().strip() or "auto"
+    if provider == "auto":
+        provider = _resolve_auto_provider()
+    model = str(llm_model or settings.llm_model or "auto").strip() or "auto"
+    return provider, model
 
-    By default we let g4f route per-model to its `best_provider` mapping.
-    Users can still force a provider shortlist via `G4F_PROVIDERS` / settings.
-    """
 
-    if G4FClient is None:  # pragma: no cover
-        raise RuntimeError("g4f не установлен. Установите: pip install g4f")
+def _run_coroutine_sync(awaitable: Any) -> Any:
+    """Run an async coroutine from sync code, even inside notebook environments."""
 
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+
+    result: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            result["value"] = asyncio.run(awaitable)
+        except BaseException as exc:  # pragma: no cover - forwarded to caller
+            result["error"] = exc
+
+    thread = threading.Thread(target=_worker, name="scireason-g4f-async-runner", daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
+
+
+def _g4f_client_kwargs() -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
     api_key = (settings.g4f_api_key or os.getenv("G4F_API_KEY"))
+    if api_key:
+        kwargs["api_key"] = api_key
 
     raw = (settings.g4f_providers or os.getenv("G4F_PROVIDERS") or "").strip()
     if raw:
@@ -677,13 +705,62 @@ def _g4f_client() -> Any:
             names = [x.strip() for x in raw.split(",") if x.strip()]
             providers = [getattr(P, n) for n in names if hasattr(P, n)]
             if providers:
-                return G4FClient(provider=RetryProvider(providers, shuffle=True), api_key=api_key)
+                kwargs["provider"] = RetryProvider(providers, shuffle=True)
         except Exception:
-            # If RetryProvider path fails, fall back to plain client.
             pass
+    return kwargs
 
-    # Default: no provider override; g4f will use the model registry routing.
-    return G4FClient(api_key=api_key)
+
+def _g4f_retry_settings() -> tuple[int, float, float, int]:
+    retries = max(1, int(getattr(settings, "g4f_async_retries", 3) or 3))
+    backoff = float(getattr(settings, "g4f_async_retry_backoff_seconds", 1.0) or 1.0)
+    backoff_max = float(getattr(settings, "g4f_async_retry_backoff_max_seconds", 8.0) or 8.0)
+    max_models = max(1, int(getattr(settings, "g4f_async_max_models_per_request", 3) or 3))
+    return retries, backoff, backoff_max, max_models
+
+
+def _is_retryable_g4f_error(exc: BaseException | None) -> bool:
+    if exc is None:
+        return False
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return True
+    text = f"{type(exc).__name__}: {exc}".lower()
+    markers = (
+        "timeout",
+        "timed out",
+        "temporarily unavailable",
+        "temporarily blocked",
+        "rate limit",
+        "too many requests",
+        "429",
+        "502",
+        "503",
+        "504",
+        "connection",
+        "network",
+        "proxy",
+        "unavailable",
+        "reset by peer",
+    )
+    return any(m in text for m in markers)
+
+
+@lru_cache(maxsize=1)
+def _g4f_client() -> Any:
+    """Create a synchronous g4f client."""
+
+    if G4FClient is None:  # pragma: no cover
+        raise RuntimeError("g4f не установлен. Установите: pip install g4f")
+    return G4FClient(**_g4f_client_kwargs())
+
+
+@lru_cache(maxsize=1)
+def _g4f_async_client() -> Any:
+    """Create an asynchronous g4f client."""
+
+    if G4FAsyncClient is None:  # pragma: no cover
+        raise RuntimeError("g4f AsyncClient недоступен. Установите свежую версию: pip install -U g4f")
+    return G4FAsyncClient(**_g4f_client_kwargs())
 
 
 def _dedup_keep_order(items: list[str]) -> list[str]:
@@ -844,6 +921,86 @@ def _warn_once(key: str) -> None:
     console.print(f"[yellow]{key}[/yellow]")
 
 
+async def _g4f_chat_completion_text_async(
+    *,
+    messages: list[dict[str, Any]],
+    temperature: float,
+    llm_model: str | None = None,
+) -> str:
+    """Call g4f AsyncClient with retries and bounded model fan-out."""
+
+    client = _g4f_async_client()
+    model_req = str(llm_model or settings.llm_model or "auto").strip() or "auto"
+    if model_req.lower() in {"auto", ""}:
+        model_candidates = _g4f_model_candidates() or ["gpt-4o-mini", "gpt-4o", "deepseek-r1"]
+    else:
+        model_candidates = [model_req]
+
+    retries, backoff, backoff_max, max_models = _g4f_retry_settings()
+    timeout_seconds = float(getattr(settings, "llm_request_timeout_seconds", 25) or 25)
+
+    last_err: Exception | None = None
+    for mname in model_candidates[:max_models]:
+        for attempt in range(1, retries + 1):
+            try:
+                coro = client.chat.completions.create(
+                    model=mname,
+                    messages=messages,
+                    temperature=temperature,
+                )
+                resp = await asyncio.wait_for(coro, timeout=timeout_seconds) if timeout_seconds > 0 else await coro
+                text_out = (getattr(resp.choices[0].message, "content", "") or "").strip()
+                if text_out:
+                    return text_out
+                last_err = RuntimeError(f"g4f returned empty response for model={mname}")
+            except Exception as e:
+                last_err = e
+
+            if attempt < retries and _is_retryable_g4f_error(last_err):
+                await asyncio.sleep(min(backoff * (2 ** (attempt - 1)), backoff_max))
+            else:
+                break
+
+    raise RuntimeError(f"g4f failed (last_err={last_err})")
+
+
+async def chat_json_async(
+    system: str,
+    user: str,
+    schema_hint: str,
+    temperature: float = 0.2,
+    *,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+) -> Any:
+    """Async variant of chat_json with dedicated g4f AsyncClient support."""
+
+    provider, model = _resolve_llm_selection(llm_provider=llm_provider, llm_model=llm_model)
+    messages = [
+        {"role": "system", "content": system.strip()},
+        {"role": "user", "content": f"""{user.strip()}
+
+Верни ТОЛЬКО валидный JSON (без markdown). Схема/ожидания:
+{schema_hint}
+"""},
+    ]
+
+    if provider == "mock":
+        return _mock_json(schema_hint=schema_hint, user=user)
+
+    if provider == "g4f":
+        text_out = await _g4f_chat_completion_text_async(messages=messages, temperature=temperature, llm_model=model)
+        return _json_loads_best_effort(text_out)
+
+    return await asyncio.to_thread(
+        chat_json,
+        system,
+        user,
+        schema_hint,
+        temperature,
+    )
+
+
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
 
 
@@ -898,6 +1055,18 @@ def chat_json(system: str, user: str, schema_hint: str, temperature: float = 0.2
 
     # ---- 1) g4f ----
     if provider == "g4f":
+        if bool(getattr(settings, "g4f_async_enabled", True)):
+            return _run_coroutine_sync(
+                chat_json_async(
+                    system,
+                    user,
+                    schema_hint,
+                    temperature,
+                    llm_provider="g4f",
+                    llm_model=settings.llm_model,
+                )
+            )
+
         client = _g4f_client()
 
         model_req = (settings.llm_model or "auto").strip() or "auto"

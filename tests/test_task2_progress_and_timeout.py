@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import time
+import contextlib
+
+import pytest
 from pathlib import Path
 
 import nbformat
@@ -74,11 +77,11 @@ steps: []
 
 def test_notebook_exposes_progress_widgets_and_callback() -> None:
     nb = nbformat.read("notebooks/task2_temporal_graph_validation_colab.ipynb", as_version=4)
-    cell4 = nb.cells[4].source
+    joined = "\n\n".join(cell.source for cell in nb.cells)
 
-    assert "progress_bar = W.IntProgress" in cell4
-    assert "def _task2_progress_callback(payload):" in cell4
-    assert "'progress_callback': _task2_progress_callback" in cell4
+    assert "progress_bar = W.IntProgress" in joined
+    assert "def _task2_progress_callback(payload):" in joined
+    assert "'progress_callback': _task2_progress_callback" in joined
 
 
 
@@ -149,3 +152,22 @@ def test_paddle_timeout_scales_with_pdf_page_count(monkeypatch, tmp_path: Path) 
     monkeypatch.setenv("PADDLEOCR_WORKER_TIMEOUT_MAX_SECONDS", "900")
 
     assert pop._effective_worker_timeout_seconds(pdf_path) == 170
+
+
+def test_extract_temporal_triplets_times_out_fast(monkeypatch) -> None:
+    from scireason.temporal import temporal_triplet_extractor as extractor
+
+    monkeypatch.setattr(extractor.settings, "llm_provider", "g4f")
+    monkeypatch.setattr(extractor.settings, "llm_request_timeout_seconds", 0.05)
+    monkeypatch.setattr(extractor, "temporary_llm_selection", lambda **kwargs: contextlib.nullcontext())
+
+    def _slow_chat_json(**kwargs):
+        time.sleep(0.2)
+        return []
+
+    monkeypatch.setattr(extractor, "chat_json", _slow_chat_json)
+
+    started = time.time()
+    with pytest.raises(TimeoutError):
+        extractor.extract_temporal_triplets(domain="science", chunk_text="demo text", paper_year=2024)
+    assert time.time() - started < 0.18

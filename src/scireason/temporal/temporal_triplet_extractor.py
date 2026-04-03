@@ -1,14 +1,47 @@
 from __future__ import annotations
 
+import asyncio
 from typing import List, Optional
+import threading
 import re
 from pydantic import TypeAdapter
 
 from ..config import settings
-from ..llm import chat_json, _resolve_auto_provider, temporary_llm_selection
+from ..llm import chat_json, chat_json_async, _resolve_auto_provider, _resolve_llm_selection, temporary_llm_selection
 from ..demos.render import render_demos_block
 from .schemas import TemporalTriplet, normalize_granularity
 from .time_parse import default_time_from_paper_year
+
+
+
+
+def _run_with_timeout(timeout_seconds: float, fn, /, *args, **kwargs):
+    """Run a blocking extraction call in a daemon thread and fail fast on timeout.
+
+    This protects notebook/CLI execution from hanging forever on flaky remote text
+    LLM providers during temporal triplet extraction.
+    """
+
+    timeout_seconds = float(timeout_seconds or 0)
+    if timeout_seconds <= 0:
+        return fn(*args, **kwargs)
+
+    result: dict[str, object] = {}
+
+    def _target() -> None:
+        try:
+            result["value"] = fn(*args, **kwargs)
+        except BaseException as exc:  # pragma: no cover - forwarded to caller
+            result["error"] = exc
+
+    thread = threading.Thread(target=_target, name=f"temporal-triplets-timeout:{getattr(fn, '__name__', 'call')}", daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    if thread.is_alive():
+        raise TimeoutError(f"Temporal triplet extraction exceeded {timeout_seconds:g}s")
+    if "error" in result:
+        raise result["error"]  # type: ignore[misc]
+    return result.get("value")
 
 
 _STOPWORDS = {
@@ -153,23 +186,7 @@ TEMPORAL_TRIPLET_SCHEMA_HINT = """Ожидается JSON массив объе�
 """
 
 
-def extract_temporal_triplets(
-    domain: str,
-    chunk_text: str,
-    paper_year: Optional[int] = None,
-    *,
-    use_demos: Optional[bool] = None,
-    llm_provider: Optional[str] = None,
-    llm_model: Optional[str] = None,
-) -> List[TemporalTriplet]:
-    """Extract temporal triplets from a chunk.
-
-    If use_demos is True (or settings.demo_enabled), the function injects retrieval-few-shot
-    examples from Qdrant demo store (task=temporal_triplets) to improve format and accuracy.
-
-    `llm_provider` / `llm_model` are explicit overrides for this extraction call. This makes
-    notebook/CLI overrides deterministic instead of relying on ambient repo defaults.
-    """
+def _build_temporal_triplet_prompt_parts(domain: str, chunk_text: str, use_demos: Optional[bool]) -> tuple[str, str]:
     system = f"""Ты — помощник исследователя в области {domain}.
 Твоя задача — извлечь из фрагмента текста научные утверждения в виде триплетов (S-P-O) и сохранить временные метки с максимально возможной точностью.
 """
@@ -194,6 +211,111 @@ def extract_temporal_triplets(
 {chunk_text}
 
 Извлеки 3-10 самых важных утверждений."""
+    return system, user
+
+
+def _validate_triplet_payload(data) -> List[TemporalTriplet]:
+    if isinstance(data, list):
+        normalized = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            time_obj = row.get("time")
+            if isinstance(time_obj, dict):
+                time_payload = dict(time_obj)
+                time_payload["granularity"] = normalize_granularity(
+                    time_payload.get("granularity"),
+                    start=time_payload.get("start"),
+                    end=time_payload.get("end"),
+                    default="year",
+                )
+                row["time"] = time_payload
+            normalized.append(row)
+        data = normalized
+    adapter = TypeAdapter(List[TemporalTriplet])
+    return adapter.validate_python(data)
+
+
+def _finalize_triplets(triplets: List[TemporalTriplet], paper_year: Optional[int]) -> List[TemporalTriplet]:
+    fallback = default_time_from_paper_year(paper_year)
+    if fallback:
+        for t in triplets:
+            if t.time is None:
+                t.time = fallback
+                t.time_source = 'paper_year_fallback'
+            elif not getattr(t, 'time_source', None):
+                t.time_source = 'extracted'
+    return [
+        t for t in triplets
+        if t.subject.strip() and t.predicate.strip() and t.object.strip()
+    ]
+
+
+async def extract_temporal_triplets_async(
+    domain: str,
+    chunk_text: str,
+    paper_year: Optional[int] = None,
+    *,
+    use_demos: Optional[bool] = None,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    semaphore: Optional[asyncio.Semaphore] = None,
+) -> List[TemporalTriplet]:
+    """Async extractor used for high-throughput g4f triplet extraction."""
+
+    system, user = _build_temporal_triplet_prompt_parts(domain=domain, chunk_text=chunk_text, use_demos=use_demos)
+    provider, model = _resolve_llm_selection(llm_provider=llm_provider, llm_model=llm_model)
+
+    if provider == 'mock':
+        return _finalize_triplets(_rule_based_triplets(chunk_text=chunk_text, paper_year=paper_year), paper_year)
+
+    if provider != 'g4f' or not bool(getattr(settings, 'g4f_async_enabled', True)):
+        return await asyncio.to_thread(
+            extract_temporal_triplets,
+            domain,
+            chunk_text,
+            paper_year,
+            use_demos=use_demos,
+            llm_provider=provider,
+            llm_model=model,
+        )
+
+    async def _call() -> List[TemporalTriplet]:
+        data = await chat_json_async(
+            system=system,
+            user=user,
+            schema_hint=TEMPORAL_TRIPLET_SCHEMA_HINT,
+            temperature=0.0,
+            llm_provider=provider,
+            llm_model=model,
+        )
+        return _finalize_triplets(_validate_triplet_payload(data), paper_year)
+
+    if semaphore is None:
+        return await _call()
+    async with semaphore:
+        return await _call()
+
+
+def extract_temporal_triplets(
+    domain: str,
+    chunk_text: str,
+    paper_year: Optional[int] = None,
+    *,
+    use_demos: Optional[bool] = None,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+) -> List[TemporalTriplet]:
+    """Extract temporal triplets from a chunk.
+
+    If use_demos is True (or settings.demo_enabled), the function injects retrieval-few-shot
+    examples from Qdrant demo store (task=temporal_triplets) to improve format and accuracy.
+
+    `llm_provider` / `llm_model` are explicit overrides for this extraction call. This makes
+    notebook/CLI overrides deterministic instead of relying on ambient repo defaults.
+    """
+    system, user = _build_temporal_triplet_prompt_parts(domain=domain, chunk_text=chunk_text, use_demos=use_demos)
 
     with temporary_llm_selection(llm_provider=llm_provider, llm_model=llm_model):
         provider = (settings.llm_provider or '').lower().strip() or 'auto'
@@ -203,38 +325,15 @@ def extract_temporal_triplets(
         if provider == 'mock':
             triplets = _rule_based_triplets(chunk_text=chunk_text, paper_year=paper_year)
         else:
-            data = chat_json(system=system, user=user, schema_hint=TEMPORAL_TRIPLET_SCHEMA_HINT, temperature=0.0)
-            if isinstance(data, list):
-                normalized = []
-                for item in data:
-                    if not isinstance(item, dict):
-                        continue
-                    row = dict(item)
-                    time_obj = row.get("time")
-                    if isinstance(time_obj, dict):
-                        time_payload = dict(time_obj)
-                        time_payload["granularity"] = normalize_granularity(
-                            time_payload.get("granularity"),
-                            start=time_payload.get("start"),
-                            end=time_payload.get("end"),
-                            default="year",
-                        )
-                        row["time"] = time_payload
-                    normalized.append(row)
-                data = normalized
-            adapter = TypeAdapter(List[TemporalTriplet])
-            triplets = adapter.validate_python(data)
+            timeout_seconds = float(getattr(settings, "llm_request_timeout_seconds", 25) or 25)
+            data = _run_with_timeout(
+                timeout_seconds,
+                chat_json,
+                system=system,
+                user=user,
+                schema_hint=TEMPORAL_TRIPLET_SCHEMA_HINT,
+                temperature=0.0,
+            )
+            triplets = _validate_triplet_payload(data)
 
-    fallback = default_time_from_paper_year(paper_year)
-    if fallback:
-        for t in triplets:
-            if t.time is None:
-                t.time = fallback
-                t.time_source = 'paper_year_fallback'
-            elif not getattr(t, 'time_source', None):
-                t.time_source = 'extracted'
-    triplets = [
-        t for t in triplets
-        if t.subject.strip() and t.predicate.strip() and t.object.strip()
-    ]
-    return triplets
+    return _finalize_triplets(triplets, paper_year)
