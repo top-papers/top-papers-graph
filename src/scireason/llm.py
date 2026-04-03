@@ -617,22 +617,104 @@ def _extract_first_json_block(text: str) -> str | None:
     return None
 
 
-def _json_loads_best_effort(text: str) -> Any:
-    """Parse JSON from an LLM response, tolerating common wrappers."""
+def _escape_json_string_control_chars(text: str) -> str:
+    """Escape raw control characters that occasionally leak into LLM JSON strings.
 
-    raw = _strip_code_fences(text)
+    Some providers return JSON-looking payloads with literal newlines, tabs, or other
+    C0 control characters embedded *inside* string values. Python's default json decoder
+    rejects these with ``Invalid control character`` even when the overall payload is
+    otherwise usable. We repair only characters occurring inside quoted JSON strings and
+    leave structural characters intact.
+    """
 
-    # 1) direct
+    s = str(text or "").lstrip("\ufeff")
+    if not s:
+        return s
+
+    out: list[str] = []
+    in_str = False
+    esc = False
+
+    for ch in s:
+        if in_str:
+            if esc:
+                out.append(ch)
+                esc = False
+                continue
+            if ch == "\\":
+                out.append(ch)
+                esc = True
+                continue
+            if ch == '"':
+                out.append(ch)
+                in_str = False
+                continue
+            if ord(ch) < 0x20:
+                if ch == "\n":
+                    out.append("\\n")
+                elif ch == "\r":
+                    out.append("\\r")
+                elif ch == "\t":
+                    out.append("\\t")
+                elif ch == "\b":
+                    out.append("\\b")
+                elif ch == "\f":
+                    out.append("\\f")
+                else:
+                    out.append(f"\\u{ord(ch):04x}")
+                continue
+            out.append(ch)
+            continue
+
+        out.append(ch)
+        if ch == '"':
+            in_str = True
+
+    return "".join(out)
+
+
+def _loads_json_lenient(payload: str) -> Any:
+    """Try strict JSON first, then tolerate control chars inside strings."""
+
     try:
-        return json.loads(raw)
-    except Exception:
-        pass
+        return json.loads(payload)
+    except json.JSONDecodeError as e:
+        if "Invalid control character" not in str(e):
+            raise
+    return json.loads(payload, strict=False)
 
-    # 2) first balanced object/array
-    block = _extract_first_json_block(raw)
-    if block is not None:
-        return json.loads(block)
 
+def _json_loads_best_effort(text: str) -> Any:
+    """Parse JSON from an LLM response, tolerating wrappers and malformed string chars."""
+
+    raw = _strip_code_fences(text).lstrip("\ufeff")
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add_candidate(payload: str | None) -> None:
+        val = str(payload or "").strip()
+        if val and val not in seen:
+            seen.add(val)
+            candidates.append(val)
+
+    _add_candidate(raw)
+    _add_candidate(_extract_first_json_block(raw))
+
+    repaired_raw = _escape_json_string_control_chars(raw)
+    _add_candidate(repaired_raw)
+    _add_candidate(_extract_first_json_block(repaired_raw))
+
+    last_error: Exception | None = None
+    for payload in candidates:
+        try:
+            return _loads_json_lenient(payload)
+        except Exception as e:
+            last_error = e
+            continue
+
+    if candidates:
+        raise json.JSONDecodeError(str(last_error or "No JSON object/array found"), candidates[-1], 0)
     raise json.JSONDecodeError("No JSON object/array found", raw, 0)
 
 
