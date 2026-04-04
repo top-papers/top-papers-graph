@@ -22,6 +22,16 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.17.0
     container_name: top-papers-graph-qdrant
+    healthcheck:
+      test: >
+        sh -c '
+          (which curl || (export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get -y install curl)) &&
+          curl -f http://localhost:6333/healthz
+        '
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -31,6 +41,12 @@ services:
   memgraph:
     image: memgraph/memgraph-mage:latest
     container_name: top-papers-graph-memgraph
+    healthcheck:
+      test: [ "CMD", "sh", "-c", 'echo "RETURN \"DB OK\";" | mgconsole' ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     ports:
       - "7688:7687"
       - "7444:7444"
@@ -41,6 +57,12 @@ services:
   lab:
     image: memgraph/lab:latest
     container_name: top-papers-graph-memgraph-lab
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "3000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     ports:
       - "3000:3000"
     depends_on:
@@ -50,11 +72,16 @@ services:
       QUICK_CONNECT_MG_PORT: 7687
 
   grobid:
-    image: lfoppiano/grobid:0.8.1
+    image: lfoppiano/grobid:0.8.2.1-crf
     container_name: top-papers-graph-grobid
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8070/api/isalive" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     ports:
       - "8070:8070"
-    profiles: ["full"]
 
 volumes:
   qdrant_storage:
