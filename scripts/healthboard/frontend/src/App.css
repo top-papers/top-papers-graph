@@ -1,0 +1,20 @@
+.app {
+  min-height: 100vh;
+  padding: 24px;
+  background-color: #f5f5f5;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.card {
+  margin-bottom: 16px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #1890ff;
+}

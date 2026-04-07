@@ -100,6 +100,72 @@ def _strip_self_loops_for_metrics(graph):
     return metric_graph, len(self_loops)
 
 
+def _edge_identity_key(source: Any, predicate: Any, target: Any) -> str:
+    return " | ".join(
+        [
+            " ".join(str(source or "").split()).lower(),
+            " ".join(str(predicate or "").split()).lower(),
+            " ".join(str(target or "").split()).lower(),
+        ]
+    )
+
+
+
+def _to_number(value: Any, default: float = 0.0) -> float:
+    try:
+        if value in (None, ''):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+
+def _safe_edge_counts(edge: Dict[str, Any]) -> Dict[str, float]:
+    papers = edge.get('papers') or []
+    quotes = edge.get('evidence_quotes') or []
+    yearly_count = edge.get('yearly_count') or {}
+    intervals = [item for item in (edge.get('time_intervals') or []) if isinstance(item, dict)]
+
+    if isinstance(papers, str):
+        papers_count = len([item for item in papers.split(';') if item.strip()])
+    elif isinstance(papers, (list, tuple, set)):
+        papers_count = len([item for item in papers if str(item or '').strip()])
+    else:
+        papers_count = 0
+
+    years = set()
+    for raw_year in yearly_count.keys():
+        try:
+            years.add(int(raw_year))
+        except Exception:
+            pass
+    for interval in intervals:
+        for key in ('start', 'end'):
+            raw = str(interval.get(key) or '').strip()
+            if raw[:4].isdigit():
+                years.add(int(raw[:4]))
+
+    if years:
+        temporal_span_years = float(max(years) - min(years) + 1)
+        active_years_count = float(len(years))
+        temporal_density = active_years_count / max(1.0, temporal_span_years)
+    else:
+        temporal_span_years = 0.0
+        active_years_count = 0.0
+        temporal_density = 0.0
+
+    return {
+        'total_count': max(1.0, _to_number(edge.get('total_count'), 1.0)),
+        'papers_count': float(max(0, papers_count)),
+        'evidence_count': float(len(quotes)) if isinstance(quotes, list) else 0.0,
+        'active_years_count': active_years_count,
+        'temporal_span_years': temporal_span_years,
+        'temporal_density': temporal_density,
+    }
+
+
+
 def compute_graph_analytics(payload: Dict[str, Any], *, top_k: int = 20, max_cliques: int = 30) -> Dict[str, Any]:
     import networkx as nx
 
@@ -113,7 +179,16 @@ def compute_graph_analytics(payload: Dict[str, Any], *, top_k: int = 20, max_cli
     degree = nx.degree_centrality(H_metrics) if H_metrics.number_of_nodes() > 1 else {n: 0.0 for n in H_metrics.nodes()}
     betweenness = nx.betweenness_centrality(H_metrics, normalized=True) if H_metrics.number_of_nodes() > 1 else {n: 0.0 for n in H_metrics.nodes()}
     closeness = nx.closeness_centrality(H_metrics) if H_metrics.number_of_nodes() > 1 else {n: 0.0 for n in H_metrics.nodes()}
+    clustering = nx.clustering(H_metrics) if H_metrics.number_of_nodes() > 1 else {n: 0.0 for n in H_metrics.nodes()}
     core_numbers = nx.core_number(H_metrics) if H_metrics.number_of_nodes() and H_metrics.number_of_edges() else {n: 0 for n in H_metrics.nodes()}
+    if G_metrics.is_directed():
+        in_degree = nx.in_degree_centrality(G_metrics) if G_metrics.number_of_nodes() > 1 else {n: 0.0 for n in G_metrics.nodes()}
+        out_degree = nx.out_degree_centrality(G_metrics) if G_metrics.number_of_nodes() > 1 else {n: 0.0 for n in G_metrics.nodes()}
+    else:
+        in_degree = {n: float(degree.get(n, 0.0)) for n in G_metrics.nodes()}
+        out_degree = {n: float(degree.get(n, 0.0)) for n in G_metrics.nodes()}
+
+    edge_betweenness = nx.edge_betweenness_centrality(H_metrics, normalized=True) if H_metrics.number_of_edges() else {}
 
     communities_raw = []
     modularity = None
@@ -169,10 +244,65 @@ def compute_graph_analytics(payload: Dict[str, Any], *, top_k: int = 20, max_cli
             'community_id': community_lookup.get(str(node_id)),
             'pagerank': round(float(pagerank.get(node_id, 0.0)), 6),
             'degree': round(float(degree.get(node_id, 0.0)), 6),
+            'in_degree': round(float(in_degree.get(node_id, 0.0)), 6),
+            'out_degree': round(float(out_degree.get(node_id, 0.0)), 6),
             'betweenness': round(float(betweenness.get(node_id, 0.0)), 6),
             'closeness': round(float(closeness.get(node_id, 0.0)), 6),
+            'clustering': round(float(clustering.get(node_id, 0.0)), 6),
             'core_number': int(core_numbers.get(node_id, 0)),
         }
+
+    edge_metrics: Dict[str, Dict[str, Any]] = {}
+    edge_metric_max: Dict[str, float] = {
+        'edge_betweenness': 0.0,
+        'pagerank_mean': 0.0,
+        'node_betweenness_mean': 0.0,
+        'core_mean': 0.0,
+        'directional_flow': 0.0,
+        'total_count': 0.0,
+        'papers_count': 0.0,
+        'evidence_count': 0.0,
+        'active_years_count': 0.0,
+        'temporal_span_years': 0.0,
+        'temporal_density': 0.0,
+    }
+
+    for edge in payload.get('edges', []) or []:
+        if not isinstance(edge, dict):
+            continue
+        src = str(edge.get('source') or '')
+        tgt = str(edge.get('target') or edge.get('object') or '')
+        pred = str(edge.get('predicate') or edge.get('label') or '')
+        if not src or not tgt:
+            continue
+        edge_key = _edge_identity_key(src, pred, tgt)
+        source_comm = community_lookup.get(src)
+        target_comm = community_lookup.get(tgt)
+        counts = _safe_edge_counts(edge)
+        metrics_row = {
+            'source': src,
+            'target': tgt,
+            'predicate': pred,
+            'label': pred or str(edge.get('label') or ''),
+            'edge_betweenness': round(float(edge_betweenness.get((src, tgt), edge_betweenness.get((tgt, src), 0.0))), 6),
+            'pagerank_mean': round((float(pagerank.get(src, 0.0)) + float(pagerank.get(tgt, 0.0))) / 2.0, 6),
+            'node_betweenness_mean': round((float(betweenness.get(src, 0.0)) + float(betweenness.get(tgt, 0.0))) / 2.0, 6),
+            'degree_mean': round((float(degree.get(src, 0.0)) + float(degree.get(tgt, 0.0))) / 2.0, 6),
+            'directional_flow': round((float(out_degree.get(src, 0.0)) + float(in_degree.get(tgt, 0.0))) / 2.0, 6),
+            'core_mean': round((float(core_numbers.get(src, 0)) + float(core_numbers.get(tgt, 0))) / 2.0, 6),
+            'clustering_mean': round((float(clustering.get(src, 0.0)) + float(clustering.get(tgt, 0.0))) / 2.0, 6),
+            'source_community_id': source_comm,
+            'target_community_id': target_comm,
+            'is_cross_community': bool(source_comm and target_comm and source_comm != target_comm),
+            'source_label': str(G.nodes[src].get('label') or src) if src in G.nodes else src,
+            'target_label': str(G.nodes[tgt].get('label') or tgt) if tgt in G.nodes else tgt,
+        }
+        metrics_row.update(counts)
+        edge_metrics[edge_key] = metrics_row
+        for key in edge_metric_max:
+            edge_metric_max[key] = max(edge_metric_max[key], float(metrics_row.get(key, 0.0) or 0.0))
+
+    top_edges = sorted(edge_metrics.values(), key=lambda row: (float(row.get('edge_betweenness', 0.0)), float(row.get('pagerank_mean', 0.0))), reverse=True)
 
     summary = {
         'node_count': int(G.number_of_nodes()),
@@ -196,11 +326,17 @@ def compute_graph_analytics(payload: Dict[str, Any], *, top_k: int = 20, max_cli
             'degree': _top(degree),
             'betweenness': _top(betweenness),
             'closeness': _top(closeness),
+            'in_degree': _top(in_degree),
+            'out_degree': _top(out_degree),
         },
+        'top_edges': top_edges[:top_k],
         'cliques': cliques,
         'components': components,
         'node_metrics': node_metrics,
+        'edge_metrics': edge_metrics,
+        'edge_metric_max': {k: round(v, 6) for k, v in edge_metric_max.items()},
     }
+
 
 
 def _spring_positions(payload: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
@@ -398,6 +534,8 @@ def build_interactive_graph_view(
         width=360,
     )
     return G, pn.Row(sidebar, graph, sizing_mode='stretch_width')
+
+
 def write_graph_analytics_json(graph_json_path: Path, analytics_path: Path) -> Path:
     payload = json.loads(graph_json_path.read_text(encoding='utf-8'))
     analytics = compute_graph_analytics(payload)
@@ -610,6 +748,271 @@ def _build_graph_html(payload: Dict[str, Any], analytics: Dict[str, Any], title:
 </html>'''
 
 
+
+
+def _build_light_graph_html(payload: Dict[str, Any], analytics: Dict[str, Any], title: str) -> str:
+    graph_json = json.dumps(payload, ensure_ascii=False)
+    analytics_json = json.dumps(analytics, ensure_ascii=False)
+    positions_json = json.dumps(_spring_positions(payload), ensure_ascii=False)
+    palette_json = json.dumps(balanced_graph_palette(), ensure_ascii=False)
+    return f'''<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title} - light</title>
+  <style>
+    :root {{ --bg:#f8fafc; --card:#fff; --border:#d0d7de; --muted:#475569; --text:#111827; --accent:#0f766e; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }}
+    .page {{ max-width:1440px; margin:0 auto; padding:18px; }}
+    .card {{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:14px; }}
+    .toolbar {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }}
+    .toolbar label {{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); min-width:160px; }}
+    .toolbar input, .toolbar select {{ padding:8px 10px; border:1px solid var(--border); border-radius:10px; font:inherit; background:#fff; }}
+    .stats {{ display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 14px; }}
+    .pill {{ display:inline-flex; padding:4px 10px; border-radius:999px; background:#ecfeff; color:#0f766e; font-size:12px; }}
+    .layout {{ display:grid; grid-template-columns:minmax(0,1.6fr) minmax(320px,0.9fr); gap:14px; }}
+    @media (max-width:1100px) {{ .layout {{ grid-template-columns:1fr; }} }}
+    svg {{ width:100%; min-height:760px; border:1px solid var(--border); border-radius:12px; background:linear-gradient(180deg,#fff 0%,#f8fafc 100%); }}
+    .panel {{ max-height:760px; overflow:auto; border:1px solid var(--border); border-radius:12px; padding:10px; background:#fff; }}
+    table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+    th, td {{ text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; vertical-align:top; }}
+    .muted {{ color:var(--muted); }}
+    .node-label {{ font-size:11px; fill:#334155; pointer-events:none; }}
+    .edge-label {{ font-size:10px; fill:#64748b; pointer-events:none; }}
+    .legend {{ display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }}
+    .legend span {{ font-size:12px; color:var(--muted); }}
+    .legend i {{ display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; vertical-align:middle; }}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="card">
+      <h2>{title} - облегченная версия</h2>
+      <div class="muted">По умолчанию показывает только значимые вершины и ребра. Полная HTML-версия остается отдельным файлом.</div>
+      <div id="stats" class="stats"></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <label>Метрика вершин
+          <select id="nodeMetric">
+            <option value="pagerank">PageRank</option>
+            <option value="betweenness">Betweenness</option>
+            <option value="degree">Degree</option>
+            <option value="core_number">K-core</option>
+            <option value="in_degree">In-degree</option>
+            <option value="out_degree">Out-degree</option>
+          </select>
+        </label>
+        <label>Топ вершин
+          <input id="topNodes" type="range" min="5" max="120" step="1" value="35">
+          <span id="topNodesValue" class="muted"></span>
+        </label>
+        <label>Метрика ребер
+          <select id="edgeMetric">
+            <option value="edge_betweenness">Edge betweenness</option>
+            <option value="pagerank_mean">Endpoint PageRank</option>
+            <option value="total_count">Support count</option>
+            <option value="papers_count">Paper support</option>
+            <option value="temporal_span_years">Temporal span</option>
+          </select>
+        </label>
+        <label>Топ ребер
+          <input id="topEdges" type="range" min="5" max="220" step="1" value="80">
+          <span id="topEdgesValue" class="muted"></span>
+        </label>
+        <label><span>Подписи вершин</span><input id="showLabels" type="checkbox" checked></label>
+        <label><span>Подписи ребер</span><input id="showEdgeLabels" type="checkbox"></label>
+        <label><span>Оставлять только ребра между выбранными вершинами</span><input id="strictNodes" type="checkbox" checked></label>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="layout">
+        <svg id="graphSvg" viewBox="0 0 1280 820"></svg>
+        <div class="panel">
+          <h3>Видимые ребра</h3>
+          <table id="edgeTable"></table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const APP = {{ graph: {graph_json}, analytics: {analytics_json}, positions: {positions_json}, palette: {palette_json} }};
+    const esc = (v) => String(v ?? '').replace(/[&<>\"']/g, (ch) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}}[ch]));
+    const trunc = (v,n=58) => {{ const t=String(v??''); return t.length<=n ? t : t.slice(0,n-1)+'…'; }};
+    const stats = APP.analytics.summary || {{}};
+    const nodeMetrics = APP.analytics.node_metrics || {{}};
+    const edgeMetrics = APP.analytics.edge_metrics || {{}};
+    const positions = APP.positions || {{}};
+    const nodes = Array.isArray(APP.graph.nodes) ? APP.graph.nodes : [];
+    const edges = Array.isArray(APP.graph.edges) ? APP.graph.edges : [];
+
+    function edgeKey(src, pred, tgt) {{
+      return [src, pred, tgt].map((v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ')).join(' | ');
+    }}
+    function nodeValue(nodeId, metric) {{
+      const row = nodeMetrics[nodeId] || {{}};
+      return Number(row[metric] || 0);
+    }}
+    function edgeValue(edge, metric) {{
+      const row = edgeMetrics[edgeKey(edge.source, edge.predicate || edge.label || '', edge.target || edge.object || '')] || {{}};
+      return Number(row[metric] || 0);
+    }}
+    function sortTop(items, getValue, n) {{
+      return new Set(items
+        .map((item) => [item, getValue(item)])
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, n)
+        .map(([item]) => typeof item === 'string' ? item : edgeKey(item.source, item.predicate || item.label || '', item.target || item.object || '')));
+    }}
+    function renderStats() {{
+      const host = document.getElementById('stats');
+      host.innerHTML = '';
+      Object.entries(stats).forEach(([k, v]) => {{ const span = document.createElement('span'); span.className = 'pill'; span.textContent = `${{k}}: ${{v ?? '—'}}`; host.appendChild(span); }});
+    }}
+    function renderLegend() {{
+      const host = document.getElementById('legend');
+      host.innerHTML = '';
+      ['step','paper','term','time','assertion','default'].forEach((name) => {{
+        const color = APP.palette[name];
+        const span = document.createElement('span');
+        span.innerHTML = `<i style="background:${{color}}"></i>${{esc(name)}}`;
+        host.appendChild(span);
+      }});
+    }}
+    function render() {{
+      const topNodes = Number(document.getElementById('topNodes').value || 35);
+      const topEdges = Number(document.getElementById('topEdges').value || 80);
+      const nodeMetric = document.getElementById('nodeMetric').value;
+      const edgeMetric = document.getElementById('edgeMetric').value;
+      const showLabels = document.getElementById('showLabels').checked;
+      const showEdgeLabels = document.getElementById('showEdgeLabels').checked;
+      const strictNodes = document.getElementById('strictNodes').checked;
+      document.getElementById('topNodesValue').textContent = String(topNodes);
+      document.getElementById('topEdgesValue').textContent = String(topEdges);
+
+      const topNodeIds = new Set(Array.from(sortTop(nodes.map((node) => String(node.id || node.term || node.label || '')), (nodeId) => nodeValue(nodeId, nodeMetric), topNodes)));
+      const topEdgeIds = sortTop(edges, (edge) => edgeValue(edge, edgeMetric), topEdges);
+
+      const visibleEdges = edges.filter((edge) => {{
+        const src = String(edge.source || '');
+        const tgt = String(edge.target || edge.object || '');
+        const inTopEdges = topEdgeIds.has(edgeKey(src, edge.predicate || edge.label || '', tgt));
+        if (!inTopEdges) return false;
+        if (!strictNodes) return true;
+        return topNodeIds.has(src) && topNodeIds.has(tgt);
+      }});
+      const visibleNodeIds = new Set();
+      visibleEdges.forEach((edge) => {{ visibleNodeIds.add(String(edge.source || '')); visibleNodeIds.add(String(edge.target || edge.object || '')); }});
+      nodes.forEach((node) => {{ const nodeId = String(node.id || node.term || node.label || ''); if (topNodeIds.has(nodeId)) visibleNodeIds.add(nodeId); }});
+      const visibleNodes = nodes.filter((node) => visibleNodeIds.has(String(node.id || node.term || node.label || '')));
+
+      const svg = document.getElementById('graphSvg');
+      svg.innerHTML = '';
+      const NS = 'http://www.w3.org/2000/svg';
+      const coords = {{}};
+      const cx = 640, cy = 410;
+      visibleNodes.forEach((node, idx) => {{
+        const nodeId = String(node.id || node.term || node.label || '');
+        if (positions[nodeId]) {{
+          coords[nodeId] = {{ x: cx + positions[nodeId].x * 320, y: cy + positions[nodeId].y * 260 }};
+        }} else {{
+          const angle = (Math.PI * 2 * idx) / Math.max(1, visibleNodes.length);
+          coords[nodeId] = {{ x: cx + 300 * Math.cos(angle), y: cy + 250 * Math.sin(angle) }};
+        }}
+      }});
+
+      visibleEdges.forEach((edge) => {{
+        const src = String(edge.source || ''); const tgt = String(edge.target || edge.object || '');
+        if (!coords[src] || !coords[tgt]) return;
+        const line = document.createElementNS(NS, 'line');
+        line.setAttribute('x1', coords[src].x); line.setAttribute('y1', coords[src].y);
+        line.setAttribute('x2', coords[tgt].x); line.setAttribute('y2', coords[tgt].y);
+        line.setAttribute('stroke', String(edge.viz_color || '#94a3b8')); line.setAttribute('stroke-opacity', '0.65'); line.setAttribute('stroke-width', '1.8');
+        const tooltip = document.createElementNS(NS, 'title');
+        tooltip.textContent = `${{edge.predicate || edge.label || 'edge'}}\n${{src}} -> ${{tgt}}\n${{edgeMetric}}=${{edgeValue(edge, edgeMetric).toFixed(4)}}`;
+        line.appendChild(tooltip);
+        svg.appendChild(line);
+        if (showEdgeLabels) {{
+          const text = document.createElementNS(NS, 'text');
+          text.setAttribute('class', 'edge-label');
+          text.setAttribute('x', (coords[src].x + coords[tgt].x) / 2); text.setAttribute('y', (coords[src].y + coords[tgt].y) / 2 - 4);
+          text.setAttribute('text-anchor', 'middle'); text.textContent = trunc(edge.predicate || edge.label || '', 24);
+          svg.appendChild(text);
+        }}
+      }});
+
+      visibleNodes.forEach((node) => {{
+        const nodeId = String(node.id || node.term || node.label || '');
+        const row = nodeMetrics[nodeId] || {{}};
+        const circle = document.createElementNS(NS, 'circle');
+        const metricValue = Math.max(0, nodeValue(nodeId, nodeMetric));
+        const radius = 9 + (metricValue * 18);
+        circle.setAttribute('cx', coords[nodeId].x); circle.setAttribute('cy', coords[nodeId].y); circle.setAttribute('r', radius.toFixed(2));
+        circle.setAttribute('fill', String(node.viz_color || APP.palette.default)); circle.setAttribute('opacity', '0.92'); circle.setAttribute('stroke', '#fff'); circle.setAttribute('stroke-width', '1.2');
+        const tooltip = document.createElementNS(NS, 'title');
+        tooltip.textContent = `${{node.label || node.term || nodeId}}\npagerank=${{Number(row.pagerank || 0).toFixed(4)}}\nbetweenness=${{Number(row.betweenness || 0).toFixed(4)}}\ncore=${{row.core_number || 0}}`;
+        circle.appendChild(tooltip);
+        svg.appendChild(circle);
+        if (showLabels) {{
+          const text = document.createElementNS(NS, 'text');
+          text.setAttribute('class', 'node-label'); text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('x', coords[nodeId].x); text.setAttribute('y', coords[nodeId].y + radius + 14);
+          text.textContent = trunc(node.label || node.term || nodeId, 28);
+          svg.appendChild(text);
+        }}
+      }});
+
+      const table = document.getElementById('edgeTable');
+      table.innerHTML = '<thead><tr><th>#</th><th>edge</th><th>metric</th><th>papers</th><th>years</th></tr></thead>';
+      const body = document.createElement('tbody');
+      visibleEdges
+        .slice()
+        .sort((a, b) => edgeValue(b, edgeMetric) - edgeValue(a, edgeMetric))
+        .forEach((edge, idx) => {{
+          const src = String(edge.source || ''); const tgt = String(edge.target || edge.object || '');
+          const key = edgeKey(src, edge.predicate || edge.label || '', tgt);
+          const row = edgeMetrics[key] || {{}};
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${{idx + 1}}</td><td><b>${{esc(trunc(src, 24))}}</b> - ${{esc(trunc(edge.predicate || edge.label || '', 18))}} -> <b>${{esc(trunc(tgt, 24))}}</b></td><td>${{esc(edgeValue(edge, edgeMetric).toFixed(4))}}</td><td>${{esc(row.papers_count || 0)}}</td><td>${{esc(row.active_years_count || 0)}} / span=${{esc(row.temporal_span_years || 0)}}</td>`;
+          body.appendChild(tr);
+        }});
+      table.appendChild(body);
+    }}
+    ['nodeMetric','edgeMetric','topNodes','topEdges','showLabels','showEdgeLabels','strictNodes'].forEach((id) => {{
+      const el = document.getElementById(id); if (!el) return; el.addEventListener('input', render); el.addEventListener('change', render);
+    }});
+    renderStats(); renderLegend(); render();
+  </script>
+</body>
+</html>'''
+
+
+
+def write_graph_html_variants(
+    graph_json_path: Path,
+    html_path: Path,
+    *,
+    analytics_path: Path | None = None,
+    light_html_path: Path | None = None,
+) -> Dict[str, Path]:
+    payload = json.loads(graph_json_path.read_text(encoding='utf-8'))
+    analytics = compute_graph_analytics(payload)
+    if analytics_path is not None:
+        analytics_path.write_text(json.dumps(analytics, ensure_ascii=False, indent=2), encoding='utf-8')
+    title = graph_json_path.stem.replace('_', ' ')
+    _, interactive_view = build_interactive_graph_view(payload, analytics=analytics, title=title)
+    if interactive_view is not None:
+        try:
+            interactive_view.save(html_path, resources='inline', embed=False, title=title)
+        except Exception:
+            html_path.write_text(_build_graph_html(payload, analytics, title), encoding='utf-8')
+    else:
+        html_path.write_text(_build_graph_html(payload, analytics, title), encoding='utf-8')
+
+    light_target = light_html_path or html_path.with_name(html_path.stem + '_light.html')
+    light_target.write_text(_build_light_graph_html(payload, analytics, title), encoding='utf-8')
+    return {'full': html_path, 'light': light_target}
 
 
 def write_graph_html(graph_json_path: Path, html_path: Path, *, analytics_path: Path | None = None) -> Path:

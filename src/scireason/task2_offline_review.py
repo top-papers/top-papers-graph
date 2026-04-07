@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from .task2_filters import cooccurrence_strength_score, is_cooccurrence_triplet, is_likely_causal_triplet
 from .temporal.schemas import normalize_granularity
 
 
@@ -307,6 +308,10 @@ def _normalize_assertions(rows: List[Dict[str, Any]], graph_kind: str) -> List[D
             "cutoff_year": str(_pick_first(row_dict, ["cutoff_year"], "")),
             "needs_mm_review": needs_mm_review,
             "time_granularity": _normalize_time_granularity(_pick_first(row_dict, ["time_granularity", "granularity"], "unknown"), start_date=start_date, end_date=end_date),
+            "is_cooccurrence": bool(is_cooccurrence_triplet(row_dict)),
+            "is_likely_causal": bool(is_likely_causal_triplet(row_dict)),
+            "cooccurrence_strength": round(float(cooccurrence_strength_score(row_dict)), 6),
+            "relation_family": "cooccurrence" if bool(is_cooccurrence_triplet(row_dict)) else ("causal" if bool(is_likely_causal_triplet(row_dict)) else "other"),
         }
         normalized_row["default_review_state"] = _default_review_state(normalized_row)
         normalized.append(normalized_row)
@@ -485,6 +490,8 @@ _HTML_TEMPLATE = r"""<!doctype html>
       pageSize: 5,
       page: 1,
       importanceThreshold: Number(APP_FILTER_DEFAULTS.importance_threshold || 0),
+      cooccurrenceMode: String(APP_FILTER_DEFAULTS.cooccurrence_filter_mode || "all"),
+      weakCooccurrenceMax: Number(APP_FILTER_DEFAULTS.weak_cooccurrence_max_importance ?? 0.45),
       exclusionText: APP_FILTER_DEFAULTS.exclusion_rules ? JSON.stringify(APP_FILTER_DEFAULTS.exclusion_rules, null, 2) : '',
     },
     reviewState: Object.fromEntries(APP.records.map((row) => [row.edge_uid, clone(row.default_review_state)])),
@@ -541,6 +548,8 @@ _HTML_TEMPLATE = r"""<!doctype html>
     state.filters.pageSize = toNumber(filters.page_size || filters.pageSize, state.filters.pageSize);
     state.filters.page = toNumber(filters.page, state.filters.page);
     state.filters.importanceThreshold = Math.max(0, Math.min(1, toNumber(filters.importance_threshold ?? filters.importanceThreshold, state.filters.importanceThreshold)));
+    state.filters.cooccurrenceMode = String(filters.cooccurrence_filter_mode ?? filters.cooccurrenceMode ?? state.filters.cooccurrenceMode || "all");
+    state.filters.weakCooccurrenceMax = Math.max(0, Math.min(1, toNumber(filters.weak_cooccurrence_max_importance ?? filters.weakCooccurrenceMax, state.filters.weakCooccurrenceMax)));
     if (typeof filters.exclusion_text === 'string') state.filters.exclusionText = filters.exclusion_text;
     if (typeof filters.exclusionText === 'string') state.filters.exclusionText = filters.exclusionText;
     const loaded = payload.review_state || payload.reviewState || {};
@@ -784,7 +793,42 @@ _HTML_TEMPLATE = r"""<!doctype html>
   function normalizeTextList(value) {
     if (!value) return [];
     if (Array.isArray(value)) return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+    if (typeof value === 'object') return Object.values(value).flatMap((item) => normalizeTextList(item));
     return String(value).split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean);
+  }
+
+  function extractDois(value) {
+    const text = String(value || '');
+    const matches = text.match(/10\.\d{4,9}\/[A-Z0-9._;()/:+-]+/ig) || [];
+    return matches.map((item) => String(item).toLowerCase());
+  }
+
+  function normalizeUrlValue(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/[?#].*$/, '')
+      .replace(/\/$/, '');
+  }
+
+  function identifierVariants(values) {
+    const variants = new Set();
+    normalizeTextList(values).forEach((raw) => {
+      const text = String(raw || '').trim();
+      if (!text) return;
+      variants.add(text.toLowerCase());
+      extractDois(text).forEach((doi) => {
+        variants.add(doi);
+        variants.add(`doi:${doi}`);
+        variants.add(`https://doi.org/${doi}`);
+        variants.add(`http://doi.org/${doi}`);
+      });
+      const url = normalizeUrlValue(text);
+      if (url) variants.add(url);
+    });
+    return Array.from(variants);
   }
 
   function parseExclusionText(raw) {
@@ -793,9 +837,11 @@ _HTML_TEMPLATE = r"""<!doctype html>
     try { return JSON.parse(text); } catch (_) { /* noop */ }
     const spec = { paper_ids: [], titles: [], source_refs: [], match_substrings: [], url_substrings: [] };
     const keyMap = {
-      paper_ids: 'paper_ids', ids: 'paper_ids', articles: 'paper_ids',
-      titles: 'titles', source_refs: 'source_refs', urls: 'source_refs',
-      match_substrings: 'match_substrings', substrings: 'match_substrings',
+      paper_ids: 'paper_ids', ids: 'paper_ids', articles: 'paper_ids', article_ids: 'paper_ids',
+      identifier: 'paper_ids', identifiers: 'paper_ids', doi: 'paper_ids', dois: 'paper_ids',
+      titles: 'titles', title: 'titles',
+      source_refs: 'source_refs', source_ref: 'source_refs', urls: 'source_refs', url: 'source_refs', links: 'source_refs',
+      match_substrings: 'match_substrings', substrings: 'match_substrings', substring: 'match_substrings',
       url_substrings: 'url_substrings'
     };
     let currentKey = '';
@@ -805,7 +851,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
       if (!trimmed || trimmed.startsWith('#')) return;
       const keyMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/);
       if (keyMatch) {
-        const mapped = keyMap[keyMatch[1]] || keyMatch[1];
+        const mapped = keyMap[keyMatch[1].toLowerCase()] || keyMatch[1];
         currentKey = mapped;
         if (mapped === 'max_year') {
           const year = Number(keyMatch[2]);
@@ -834,23 +880,113 @@ _HTML_TEMPLATE = r"""<!doctype html>
         }
       }
     });
+    spec.paper_ids = identifierVariants(spec.paper_ids);
+    spec.source_refs = identifierVariants(spec.source_refs);
+    spec.url_substrings = identifierVariants(spec.url_substrings);
+    spec.titles = normalizeTextList(spec.titles).map((item) => String(item).trim()).filter(Boolean);
+    spec.match_substrings = normalizeTextList(spec.match_substrings).map((item) => String(item).trim()).filter(Boolean);
     return spec;
+  }
+
+  function collectEntityFields(value, bucket) {
+    const out = bucket || { ids: new Set(), titles: new Set(), urls: new Set(), raw: [] };
+    if (value === null || value === undefined) return out;
+    if (Array.isArray(value)) {
+      value.forEach((item) => collectEntityFields(item, out));
+      return out;
+    }
+    if (typeof value === 'object') {
+      Object.entries(value).forEach(([key, inner]) => {
+        const lowered = String(key || '').toLowerCase();
+        if (['id', 'paper_id', 'article_id', 'doi', 'identifier'].includes(lowered)) {
+          identifierVariants(inner).forEach((item) => out.ids.add(item));
+        } else if (['title', 'paper_title', 'article_title', 'name'].includes(lowered)) {
+          normalizeTextList(inner).forEach((item) => out.titles.add(String(item).toLowerCase()));
+        } else if (['source_ref', 'source_refs', 'url', 'urls', 'link', 'links'].includes(lowered)) {
+          identifierVariants(inner).forEach((item) => out.urls.add(item));
+        }
+        collectEntityFields(inner, out);
+      });
+      return out;
+    }
+    const textValue = String(value).trim();
+    if (!textValue) return out;
+    out.raw.push(textValue.toLowerCase());
+    identifierVariants(textValue).forEach((item) => out.ids.add(item));
+    const url = normalizeUrlValue(textValue);
+    if (url) out.urls.add(url);
+    return out;
+  }
+
+  function isCooccurrenceRow(row) {
+    const predicate = String(row?.predicate || '').toLowerCase();
+    const raw = String(row?.raw_record_json || '').toLowerCase();
+    return Boolean(row?.is_cooccurrence) || predicate === 'cooccurs_with' || raw.includes('cooccurrence');
+  }
+
+  function isLikelyCausalRow(row) {
+    const predicate = String(row?.predicate || '').toLowerCase();
+    const evidence = String(row?.evidence_text || '').toLowerCase();
+    const hay = `${predicate} ${evidence}`;
+    return Boolean(row?.is_likely_causal) || ['cause','causes','causal','lead to','leads to','drives','induces','promotes','inhibits','mediates','results in','trigger'].some((token) => hay.includes(token));
+  }
+
+  function cooccurrenceStrength(row) {
+    const candidate = toNumber(row?.cooccurrence_strength, NaN);
+    if (Number.isFinite(candidate)) return Math.max(0, Math.min(1, candidate));
+    const importance = toNumber(row?.importance_score, NaN);
+    if (Number.isFinite(importance)) return Math.max(0, Math.min(1, importance));
+    const confidence = toNumber(row?.mean_confidence, NaN);
+    if (Number.isFinite(confidence) && confidence >= 0 && confidence <= 1) return confidence;
+    return 0;
+  }
+
+  function shouldHideCooccurrenceRow(row) {
+    const mode = String(state.filters.cooccurrenceMode || 'all');
+    if (mode === 'all') return false;
+    if (!isCooccurrenceRow(row)) return false;
+    if (mode === 'exclude_all') return true;
+    if (mode !== 'hide_weak') return false;
+    if (isLikelyCausalRow(row)) return false;
+    return cooccurrenceStrength(row) <= Math.max(0, Math.min(1, toNumber(state.filters.weakCooccurrenceMax, 0.45)));
   }
 
   function exclusionMatchesRow(row, rawSpec) {
     const spec = rawSpec || {};
-    const paperIds = normalizeTextList(row.paper_ids).concat(normalizeTextList(row.papers_text));
-    const titles = normalizeTextList(row.paper_titles);
-    const sourceRefs = normalizeTextList(row.paper_source_refs);
-    const rawJson = String(row.raw_record_json || '').toLowerCase();
-    const hay = [row.subject, row.predicate, row.object, row.evidence_text, row.papers_text, row.raw_record_json].join(' ').toLowerCase();
-    const exactIn = (needles, values) => normalizeTextList(needles).some((needle) => values.some((value) => String(value).toLowerCase() === String(needle).toLowerCase()));
-    const containsIn = (needles, values) => normalizeTextList(needles).some((needle) => values.some((value) => String(value).toLowerCase().includes(String(needle).toLowerCase())));
-    if (exactIn(spec.paper_ids, paperIds) || containsIn(spec.paper_ids, paperIds)) return true;
-    if (containsIn(spec.titles, titles) || normalizeTextList(spec.titles).some((needle) => hay.includes(String(needle).toLowerCase()))) return true;
-    if (containsIn(spec.source_refs, sourceRefs) || normalizeTextList(spec.source_refs).some((needle) => rawJson.includes(String(needle).toLowerCase()))) return true;
-    if (normalizeTextList(spec.match_substrings).some((needle) => hay.includes(String(needle).toLowerCase()))) return true;
-    if (normalizeTextList(spec.url_substrings).some((needle) => rawJson.includes(String(needle).toLowerCase()))) return true;
+    const paperIds = new Set(identifierVariants(normalizeTextList(row.paper_ids).concat(normalizeTextList(row.papers_text))));
+    const titles = new Set(normalizeTextList(row.paper_titles).map((item) => String(item).toLowerCase()));
+    const sourceRefs = new Set(identifierVariants(row.paper_source_refs));
+    const rawEntity = collectEntityFields([
+      row.raw_record_json,
+      row.paper_ids,
+      row.paper_titles,
+      row.paper_source_refs,
+      row.papers_text,
+      row.subject,
+      row.object,
+      row.evidence_text,
+    ]);
+    rawEntity.ids.forEach((item) => paperIds.add(item));
+    rawEntity.titles.forEach((item) => titles.add(item));
+    rawEntity.urls.forEach((item) => sourceRefs.add(item));
+
+    const hayParts = [
+      row.subject, row.predicate, row.object, row.evidence_text, row.papers_text, row.raw_record_json,
+      ...Array.from(rawEntity.ids), ...Array.from(rawEntity.titles), ...Array.from(rawEntity.urls), ...rawEntity.raw,
+    ].map((item) => String(item || '').toLowerCase());
+    const hay = hayParts.join(' ');
+
+    const anyExactOrContains = (needles, values) => normalizeTextList(needles).some((needle) => {
+      const target = String(needle || '').toLowerCase();
+      return Array.from(values).some((value) => value === target || value.includes(target) || target.includes(value));
+    });
+    const anyInHay = (needles) => normalizeTextList(needles).some((needle) => hay.includes(String(needle || '').toLowerCase()));
+
+    if (anyExactOrContains(spec.paper_ids, paperIds) || anyInHay(spec.paper_ids)) return true;
+    if (anyExactOrContains(spec.titles, titles) || anyInHay(spec.titles)) return true;
+    if (anyExactOrContains(spec.source_refs, sourceRefs) || anyInHay(spec.source_refs)) return true;
+    if (anyExactOrContains(spec.url_substrings, sourceRefs) || anyInHay(spec.url_substrings)) return true;
+    if (anyInHay(spec.match_substrings)) return true;
     if (spec.max_year !== undefined && spec.max_year !== null && String(row.start_date || row.valid_from || '').slice(0, 4)) {
       const year = Number(String(row.start_date || row.valid_from || '').slice(0, 4));
       if (Number.isFinite(year) && year > Number(spec.max_year)) return true;
@@ -871,6 +1007,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
       }
       const importance = Math.max(0, Math.min(1, toNumber(row.importance_score, 0)));
       if (importance < threshold) return false;
+      if (shouldHideCooccurrenceRow(row)) return false;
       if (exclusionMatchesRow(row, exclusionSpec)) return false;
       if (!query) return true;
       const hay = [row.subject, row.predicate, row.object, row.evidence_text, row.papers_text].join(' ').toLowerCase();
@@ -956,6 +1093,8 @@ _HTML_TEMPLATE = r"""<!doctype html>
       temporal_corrections: correctionRows.length,
       active_filters: {
         importance_threshold: state.filters.importanceThreshold,
+        cooccurrence_filter_mode: state.filters.cooccurrenceMode,
+        weak_cooccurrence_max_importance: state.filters.weakCooccurrenceMax,
         exclusion_rules: parseExclusionText(state.filters.exclusionText),
       },
     };
@@ -1051,6 +1190,12 @@ _HTML_TEMPLATE = r"""<!doctype html>
 
     const importanceThreshold = el('input', { type: 'number', min: '0', max: '1', step: '0.05', value: String(state.filters.importanceThreshold ?? 0), title: 'Минимальная важность триплета' });
     importanceThreshold.addEventListener('input', (e) => { state.filters.importanceThreshold = Math.max(0, Math.min(1, toNumber(e.target.value, 0))); state.filters.page = 1; autosave(); renderValidation(); });
+    const cooccurrenceMode = el('select', { title: 'Фильтр co-occurrence' });
+    [['all','Co-occurrence: все'], ['hide_weak','Co-occurrence: скрыть слабые'], ['exclude_all','Co-occurrence: оставить только не co-occurrence']].forEach(([value, label]) => cooccurrenceMode.appendChild(el('option', { value, text: label })));
+    cooccurrenceMode.value = String(state.filters.cooccurrenceMode || 'all');
+    cooccurrenceMode.addEventListener('change', (e) => { state.filters.cooccurrenceMode = e.target.value; state.filters.page = 1; autosave(); renderValidation(); });
+    const weakCooccurrenceMax = el('input', { type: 'number', min: '0', max: '1', step: '0.05', value: String(state.filters.weakCooccurrenceMax ?? 0.45), title: 'Макс. сила слабого co-occurrence' });
+    weakCooccurrenceMax.addEventListener('input', (e) => { state.filters.weakCooccurrenceMax = Math.max(0, Math.min(1, toNumber(e.target.value, 0.45))); state.filters.page = 1; autosave(); renderValidation(); });
     const exclusionInput = el('textarea', { rows: '5', placeholder: `paper_ids:
   - PMID:12345
 match_substrings:
@@ -1109,6 +1254,8 @@ match_substrings:
         timestamp: new Date().toISOString(),
         filter_settings: {
           importance_threshold: state.filters.importanceThreshold,
+          cooccurrence_filter_mode: state.filters.cooccurrenceMode,
+          weak_cooccurrence_max_importance: state.filters.weakCooccurrenceMax,
           exclusion_rules: parseExclusionText(state.filters.exclusionText),
         },
         assertions: reviewRows,
@@ -1137,6 +1284,8 @@ match_substrings:
       el('label', { class: 'muted', text: 'Reviewer' }), reviewer,
       graphSelect, verdictSelect, search, pageSize,
       el('label', { class: 'muted', text: 'Порог важности' }), importanceThreshold,
+      cooccurrenceMode,
+      el('label', { class: 'muted', text: 'weak co-occ ≤' }), weakCooccurrenceMax,
       saveDraft, importBtn, importInput, exportZip
     );
     host.appendChild(toolbar);
@@ -1144,7 +1293,7 @@ match_substrings:
     const extraFilters = el('details', { open: false },
       el('summary', { text: 'Дополнительные фильтры: исключения из YAML / JSON' }),
       el('div', { class: 'task2-note task2-ui' },
-        el('div', { class: 'task2-small', text: 'Исключите статьи и триплеты по paper_ids / titles / source_refs / match_substrings, чтобы убрать утечку знаний из будущего в прошлое.' }),
+        el('div', { class: 'task2-small', html: 'Исключите статьи и триплеты по <code>paper_ids</code> / <code>titles</code> / <code>source_refs</code> / <code>match_substrings</code>, чтобы убрать leakage. Отдельный переключатель <b>Co-occurrence</b> выше позволяет скрыть слабые <code>co-occurs_with</code> связи и быстрее оставить сильные каузальные/направленные связи.' }),
         exclusionInput,
         el('div', { class: 'toolbar' }, uploadExclusionBtn, clearExclusionBtn, exclusionUpload)
       )
@@ -1168,6 +1317,8 @@ match_substrings:
       `без оценки: ${APP.records.length - decided}`,
       `с правками: ${corrected}`,
       `важность ≥ ${Number(state.filters.importanceThreshold || 0).toFixed(2)}`,
+      `co-occurrence: ${state.filters.cooccurrenceMode === 'hide_weak' ? 'скрыть слабые' : (state.filters.cooccurrenceMode === 'exclude_all' ? 'убрать все' : 'все')}`,
+      `weak co-occ ≤ ${Number(state.filters.weakCooccurrenceMax || 0).toFixed(2)}`,
       `фильтровано: ${rows.length}`,
       `страница: ${state.filters.page}/${totalPages}`,
     ].forEach((text) => summaryRow.appendChild(el('span', { class: 'pill', text })));
@@ -1421,7 +1572,7 @@ def build_task2_offline_review_package(
             "bundle_dir": str(bundle_dir),
             "reviewer_default": str((task1_doc.get("expert") or {}).get("latin_slug") or (task1_doc.get("expert") or {}).get("full_name") or "") if isinstance(task1_doc.get("expert"), dict) else "",
         },
-        "filter_defaults": manifest.get("filter_defaults") or {"importance_threshold": 0.0, "exclusion_rules": {}},
+        "filter_defaults": manifest.get("filter_defaults") or {"importance_threshold": 0.0, "cooccurrence_filter_mode": "all", "weak_cooccurrence_max_importance": 0.45, "exclusion_rules": {}},
         "excluded_papers": _safe_json_load(Path(bundle_dir / "excluded_papers.json")) if (bundle_dir / "excluded_papers.json").exists() else [],
         "graph_analytics": {
             "gold": _safe_json_load(gold_graph_analytics_path) if gold_graph_analytics_path is not None else {},

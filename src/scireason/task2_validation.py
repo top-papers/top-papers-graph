@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import yaml  # type: ignore
 
 from .task2_offline_review import build_task2_offline_review_package
-from .task2_graph_viz import build_interactive_graph_view, compute_graph_analytics, networkx_from_payload, write_graph_html
+from .task2_graph_viz import build_interactive_graph_view, compute_graph_analytics, networkx_from_payload, write_graph_html, write_graph_html_variants
 from .task2_filters import score_triplet_importance, topic_profile_from_doc, serialize_exclusion_spec, normalize_exclusion_spec
 from .pipeline.task2_validation import (
     build_reference_graph,
@@ -198,6 +198,7 @@ def build_task2_validation_bundle(
     gold_triplets_json = bundle_dir / "reference_triplets.json"
     gold_triplets_csv = bundle_dir / "reference_triplets.csv"
     gold_graph_html = bundle_dir / "reference_graph.html"
+    gold_graph_html_light = bundle_dir / "reference_graph_light.html"
     gold_graph_analytics = bundle_dir / "reference_graph_analytics.json"
 
     gold_payload = json.loads(gold_graph_json.read_text(encoding="utf-8")) if gold_graph_json.exists() else {}
@@ -208,19 +209,20 @@ def build_task2_validation_bundle(
         gold_rows = _score_triplet_rows(gold_rows, doc, analytics=gold_analytics)
         gold_triplets_json.write_text(json.dumps(gold_rows, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_triplets_csv(gold_triplets_json, gold_triplets_csv)
-    write_graph_html(gold_graph_json, gold_graph_html, analytics_path=gold_graph_analytics)
+    write_graph_html_variants(gold_graph_json, gold_graph_html, analytics_path=gold_graph_analytics, light_html_path=gold_graph_html_light)
 
     auto_graph_json = bundle_dir / "automatic_graph" / "temporal_kg.json"
     auto_triplets_json = bundle_dir / "automatic_triplets.json"
     auto_triplets_csv = bundle_dir / "automatic_triplets.csv"
     auto_graph_html = bundle_dir / "automatic_graph.html"
+    auto_graph_html_light = bundle_dir / "automatic_graph_light.html"
     auto_graph_analytics = bundle_dir / "automatic_graph_analytics.json"
 
     auto_analytics = {}
     if auto_graph_json.exists():
         auto_payload = json.loads(auto_graph_json.read_text(encoding="utf-8"))
         auto_analytics = compute_graph_analytics(auto_payload) if auto_payload else {}
-        write_graph_html(auto_graph_json, auto_graph_html, analytics_path=auto_graph_analytics)
+        write_graph_html_variants(auto_graph_json, auto_graph_html, analytics_path=auto_graph_analytics, light_html_path=auto_graph_html_light)
     if auto_triplets_json.exists():
         auto_rows = json.loads(auto_triplets_json.read_text(encoding="utf-8"))
         auto_rows = auto_rows if isinstance(auto_rows, list) else []
@@ -235,14 +237,18 @@ def build_task2_validation_bundle(
         "topic": str(doc.get("topic") or ""),
         "bundle_dir": str(bundle_dir),
         "gold_graph": str(gold_graph_json),
-        "gold_graph_html": str(gold_graph_html),
+        "gold_graph_html": str(gold_graph_html_light),
+        "gold_graph_html_light": str(gold_graph_html_light),
+        "gold_graph_html_full": str(gold_graph_html),
         "gold_triplets_csv": str(gold_triplets_csv),
-        "manifest_version": 6,
+        "manifest_version": 7,
         "review_state_dir": str(review_state_paths["draft_dir"]),
         "review_state_latest": str(review_state_paths["latest"]),
         "gold_graph_analytics": str(gold_graph_analytics),
         "filter_defaults": {
             "importance_threshold": max(0.0, min(1.0, float(importance_threshold or 0.0))),
+            "cooccurrence_filter_mode": "all",
+            "weak_cooccurrence_max_importance": 0.45,
             "exclusion_rules": serialize_exclusion_spec(normalize_exclusion_spec(exclusion_spec)),
         },
     }
@@ -251,7 +257,9 @@ def build_task2_validation_bundle(
         manifest.update({
             "auto_run_dir": str(bundle_dir / "automatic_graph"),
             "auto_graph_json": str(auto_graph_json),
-            "auto_graph_html": str(auto_graph_html),
+            "auto_graph_html": str(auto_graph_html_light),
+            "auto_graph_html_light": str(auto_graph_html_light),
+            "auto_graph_html_full": str(auto_graph_html),
             "auto_triplets_csv": str(auto_triplets_csv),
             "auto_graph_analytics": str(auto_graph_analytics),
         })
