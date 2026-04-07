@@ -548,7 +548,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
     state.filters.pageSize = toNumber(filters.page_size || filters.pageSize, state.filters.pageSize);
     state.filters.page = toNumber(filters.page, state.filters.page);
     state.filters.importanceThreshold = Math.max(0, Math.min(1, toNumber(filters.importance_threshold ?? filters.importanceThreshold, state.filters.importanceThreshold)));
-    state.filters.cooccurrenceMode = String(filters.cooccurrence_filter_mode ?? filters.cooccurrenceMode ?? state.filters.cooccurrenceMode || "all");
+    state.filters.cooccurrenceMode = String((filters.cooccurrence_filter_mode ?? filters.cooccurrenceMode ?? state.filters.cooccurrenceMode) || "all");
     state.filters.weakCooccurrenceMax = Math.max(0, Math.min(1, toNumber(filters.weak_cooccurrence_max_importance ?? filters.weakCooccurrenceMax, state.filters.weakCooccurrenceMax)));
     if (typeof filters.exclusion_text === 'string') state.filters.exclusionText = filters.exclusion_text;
     if (typeof filters.exclusionText === 'string') state.filters.exclusionText = filters.exclusionText;
