@@ -673,6 +673,71 @@ def _escape_json_string_control_chars(text: str) -> str:
     return "".join(out)
 
 
+def _escape_invalid_json_string_backslashes(text: str) -> str:
+    """Repair invalid backslash escapes that occur inside JSON string values.
+
+    LLMs sometimes emit JSON-looking payloads with substrings like ``\\alpha`` or
+    ``\\mathrm`` inside quoted strings. Those are valid text fragments but invalid
+    JSON escapes because JSON only allows ``\" \\ \/ \b \f \n \r \t`` and
+    ``\\uXXXX``. We therefore double only the offending backslashes that appear
+    inside quoted strings, preserving valid escapes and the surrounding JSON
+    structure.
+    """
+
+    s = str(text or "").lstrip("\ufeff")
+    if not s:
+        return s
+
+    out: list[str] = []
+    in_str = False
+    i = 0
+    hexdigits = set("0123456789abcdefABCDEF")
+    valid_simple = {'"', '\\', '/', 'b', 'f', 'n', 'r', 't'}
+
+    while i < len(s):
+        ch = s[i]
+        if not in_str:
+            out.append(ch)
+            if ch == '"':
+                in_str = True
+            i += 1
+            continue
+
+        if ch == '"':
+            out.append(ch)
+            in_str = False
+            i += 1
+            continue
+
+        if ch != '\\':
+            out.append(ch)
+            i += 1
+            continue
+
+        if i + 1 >= len(s):
+            out.append('\\\\')
+            i += 1
+            continue
+
+        nxt = s[i + 1]
+        if nxt in valid_simple:
+            out.append('\\')
+            out.append(nxt)
+            i += 2
+            continue
+
+        if nxt == 'u' and i + 5 < len(s) and all(c in hexdigits for c in s[i + 2:i + 6]):
+            out.append('\\u')
+            out.extend(list(s[i + 2:i + 6]))
+            i += 6
+            continue
+
+        out.append('\\\\')
+        i += 1
+
+    return ''.join(out)
+
+
 def _loads_json_lenient(payload: str) -> Any:
     """Try strict JSON first, then tolerate control chars inside strings."""
 
@@ -698,12 +763,18 @@ def _json_loads_best_effort(text: str) -> Any:
             seen.add(val)
             candidates.append(val)
 
-    _add_candidate(raw)
-    _add_candidate(_extract_first_json_block(raw))
+    def _register_variants(payload: str | None) -> None:
+        base = str(payload or "")
+        if not base.strip():
+            return
+        control_fixed = _escape_json_string_control_chars(base)
+        escape_fixed = _escape_invalid_json_string_backslashes(base)
+        combined_fixed = _escape_invalid_json_string_backslashes(control_fixed)
+        for variant in (base, control_fixed, escape_fixed, combined_fixed):
+            _add_candidate(variant)
+            _add_candidate(_extract_first_json_block(variant))
 
-    repaired_raw = _escape_json_string_control_chars(raw)
-    _add_candidate(repaired_raw)
-    _add_candidate(_extract_first_json_block(repaired_raw))
+    _register_variants(raw)
 
     last_error: Exception | None = None
     for payload in candidates:

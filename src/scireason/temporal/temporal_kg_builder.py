@@ -26,7 +26,11 @@ from ..domain import DomainConfig
 from ..temporal.schemas import TemporalTriplet
 from ..config import settings
 from ..llm import _resolve_llm_selection
-from ..temporal.temporal_triplet_extractor import extract_temporal_triplets, extract_temporal_triplets_async
+from ..temporal.temporal_triplet_extractor import (
+    extract_temporal_triplets,
+    extract_temporal_triplets_async,
+    extract_temporal_triplets_localized_fallback,
+)
 from .term_extraction import TermCandidate, extract_terms_rake
 
 
@@ -679,6 +683,7 @@ def build_temporal_kg(
     base_mode = "llm_triplets" if edge_mode == "auto" else edge_mode
     llm_failures = 0
     localized_fallbacks = 0
+    heuristic_fallbacks = 0
     llm_disabled_after_timeout = False
     selected_provider, _selected_model = _resolve_llm_selection(llm_provider=llm_provider, llm_model=llm_model)
     use_g4f_async_batch = (
@@ -709,6 +714,18 @@ def build_temporal_kg(
                     continue
 
                 localized_fallbacks += 1
+                fallback_triplets = extract_temporal_triplets_localized_fallback(str(unit.text or ""), paper_year=pr.year)
+                if fallback_triplets:
+                    heuristic_fallbacks += 1
+                    if error is not None:
+                        llm_failures += 1
+                        console.print(
+                            f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {error}. "
+                            "Using localized heuristic triplet fallback for this evidence unit after async g4f retries.[/yellow]"
+                        )
+                    _merge_triplets_into_graph(pr=pr, unit=unit, triplets=fallback_triplets, edges=edges, term_set=paper_term_set)
+                    continue
+
                 if error is not None:
                     llm_failures += 1
                     console.print(
@@ -746,25 +763,42 @@ def build_temporal_kg(
                         llm_disabled_after_timeout = True
                         console.print(
                             f"[yellow]Temporal triplets timed out for {pr.paper_id}/{unit.unit_id}: {e}. "
-                            "Disabling LLM triplet extraction for the remaining evidence units and switching to co-occurrence fallback.[/yellow]"
+                            "Disabling LLM triplet extraction for the remaining evidence units and switching to heuristic/co-occurrence fallback.[/yellow]"
                         )
-                        triplets = []
+                        triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
+                        if triplets:
+                            heuristic_fallbacks += 1
+                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
+                            continue
                         unit_mode = "cooccurrence"
                     except Exception as e:
                         llm_failures += 1
                         localized_fallbacks += 1
+                        triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
+                        if triplets:
+                            heuristic_fallbacks += 1
+                            console.print(
+                                f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {e}. "
+                                "Using localized heuristic triplet fallback for this evidence unit only.[/yellow]"
+                            )
+                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
+                            continue
                         console.print(
                             f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {e}. "
                             "Using localized co-occurrence fallback for this evidence unit only.[/yellow]"
                         )
-                        triplets = []
                         unit_mode = "cooccurrence"
                     else:
                         if triplets:
                             _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
-                        else:
-                            localized_fallbacks += 1
-                            unit_mode = "cooccurrence"
+                            continue
+                        localized_fallbacks += 1
+                        triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
+                        if triplets:
+                            heuristic_fallbacks += 1
+                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
+                            continue
+                        unit_mode = "cooccurrence"
                 elif base_mode == "llm_triplets" and llm_disabled_after_timeout:
                     localized_fallbacks += 1
 
@@ -857,6 +891,7 @@ def build_temporal_kg(
             "edge_mode": base_mode,
             "years": years_all,
             "localized_fallbacks": localized_fallbacks,
+            "heuristic_fallbacks": heuristic_fallbacks,
             "llm_failures": llm_failures,
             "llm_disabled_after_timeout": llm_disabled_after_timeout,
             "g4f_async_batch": use_g4f_async_batch,

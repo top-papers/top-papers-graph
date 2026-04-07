@@ -297,7 +297,9 @@ def test_build_temporal_kg_keeps_trying_async_g4f_before_fallback(monkeypatch) -
     assert kg.meta["llm_disabled_after_timeout"] is False
     assert kg.meta["llm_failures"] == 2
     assert kg.meta["localized_fallbacks"] >= 2
-    assert any(edge.predicate == "cooccurs_with" for edge in kg.edges)
+    assert kg.meta["heuristic_fallbacks"] >= 2
+    assert any(edge.predicate == "improves" for edge in kg.edges)
+    assert not any(edge.predicate == "cooccurs_with" for edge in kg.edges)
 
 
 def test_build_temporal_kg_async_g4f_respects_semaphore_limit(monkeypatch) -> None:
@@ -346,3 +348,28 @@ def test_build_temporal_kg_async_g4f_respects_semaphore_limit(monkeypatch) -> No
     assert kg.meta["g4f_async_max_concurrency"] == 2
     assert max_active <= 2
     assert any(edge.predicate == "improves" for edge in kg.edges)
+
+
+def test_json_best_effort_repairs_invalid_escape_sequences() -> None:
+    from scireason.llm import _json_loads_best_effort
+
+    payload = '[{"subject":"dust crystal","predicate":"leads_to","object":"melting",' \
+              '"evidence_quote":"The derivation uses \\alpha and \\mathrm{O} in the text.","confidence":0.8}]'
+    parsed = _json_loads_best_effort(payload)
+
+    assert isinstance(parsed, list)
+    assert parsed[0]["evidence_quote"] == r"The derivation uses \alpha and \mathrm{O} in the text."
+
+
+def test_extract_temporal_triplets_prefers_directional_local_fallback() -> None:
+    from scireason.temporal.temporal_triplet_extractor import extract_temporal_triplets_localized_fallback
+
+    rows = extract_temporal_triplets_localized_fallback(
+        "Increasing plasma power leads to lattice melting after defect proliferation in 2021.",
+        paper_year=2021,
+    )
+
+    assert rows
+    assert rows[0].predicate in {"leads_to", "causes", "results_in"}
+    assert rows[0].time is not None
+    assert rows[0].time.start == "2021"
