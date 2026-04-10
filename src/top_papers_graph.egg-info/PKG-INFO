@@ -15,7 +15,7 @@ Requires-Dist: tenacity>=8.2
 Requires-Dist: python-dotenv>=1.0
 Requires-Dist: pyyaml>=6.0
 Requires-Dist: networkx>=3.3
-Requires-Dist: numpy<2,>=1.26
+Requires-Dist: numpy<3,>=1.26
 Requires-Dist: pypdf>=4.0
 Requires-Dist: neo4j>=5.20
 Requires-Dist: qdrant-client>=1.9
@@ -118,6 +118,22 @@ Requires-Dist: torch-spline-conv>=1.2.2; extra == "gnn-ext"
 Provides-Extra: tgnn
 Requires-Dist: torch>=2.2; extra == "tgnn"
 Requires-Dist: torch-geometric>=2.6.0; extra == "tgnn"
+Provides-Extra: task3
+Requires-Dist: pymupdf>=1.24; extra == "task3"
+Requires-Dist: pillow>=10.0; extra == "task3"
+Requires-Dist: torch>=2.2; extra == "task3"
+Requires-Dist: transformers>=4.57.0; extra == "task3"
+Requires-Dist: accelerate>=0.33; extra == "task3"
+Requires-Dist: sentencepiece>=0.2; extra == "task3"
+Requires-Dist: qwen-vl-utils>=0.0.14; extra == "task3"
+Requires-Dist: g4f>=7.1.2; extra == "task3"
+Requires-Dist: langchain-community>=0.3; extra == "task3"
+Requires-Dist: langchain-text-splitters>=0.3; extra == "task3"
+Requires-Dist: python-dateutil>=2.9; extra == "task3"
+Requires-Dist: dateparser>=1.2; extra == "task3"
+Requires-Dist: annoy>=1.17.3; python_version < "3.13" and extra == "task3"
+Requires-Dist: torch-geometric>=2.6.0; extra == "task3"
+Requires-Dist: torch-geometric-temporal>=0.56.2; extra == "task3"
 Provides-Extra: ocr
 Requires-Dist: paddleocr[doc-parser]>=3.0.0; extra == "ocr"
 Requires-Dist: paddlepaddle>=3.0.0; platform_system != "Darwin" and extra == "ocr"
@@ -238,6 +254,7 @@ pip install -e ".[dev,agents]"
 ```
 
 > `g4f` теперь ставится автоматически вместе с `.[task2_notebook]`, `.[mm]`, `.[multimodal]` и `.[fullstack]`.
+> Для третьего задания добавлен отдельный extra `.[task3]` (multimodal + Annoy + temporal GNN runtime).
 > Отдельный extra `.[g4f]` сохранён для явной установки только g4f.
 
 ### 2) Настройка
@@ -325,6 +342,14 @@ top-papers-graph run --query "..." --llm ollama:llama3.2
 > `HYP_AGENT_BACKEND=smolagents`.
 > Для **локальных HF моделей**: `pip install -e ".[agents_hf]"`.
 > Подробности: `docs/smolagents.md`.
+
+### Task 3 — мультимодальные темпоральные гипотезы
+```bash
+pip install -e ".[task3]"
+top-papers-graph task3-bundle --query "temporal knowledge graph multimodal hypothesis generation" --top-papers 12
+```
+
+Подробности: `README_TASK3_HYPOTHESES.md`.
 
 ### 4) Поиск статей по вашей теме (отдельный шаг)
 ```bash

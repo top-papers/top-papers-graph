@@ -1,0 +1,45 @@
+{
+  "bundle_dir": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review",
+  "generated_at": "2026-04-10T12:09:56Z",
+  "domain_id": "science",
+  "domain_title": "science",
+  "query": "offline dual local model blind review",
+  "trajectory": null,
+  "identifiers_file": null,
+  "n_selected_papers": 0,
+  "n_paper_records": 2,
+  "n_chunks": 6,
+  "n_mm_triplets": 31,
+  "n_link_predictions": 14,
+  "n_candidates": 5,
+  "n_hypotheses": 3,
+  "inputs": {
+    "include_multimodal": true,
+    "run_vlm": false,
+    "edge_mode": "cooccurrence",
+    "link_prediction_backend": "heuristic",
+    "annoy_metric": "angular",
+    "annoy_n_trees": 32
+  },
+  "artifacts": {
+    "papers_selected": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/papers_selected.json",
+    "chunk_registry": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/chunk_registry.jsonl",
+    "annoy_manifest": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/annoy/annoy_manifest.json",
+    "temporal_kg": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/automatic_graph/temporal_kg.json",
+    "events": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/automatic_graph/events.jsonl",
+    "multimodal_triplets": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/automatic_graph/multimodal_triplets.jsonl",
+    "link_predictions": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/automatic_graph/link_predictions.json",
+    "hypotheses_candidates": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/hypotheses_candidates.json",
+    "hypotheses_ranked": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/hypotheses_ranked.json",
+    "hypotheses_markdown": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_beta/offline-dual-local-model-blind-review/hypotheses_ranked.md"
+  },
+  "runtime": {
+    "llm_provider": "mock",
+    "llm_model": "mock",
+    "vlm_backend": "none",
+    "vlm_model_id": "mock-local-model-b",
+    "annoy_backend": "numpy_fallback",
+    "link_prediction_used_backend": "heuristic",
+    "link_prediction_fallback_error": null
+  }
+}

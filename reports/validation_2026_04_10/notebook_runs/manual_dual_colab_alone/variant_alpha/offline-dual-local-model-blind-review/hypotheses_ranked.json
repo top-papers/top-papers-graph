@@ -1,0 +1,403 @@
+[
+  {
+    "candidate": {
+      "kind": "tgnn_missing_link",
+      "source": "improves forecast stability",
+      "target": "links catalyst",
+      "predicate": "may_relate_to",
+      "score": 3.9393939393939394,
+      "time_scope": "2022-2024",
+      "graph_signals": {
+        "tgnn_score": 0.3939393939393939,
+        "tgnn_recent_window_years": 3.0,
+        "tgnn_half_life_years": 2.0
+      }
+    },
+    "temporal_context": {
+      "time_scope": "2022-2024",
+      "ordering": "predicted_or_missing",
+      "yearly_count": {},
+      "first_seen": null,
+      "last_seen": null,
+      "time_intervals": []
+    },
+    "prediction_support": {
+      "source": "improves forecast stability",
+      "target": "links catalyst",
+      "score": 0.3939393939393939,
+      "backend": "heuristic"
+    },
+    "annoy_neighbors": [
+      {
+        "item_id": "paper-2:c1",
+        "chunk_id": "paper-2:c1",
+        "paper_id": "paper-2",
+        "page": null,
+        "modality": "text",
+        "image_path": null,
+        "text": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes.",
+        "embedding_source": "text",
+        "item_index": 3,
+        "score": 0.4518481194972992
+      },
+      {
+        "item_id": "paper-1:c1",
+        "chunk_id": "paper-1:c1",
+        "paper_id": "paper-1",
+        "page": null,
+        "modality": "text",
+        "image_path": null,
+        "text": "Catalyst A reduces latency in sensor networks during 2023 trials. Forecast accuracy improves after catalyst A deployment.",
+        "embedding_source": "text",
+        "item_index": 0,
+        "score": 0.34020695090293884
+      },
+      {
+        "item_id": "paper-2:mm:1",
+        "chunk_id": "paper-2:mm:1",
+        "paper_id": "paper-2",
+        "page": 1,
+        "modality": "page",
+        "image_path": null,
+        "text": "Figure summary: catalyst A maintains lower latency in 2024.\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 4,
+        "score": 0.1714985966682434
+      },
+      {
+        "item_id": "paper-1:mm:1",
+        "chunk_id": "paper-1:mm:1",
+        "paper_id": "paper-1",
+        "page": 1,
+        "modality": "page",
+        "image_path": null,
+        "text": "Page evidence: catalyst A, latency reduction, 2023 timeline.\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 1,
+        "score": 0.0833333432674408
+      },
+      {
+        "item_id": "paper-2:mm:1:table",
+        "chunk_id": "paper-2:mm:1:table",
+        "paper_id": "paper-2",
+        "page": 1,
+        "modality": "table",
+        "image_path": null,
+        "text": "Year | effect\\n2024 | latency reduction\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 5,
+        "score": 0.0
+      },
+      {
+        "item_id": "paper-1:mm:1:table",
+        "chunk_id": "paper-1:mm:1:table",
+        "paper_id": "paper-1",
+        "page": 1,
+        "modality": "table",
+        "image_path": null,
+        "text": "Year | effect\\n2024 | latency reduction\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 2,
+        "score": 0.0
+      }
+    ],
+    "multimodal_support": [
+      {
+        "paper_id": "paper-2",
+        "chunk_id": "paper-2:c1",
+        "modality": "text",
+        "page": null,
+        "image_path": "",
+        "analysis_text": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes.",
+        "triplet": {
+          "subject": "Catalyst",
+          "predicate": "reduces",
+          "object": "latency improves forecast stability 2024 monitoring",
+          "confidence": 0.84,
+          "polarity": "supports",
+          "time": {
+            "start": "2024",
+            "end": "2024",
+            "granularity": "year"
+          },
+          "time_source": "paper_year_fallback",
+          "evidence_quote": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring."
+        }
+      }
+    ],
+    "vlm_candidate_analysis": [],
+    "hypothesis": {
+      "title": "(mock) Graph-derived hypothesis",
+      "premise": "(mock) Premise based on graph signals.",
+      "mechanism": "(mock) Candidate mechanism.",
+      "time_scope": "(mock)",
+      "proposed_experiment": "(mock) Controlled experiment with metrics and ablations.",
+      "supporting_evidence": [],
+      "confidence_score": 5
+    },
+    "final_score": 5.90226445860935,
+    "score_components": {
+      "candidate_score": 3.9393939393939394,
+      "prediction_score": 0.3939393939393939,
+      "multimodal_score": 0.2,
+      "retrieval_score": 0.17448116838932037,
+      "reward_score": -1.0,
+      "reward_reasons": [
+        "missing supporting_evidence"
+      ]
+    },
+    "rank": 1
+  },
+  {
+    "candidate": {
+      "kind": "tgnn_missing_link",
+      "source": "forecasting outcomes",
+      "target": "improves forecast stability",
+      "predicate": "may_relate_to",
+      "score": 3.9393939393939394,
+      "time_scope": "2022-2024",
+      "graph_signals": {
+        "tgnn_score": 0.3939393939393939,
+        "tgnn_recent_window_years": 3.0,
+        "tgnn_half_life_years": 2.0
+      }
+    },
+    "temporal_context": {
+      "time_scope": "2022-2024",
+      "ordering": "predicted_or_missing",
+      "yearly_count": {},
+      "first_seen": null,
+      "last_seen": null,
+      "time_intervals": []
+    },
+    "prediction_support": {
+      "source": "forecasting outcomes",
+      "target": "improves forecast stability",
+      "score": 0.3939393939393939,
+      "backend": "heuristic"
+    },
+    "annoy_neighbors": [
+      {
+        "item_id": "paper-2:c1",
+        "chunk_id": "paper-2:c1",
+        "paper_id": "paper-2",
+        "page": null,
+        "modality": "text",
+        "image_path": null,
+        "text": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes.",
+        "embedding_source": "text",
+        "item_index": 3,
+        "score": 0.3872984051704407
+      },
+      {
+        "item_id": "paper-1:c1",
+        "chunk_id": "paper-1:c1",
+        "paper_id": "paper-1",
+        "page": null,
+        "modality": "text",
+        "image_path": null,
+        "text": "Catalyst A reduces latency in sensor networks during 2023 trials. Forecast accuracy improves after catalyst A deployment.",
+        "embedding_source": "text",
+        "item_index": 0,
+        "score": 0.13608278334140778
+      },
+      {
+        "item_id": "paper-2:mm:1",
+        "chunk_id": "paper-2:mm:1",
+        "paper_id": "paper-2",
+        "page": 1,
+        "modality": "page",
+        "image_path": null,
+        "text": "Figure summary: catalyst A maintains lower latency in 2024.\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 4,
+        "score": 0.0857492983341217
+      },
+      {
+        "item_id": "paper-2:mm:1:table",
+        "chunk_id": "paper-2:mm:1:table",
+        "paper_id": "paper-2",
+        "page": 1,
+        "modality": "table",
+        "image_path": null,
+        "text": "Year | effect\\n2024 | latency reduction\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 5,
+        "score": 0.0
+      },
+      {
+        "item_id": "paper-1:mm:1:table",
+        "chunk_id": "paper-1:mm:1:table",
+        "paper_id": "paper-1",
+        "page": 1,
+        "modality": "table",
+        "image_path": null,
+        "text": "Year | effect\\n2024 | latency reduction\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 2,
+        "score": 0.0
+      },
+      {
+        "item_id": "paper-1:mm:1",
+        "chunk_id": "paper-1:mm:1",
+        "paper_id": "paper-1",
+        "page": 1,
+        "modality": "page",
+        "image_path": null,
+        "text": "Page evidence: catalyst A, latency reduction, 2023 timeline.\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 1,
+        "score": 0.0
+      }
+    ],
+    "multimodal_support": [],
+    "vlm_candidate_analysis": [],
+    "hypothesis": {
+      "title": "(mock) Graph-derived hypothesis",
+      "premise": "(mock) Premise based on graph signals.",
+      "mechanism": "(mock) Candidate mechanism.",
+      "time_scope": "(mock)",
+      "proposed_experiment": "(mock) Controlled experiment with metrics and ablations.",
+      "supporting_evidence": [],
+      "confidence_score": 5
+    },
+    "final_score": 5.718488806260355,
+    "score_components": {
+      "candidate_score": 3.9393939393939394,
+      "prediction_score": 0.3939393939393939,
+      "multimodal_score": 0.0,
+      "retrieval_score": 0.1015217478076617,
+      "reward_score": -1.0,
+      "reward_reasons": [
+        "missing supporting_evidence"
+      ]
+    },
+    "rank": 2
+  },
+  {
+    "candidate": {
+      "kind": "tgnn_missing_link",
+      "source": "links catalyst",
+      "target": "reduces latency",
+      "predicate": "may_relate_to",
+      "score": 3.671010702113229,
+      "time_scope": "2022-2024",
+      "graph_signals": {
+        "tgnn_score": 0.36710107021132293,
+        "tgnn_recent_window_years": 3.0,
+        "tgnn_half_life_years": 2.0
+      }
+    },
+    "temporal_context": {
+      "time_scope": "2022-2024",
+      "ordering": "predicted_or_missing",
+      "yearly_count": {},
+      "first_seen": null,
+      "last_seen": null,
+      "time_intervals": []
+    },
+    "prediction_support": {
+      "source": "links catalyst",
+      "target": "reduces latency",
+      "score": 0.36710107021132293,
+      "backend": "heuristic"
+    },
+    "annoy_neighbors": [
+      {
+        "item_id": "paper-2:c1",
+        "chunk_id": "paper-2:c1",
+        "paper_id": "paper-2",
+        "page": null,
+        "modality": "text",
+        "image_path": null,
+        "text": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes.",
+        "embedding_source": "text",
+        "item_index": 3,
+        "score": 0.48304593563079834
+      },
+      {
+        "item_id": "paper-2:mm:1",
+        "chunk_id": "paper-2:mm:1",
+        "paper_id": "paper-2",
+        "page": 1,
+        "modality": "page",
+        "image_path": null,
+        "text": "Figure summary: catalyst A maintains lower latency in 2024.\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 4,
+        "score": 0.36667943000793457
+      },
+      {
+        "item_id": "paper-1:c1",
+        "chunk_id": "paper-1:c1",
+        "paper_id": "paper-1",
+        "page": null,
+        "modality": "text",
+        "image_path": null,
+        "text": "Catalyst A reduces latency in sensor networks during 2023 trials. Forecast accuracy improves after catalyst A deployment.",
+        "embedding_source": "text",
+        "item_index": 0,
+        "score": 0.36369648575782776
+      },
+      {
+        "item_id": "paper-1:mm:1",
+        "chunk_id": "paper-1:mm:1",
+        "paper_id": "paper-1",
+        "page": 1,
+        "modality": "page",
+        "image_path": null,
+        "text": "Page evidence: catalyst A, latency reduction, 2023 timeline.\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 1,
+        "score": 0.267261266708374
+      },
+      {
+        "item_id": "paper-2:mm:1:table",
+        "chunk_id": "paper-2:mm:1:table",
+        "paper_id": "paper-2",
+        "page": 1,
+        "modality": "table",
+        "image_path": null,
+        "text": "Year | effect\\n2024 | latency reduction\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 5,
+        "score": 0.16495724022388458
+      },
+      {
+        "item_id": "paper-1:mm:1:table",
+        "chunk_id": "paper-1:mm:1:table",
+        "paper_id": "paper-1",
+        "page": 1,
+        "modality": "table",
+        "image_path": null,
+        "text": "Year | effect\\n2024 | latency reduction\n\nTables: Year | effect\\n2024 | latency reduction",
+        "embedding_source": "text",
+        "item_index": 2,
+        "score": 0.16495724022388458
+      }
+    ],
+    "multimodal_support": [],
+    "vlm_candidate_analysis": [],
+    "hypothesis": {
+      "title": "(mock) Graph-derived hypothesis",
+      "premise": "(mock) Premise based on graph signals.",
+      "mechanism": "(mock) Candidate mechanism.",
+      "time_scope": "(mock)",
+      "proposed_experiment": "(mock) Controlled experiment with metrics and ablations.",
+      "supporting_evidence": [],
+      "confidence_score": 5
+    },
+    "final_score": 5.385067846426628,
+    "score_components": {
+      "candidate_score": 3.671010702113229,
+      "prediction_score": 0.36710107021132293,
+      "multimodal_score": 0.0,
+      "retrieval_score": 0.3017662664254506,
+      "reward_score": -1.0,
+      "reward_reasons": [
+        "missing supporting_evidence"
+      ]
+    },
+    "rank": 3
+  }
+]

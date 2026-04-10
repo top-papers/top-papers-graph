@@ -1,0 +1,849 @@
+{
+  "meta": {
+    "domain": "science",
+    "domain_title": "science",
+    "query": "offline dual local model blind review",
+    "n_papers": 2,
+    "edge_mode": "cooccurrence",
+    "years": [
+      2023,
+      2024
+    ],
+    "localized_fallbacks": 0,
+    "heuristic_fallbacks": 0,
+    "llm_failures": 0,
+    "llm_disabled_after_timeout": false,
+    "g4f_async_batch": false,
+    "g4f_async_max_concurrency": 0,
+    "multimodal_enabled": true
+  },
+  "nodes": [
+    {
+      "term": "page evidence catalyst",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2023": 1
+      }
+    },
+    {
+      "term": "sensor networks during 2023",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2023": 1
+      }
+    },
+    {
+      "term": "reduces latency",
+      "doc_freq": 2,
+      "yearly_doc_freq": {
+        "2023": 1,
+        "2024": 1
+      }
+    },
+    {
+      "term": "latency reduction 2023 timeline",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2023": 1
+      }
+    },
+    {
+      "term": "catalyst",
+      "doc_freq": 2,
+      "yearly_doc_freq": {
+        "2023": 1,
+        "2024": 1
+      }
+    },
+    {
+      "term": "deployment",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2023": 1
+      }
+    },
+    {
+      "term": "latency",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    },
+    {
+      "term": "improves forecast stability",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    },
+    {
+      "term": "maintains lower latency",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    },
+    {
+      "term": "forecasting outcomes",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    },
+    {
+      "term": "links catalyst",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    },
+    {
+      "term": "figure summary catalyst",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    },
+    {
+      "term": "2024 tables year effect",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    },
+    {
+      "term": "2024 monitoring temporal graph",
+      "doc_freq": 1,
+      "yearly_doc_freq": {
+        "2024": 1
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "improves forecast stability",
+      "target": "latency",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "catalyst a reduces latency and improves forecast stability in 2024 monitoring",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 0.6931471810599453,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.5880075663549043
+    },
+    {
+      "source": "forecasting outcomes",
+      "target": "latency",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "temporal graph analysis links catalyst a to latency and forecasting outcomes",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 0.6931471810599453,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.5880075663549043
+    },
+    {
+      "source": "forecasting outcomes",
+      "target": "links catalyst",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "temporal graph analysis links catalyst a to latency and forecasting outcomes",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 0.6931471810599453,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.5880075663549043
+    },
+    {
+      "source": "latency",
+      "target": "links catalyst",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "temporal graph analysis links catalyst a to latency and forecasting outcomes",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 0.6931471810599453,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.5880075663549043
+    },
+    {
+      "source": "catalyst",
+      "target": "reduces latency",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 2,
+      "yearly_count": {
+        "2023": 1,
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-1",
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-1",
+          "quote": "catalyst a reduces latency in sensor networks during 2023 trials",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-1:c1"
+        },
+        {
+          "paper_id": "paper-2",
+          "quote": "catalyst a reduces latency and improves forecast stability in 2024 monitoring",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2023",
+          "end": "2023",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-1",
+          "unit_id": "paper-1:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        },
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 1.0986122886681096,
+        "mean_conf": 0.0,
+        "time_signal_count": 2.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.4736122894181096
+    },
+    {
+      "source": "catalyst",
+      "target": "latency",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 2,
+      "yearly_count": {
+        "2024": 2
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "catalyst a reduces latency and improves forecast stability in 2024 monitoring",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        },
+        {
+          "paper_id": "paper-2",
+          "quote": "temporal graph analysis links catalyst a to latency and forecasting outcomes",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 1.0986122886681096,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.4736122894181096
+    },
+    {
+      "source": "catalyst",
+      "target": "sensor networks during 2023",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2023": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-1"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-1",
+          "quote": "catalyst a reduces latency in sensor networks during 2023 trials",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-1:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2023",
+          "end": "2023",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-1",
+          "unit_id": "paper-1:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    },
+    {
+      "source": "reduces latency",
+      "target": "sensor networks during 2023",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2023": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-1"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-1",
+          "quote": "catalyst a reduces latency in sensor networks during 2023 trials",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-1:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2023",
+          "end": "2023",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-1",
+          "unit_id": "paper-1:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    },
+    {
+      "source": "catalyst",
+      "target": "deployment",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2023": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-1"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-1",
+          "quote": "forecast accuracy improves after catalyst a deployment",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-1:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2023",
+          "end": "2023",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-1",
+          "unit_id": "paper-1:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    },
+    {
+      "source": "catalyst",
+      "target": "improves forecast stability",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "catalyst a reduces latency and improves forecast stability in 2024 monitoring",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    },
+    {
+      "source": "improves forecast stability",
+      "target": "reduces latency",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "catalyst a reduces latency and improves forecast stability in 2024 monitoring",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    },
+    {
+      "source": "latency",
+      "target": "reduces latency",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "catalyst a reduces latency and improves forecast stability in 2024 monitoring",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    },
+    {
+      "source": "catalyst",
+      "target": "forecasting outcomes",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "temporal graph analysis links catalyst a to latency and forecasting outcomes",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    },
+    {
+      "source": "catalyst",
+      "target": "links catalyst",
+      "predicate": "cooccurs_with",
+      "directed": false,
+      "total_count": 1,
+      "yearly_count": {
+        "2024": 1
+      },
+      "mean_confidence": 0.0,
+      "polarity_counts": {
+        "supports": 0,
+        "contradicts": 0,
+        "unknown": 0
+      },
+      "papers": [
+        "paper-2"
+      ],
+      "evidence_quotes": [
+        {
+          "paper_id": "paper-2",
+          "quote": "temporal graph analysis links catalyst a to latency and forecasting outcomes",
+          "source_kind": "text:cooccurrence",
+          "unit_id": "paper-2:c1"
+        }
+      ],
+      "time_intervals": [
+        {
+          "start": "2024",
+          "end": "2024",
+          "granularity": "year",
+          "source": "paper_year_fallback",
+          "paper_id": "paper-2",
+          "unit_id": "paper-2:c1",
+          "source_kind": "text",
+          "page": null,
+          "image_path": ""
+        }
+      ],
+      "features": {
+        "pmi": 1.000000082240371e-09,
+        "trend": -0.5,
+        "log_count": 0.6931471805599453,
+        "mean_conf": 0.0,
+        "time_signal_count": 1.0,
+        "time_extracted_ratio": 0.0,
+        "time_best_granularity": 1.0
+      },
+      "score": 0.06814718130994535
+    }
+  ]
+}

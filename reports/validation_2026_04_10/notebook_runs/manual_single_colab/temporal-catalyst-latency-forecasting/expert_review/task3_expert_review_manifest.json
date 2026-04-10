@@ -1,0 +1,29 @@
+{
+  "artifact_version": 1,
+  "topic": "temporal catalyst latency forecasting",
+  "submission_id": "smoke_validation_-__0680eb31006c",
+  "bundle_dir": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_single_colab/temporal-catalyst-latency-forecasting",
+  "offline_review_html": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_single_colab/temporal-catalyst-latency-forecasting/expert_review/offline_review/task3_hypothesis_review_offline_ab.html",
+  "included_files": [
+    "task3_manifest.json",
+    "query.json",
+    "papers_selected.json",
+    "paper_records.json",
+    "chunk_registry.jsonl",
+    "hypotheses_candidates.json",
+    "hypotheses_ranked.json",
+    "hypotheses_ranked.md",
+    "automatic_graph/temporal_kg.json",
+    "automatic_graph/events.jsonl",
+    "automatic_graph/multimodal_triplets.jsonl",
+    "automatic_graph/link_predictions.json",
+    "annoy/annoy_manifest.json",
+    "expert_review/offline_review/task3_hypothesis_review_offline_ab.html",
+    "processed_papers/paper-1/meta.json",
+    "processed_papers/paper-1/chunks.jsonl",
+    "processed_papers/paper-2/meta.json",
+    "processed_papers/paper-2/chunks.jsonl",
+    "processed_papers/paper-2/mm/pages.jsonl",
+    "processed_papers/paper-1/mm/pages.jsonl"
+  ]
+}

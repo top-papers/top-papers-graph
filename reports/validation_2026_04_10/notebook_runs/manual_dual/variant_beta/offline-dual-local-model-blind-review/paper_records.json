@@ -1,0 +1,76 @@
+[
+  {
+    "paper_id": "paper-1",
+    "title": "Temporal catalyst study",
+    "year": 2023,
+    "text": "Catalyst A reduces latency in sensor networks during 2023 trials. Forecast accuracy improves after catalyst A deployment.",
+    "url": "",
+    "source": "",
+    "multimodal_text": "Page evidence: catalyst A, latency reduction, 2023 timeline.\nTables: Year | effect\\n2024 | latency reduction",
+    "evidence_units": [
+      {
+        "unit_id": "paper-1:c1",
+        "text": "Catalyst A reduces latency in sensor networks during 2023 trials. Forecast accuracy improves after catalyst A deployment.",
+        "source_kind": "text",
+        "page": null,
+        "image_path": "",
+        "chunk_id": "paper-1:c1",
+        "metadata": {
+          "source_backend": "validation_script",
+          "bbox": null,
+          "reading_order": null
+        }
+      },
+      {
+        "unit_id": "mm-page-00001",
+        "text": "Page evidence: catalyst A, latency reduction, 2023 timeline.\nTables: Year | effect\\n2024 | latency reduction",
+        "source_kind": "multimodal_page",
+        "page": 1,
+        "image_path": "",
+        "chunk_id": "",
+        "metadata": {
+          "vlm_caption": "",
+          "tables_md": "Year | effect\\n2024 | latency reduction",
+          "equations_md": ""
+        }
+      }
+    ]
+  },
+  {
+    "paper_id": "paper-2",
+    "title": "Temporal catalyst follow-up",
+    "year": 2024,
+    "text": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes.",
+    "url": "",
+    "source": "",
+    "multimodal_text": "Figure summary: catalyst A maintains lower latency in 2024.\nTables: Year | effect\\n2024 | latency reduction",
+    "evidence_units": [
+      {
+        "unit_id": "paper-2:c1",
+        "text": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes.",
+        "source_kind": "text",
+        "page": null,
+        "image_path": "",
+        "chunk_id": "paper-2:c1",
+        "metadata": {
+          "source_backend": "validation_script",
+          "bbox": null,
+          "reading_order": null
+        }
+      },
+      {
+        "unit_id": "mm-page-00001",
+        "text": "Figure summary: catalyst A maintains lower latency in 2024.\nTables: Year | effect\\n2024 | latency reduction",
+        "source_kind": "multimodal_page",
+        "page": 1,
+        "image_path": "",
+        "chunk_id": "",
+        "metadata": {
+          "vlm_caption": "",
+          "tables_md": "Year | effect\\n2024 | latency reduction",
+          "equations_md": ""
+        }
+      }
+    ]
+  }
+]

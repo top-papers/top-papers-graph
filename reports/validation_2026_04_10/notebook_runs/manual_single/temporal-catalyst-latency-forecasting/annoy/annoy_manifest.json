@@ -1,0 +1,11 @@
+{
+  "backend": "numpy_fallback",
+  "metric": "angular",
+  "n_trees": 32,
+  "size": 6,
+  "dim": 384,
+  "index_path": "",
+  "ids_path": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_single/temporal-catalyst-latency-forecasting/annoy/item_ids.json",
+  "metadata_path": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_single/temporal-catalyst-latency-forecasting/annoy/item_metadata.jsonl",
+  "vectors_path": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_single/temporal-catalyst-latency-forecasting/annoy/vectors.npy"
+}

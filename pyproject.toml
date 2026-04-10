@@ -20,7 +20,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "pyyaml>=6.0",
   "networkx>=3.3",
-  "numpy>=1.26,<2",
+  "numpy>=1.26,<3",
   "pypdf>=4.0",
 
   # Optional infra clients (services are optional; pipeline falls back to local artifacts)
@@ -184,6 +184,27 @@ gnn_ext = [
 tgnn = [
   "torch>=2.2",
   "torch-geometric>=2.6.0",
+]
+
+
+# Task 3: multimodal temporal hypothesis generation.
+# Keeps Annoy + PyTorch Geometric Temporal optional and isolated.
+task3 = [
+  "pymupdf>=1.24",
+  "pillow>=10.0",
+  "torch>=2.2",
+  "transformers>=4.57.0",
+  "accelerate>=0.33",
+  "sentencepiece>=0.2",
+  "qwen-vl-utils>=0.0.14",
+  "g4f>=7.1.2",
+  "langchain-community>=0.3",
+  "langchain-text-splitters>=0.3",
+  "python-dateutil>=2.9",
+  "dateparser>=1.2",
+  "annoy>=1.17.3; python_version < \"3.13\"",
+  "torch-geometric>=2.6.0",
+  "torch-geometric-temporal>=0.56.2",
 ]
 
 # OCR / layout extraction (PaddleOCR full-stack).

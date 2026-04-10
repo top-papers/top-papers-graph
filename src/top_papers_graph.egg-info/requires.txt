@@ -7,7 +7,7 @@ tenacity>=8.2
 python-dotenv>=1.0
 pyyaml>=6.0
 networkx>=3.3
-numpy<2,>=1.26
+numpy<3,>=1.26
 pypdf>=4.0
 neo4j>=5.20
 qdrant-client>=1.9
@@ -207,6 +207,25 @@ bokeh>=3.4
 pyvis>=0.3.2
 jupyter_bokeh>=4.0
 pandas<2.4,>=2.2.2
+
+[task3]
+pymupdf>=1.24
+pillow>=10.0
+torch>=2.2
+transformers>=4.57.0
+accelerate>=0.33
+sentencepiece>=0.2
+qwen-vl-utils>=0.0.14
+g4f>=7.1.2
+langchain-community>=0.3
+langchain-text-splitters>=0.3
+python-dateutil>=2.9
+dateparser>=1.2
+torch-geometric>=2.6.0
+torch-geometric-temporal>=0.56.2
+
+[task3:python_version < "3.13"]
+annoy>=1.17.3
 
 [temporal]
 python-dateutil>=2.9

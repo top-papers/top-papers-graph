@@ -43,6 +43,7 @@ pip install -e ".[dev,agents]"
 ```
 
 > `g4f` теперь ставится автоматически вместе с `.[task2_notebook]`, `.[mm]`, `.[multimodal]` и `.[fullstack]`.
+> Для третьего задания добавлен отдельный extra `.[task3]` (multimodal + Annoy + temporal GNN runtime).
 > Отдельный extra `.[g4f]` сохранён для явной установки только g4f.
 
 ### 2) Настройка
@@ -130,6 +131,14 @@ top-papers-graph run --query "..." --llm ollama:llama3.2
 > `HYP_AGENT_BACKEND=smolagents`.
 > Для **локальных HF моделей**: `pip install -e ".[agents_hf]"`.
 > Подробности: `docs/smolagents.md`.
+
+### Task 3 — мультимодальные темпоральные гипотезы
+```bash
+pip install -e ".[task3]"
+top-papers-graph task3-bundle --query "temporal knowledge graph multimodal hypothesis generation" --top-papers 12
+```
+
+Подробности: `README_TASK3_HYPOTHESES.md`.
 
 ### 4) Поиск статей по вашей теме (отдельный шаг)
 ```bash

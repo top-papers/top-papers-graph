@@ -1,0 +1,92 @@
+[
+  {
+    "kind": "tgnn_missing_link",
+    "source": "forecasting outcomes",
+    "target": "improves forecast stability",
+    "predicate": "may_relate_to",
+    "score": 3.9393939393939394,
+    "time_scope": "2022-2024",
+    "graph_signals": {
+      "tgnn_score": 0.3939393939393939,
+      "tgnn_recent_window_years": 3.0,
+      "tgnn_half_life_years": 2.0
+    },
+    "evidence": [
+      {
+        "source_id": "paper-2",
+        "text_snippet": "ity in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes."
+      }
+    ]
+  },
+  {
+    "kind": "tgnn_missing_link",
+    "source": "improves forecast stability",
+    "target": "links catalyst",
+    "predicate": "may_relate_to",
+    "score": 3.9393939393939394,
+    "time_scope": "2022-2024",
+    "graph_signals": {
+      "tgnn_score": 0.3939393939393939,
+      "tgnn_recent_window_years": 3.0,
+      "tgnn_half_life_years": 2.0
+    },
+    "evidence": [
+      {
+        "source_id": "paper-2",
+        "text_snippet": "Catalyst A reduces latency and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes."
+      }
+    ]
+  },
+  {
+    "kind": "tgnn_missing_link",
+    "source": "improves forecast stability",
+    "target": "sensor networks during 2023",
+    "predicate": "may_relate_to",
+    "score": 3.7112944921610613,
+    "time_scope": "2022-2024",
+    "graph_signals": {
+      "tgnn_score": 0.37112944921610613,
+      "tgnn_recent_window_years": 3.0,
+      "tgnn_half_life_years": 2.0
+    },
+    "evidence": []
+  },
+  {
+    "kind": "tgnn_missing_link",
+    "source": "forecasting outcomes",
+    "target": "reduces latency",
+    "predicate": "may_relate_to",
+    "score": 3.671010702113229,
+    "time_scope": "2022-2024",
+    "graph_signals": {
+      "tgnn_score": 0.36710107021132293,
+      "tgnn_recent_window_years": 3.0,
+      "tgnn_half_life_years": 2.0
+    },
+    "evidence": [
+      {
+        "source_id": "paper-2",
+        "text_snippet": "ity in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes."
+      }
+    ]
+  },
+  {
+    "kind": "tgnn_missing_link",
+    "source": "links catalyst",
+    "target": "reduces latency",
+    "predicate": "may_relate_to",
+    "score": 3.671010702113229,
+    "time_scope": "2022-2024",
+    "graph_signals": {
+      "tgnn_score": 0.36710107021132293,
+      "tgnn_recent_window_years": 3.0,
+      "tgnn_half_life_years": 2.0
+    },
+    "evidence": [
+      {
+        "source_id": "paper-2",
+        "text_snippet": "ncy and improves forecast stability in 2024 monitoring. Temporal graph analysis links catalyst A to latency and forecasting outcomes."
+      }
+    ]
+  }
+]

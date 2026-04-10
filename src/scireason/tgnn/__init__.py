@@ -8,3 +8,10 @@ The implementation is deliberately lightweight and course-friendly:
 
 from .event_dataset import build_event_stream, chronological_split  # noqa: F401
 from .tgn_link_prediction import TGNLinkPredConfig, tgn_link_prediction, tgnn_available  # noqa: F401
+
+from .pygt_temporal_link_prediction import (
+    PyGTemporalLinkPredConfig,
+    PyGTemporalUnavailableError,
+    pygt_temporal_available,
+    pygt_temporal_link_prediction,
+)  # noqa: F401

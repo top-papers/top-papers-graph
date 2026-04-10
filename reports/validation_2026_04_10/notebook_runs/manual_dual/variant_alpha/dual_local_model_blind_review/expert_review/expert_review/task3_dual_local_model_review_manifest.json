@@ -1,0 +1,29 @@
+{
+  "artifact_version": 1,
+  "generated_at": "2026-04-10T12:09:56Z",
+  "review_mode": "dual_local_model_blind_ab",
+  "topic": "offline dual local model blind review",
+  "submission_id": "smoke_validation_-__3e0405a95daa",
+  "offline_review_html": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_dual/variant_alpha/dual_local_model_blind_review/expert_review/offline_review/task3_dual_local_model_review_offline_ab.html",
+  "pair_count": 3,
+  "anonymous_systems": [
+    {
+      "system_id": "hidden_alpha_bcc9044699",
+      "display_label": "Hidden model α"
+    },
+    {
+      "system_id": "hidden_beta_282cd59254",
+      "display_label": "Hidden model β"
+    }
+  ],
+  "bundled_variants": [
+    {
+      "display_label": "Hidden model α",
+      "system_id": "hidden_alpha_bcc9044699"
+    },
+    {
+      "display_label": "Hidden model β",
+      "system_id": "hidden_beta_282cd59254"
+    }
+  ]
+}

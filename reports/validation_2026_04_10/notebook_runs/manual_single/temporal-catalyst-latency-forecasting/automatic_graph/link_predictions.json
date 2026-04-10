@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "requested_backend": "heuristic",
+    "used_backend": "heuristic",
+    "fallback_error": null
+  },
+  "predictions": [
+    {
+      "source": "forecasting outcomes",
+      "target": "improves forecast stability",
+      "score": 0.3939393939393939,
+      "backend": "heuristic"
+    },
+    {
+      "source": "improves forecast stability",
+      "target": "links catalyst",
+      "score": 0.3939393939393939,
+      "backend": "heuristic"
+    },
+    {
+      "source": "improves forecast stability",
+      "target": "sensor networks during 2023",
+      "score": 0.37112944921610613,
+      "backend": "heuristic"
+    },
+    {
+      "source": "forecasting outcomes",
+      "target": "reduces latency",
+      "score": 0.36710107021132293,
+      "backend": "heuristic"
+    },
+    {
+      "source": "links catalyst",
+      "target": "reduces latency",
+      "score": 0.36710107021132293,
+      "backend": "heuristic"
+    },
+    {
+      "source": "forecasting outcomes",
+      "target": "sensor networks during 2023",
+      "score": 0.3653553390593274,
+      "backend": "heuristic"
+    },
+    {
+      "source": "links catalyst",
+      "target": "sensor networks during 2023",
+      "score": 0.3653553390593274,
+      "backend": "heuristic"
+    },
+    {
+      "source": "deployment",
+      "target": "forecasting outcomes",
+      "score": 0.35531553355643597,
+      "backend": "heuristic"
+    },
+    {
+      "source": "deployment",
+      "target": "improves forecast stability",
+      "score": 0.35531553355643597,
+      "backend": "heuristic"
+    },
+    {
+      "source": "deployment",
+      "target": "links catalyst",
+      "score": 0.35531553355643597,
+      "backend": "heuristic"
+    },
+    {
+      "source": "deployment",
+      "target": "reduces latency",
+      "score": 0.32621012416011375,
+      "backend": "heuristic"
+    },
+    {
+      "source": "latency",
+      "target": "sensor networks during 2023",
+      "score": 0.3140862994774041,
+      "backend": "heuristic"
+    },
+    {
+      "source": "deployment",
+      "target": "latency",
+      "score": 0.29234977670923223,
+      "backend": "heuristic"
+    },
+    {
+      "source": "deployment",
+      "target": "sensor networks during 2023",
+      "score": 0.2823704619525196,
+      "backend": "heuristic"
+    }
+  ]
+}

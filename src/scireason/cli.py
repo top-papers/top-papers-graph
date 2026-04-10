@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -43,6 +44,7 @@ from .pipeline.e2e import run_pipeline
 from .pipeline.demo import run_demo_pipeline
 from .pipeline.task2_validation import prepare_task2_validation_bundle as prepare_task2_validation_pipeline_bundle
 from .task2_validation import build_task2_validation_bundle
+from .task3_hypothesis_generation import prepare_task3_hypothesis_bundle
 
 
 app = typer.Typer(help="top-papers-graph CLI (ex SciReason)", add_completion=False)
@@ -680,6 +682,130 @@ def task2_bundle(
         importance_threshold=importance_threshold,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle.bundle_dir}")
+
+
+@app.command("prepare-task3-hypotheses")
+def prepare_task3_hypotheses(
+    trajectory: Path | None = typer.Option(None, help="Путь к Task 1 / trajectory YAML (опционально)."),
+    query: str = typer.Option("", help="Текстовый запрос для поиска статей (если не передан trajectory)."),
+    identifiers: str = typer.Option("", help="Список DOI/URL/arXiv/OpenAlex/PMID через запятую или перевод строки."),
+    identifiers_file: Path | None = typer.Option(None, help="Файл со списком DOI/URL/идентификаторов (по одному или через запятую)."),
+    processed_dir: Path | None = typer.Option(None, help="Готовая папка processed_papers для офлайн/smoke режима."),
+    out_dir: Path = typer.Option(Path("runs/task3_hypotheses"), help="Куда сохранить bundle Task 3."),
+    domain_id: str = typer.Option("science", help="ID домена (configs/domains/<id>.yaml)."),
+    search_limit: int = typer.Option(25, help="Сколько результатов запрашивать при поиске статей."),
+    top_papers: int = typer.Option(12, help="Сколько статей максимум брать в pipeline."),
+    top_hypotheses: int = typer.Option(8, help="Сколько итоговых гипотез сохранить."),
+    candidate_top_k: int = typer.Option(16, help="Сколько graph-кандидатов рассмотреть до финального ранжирования."),
+    multimodal: bool = typer.Option(True, help="Включить multimodal ingest PDF (страницы/таблицы/figure evidence)."),
+    vlm: bool = typer.Option(True, help="Разрешить VLM-этапы Task 3 (captioning, candidate-specific analysis)."),
+    edge_mode: str = typer.Option("auto", help="auto|llm_triplets|cooccurrence"),
+    link_backend: str = typer.Option("auto", help="auto|pygt_temporal|heuristic|tgn"),
+    link_top_k: int = typer.Option(24, help="Сколько temporal link predictions сохранить."),
+    annoy_metric: str = typer.Option("angular", help="Метрика Annoy: angular|euclidean|manhattan|dot."),
+    annoy_n_trees: int = typer.Option(32, help="Сколько деревьев строить в Annoy."),
+    g4f_model: str | None = typer.Option(None, "--g4f-model", help="Явно использовать g4f с указанной моделью."),
+    local_model: str | None = typer.Option(None, "--local-model", help="Явно использовать локальную Ollama модель."),
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать текстовый LLM provider для Task 3."),
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать текстовую LLM модель для Task 3."),
+    vlm_backend: str | None = typer.Option(None, "--vlm-backend", help="Переопределить VLM backend (например g4f, qwen2_vl, qwen3_vl)."),
+    vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для HF/local backend."),
+) -> None:
+    """Task 3 orchestrator: papers/query/trajectory -> temporal multimodal KG -> ranked hypotheses."""
+
+    parsed_identifiers = []
+    if identifiers.strip():
+        parsed_identifiers = [item.strip() for item in re.split(r"[,;\n]", identifiers) if item.strip()]
+
+    bundle = prepare_task3_hypothesis_bundle(
+        trajectory=trajectory,
+        query=query,
+        identifiers=parsed_identifiers,
+        identifiers_file=identifiers_file,
+        processed_dir=processed_dir,
+        out_dir=out_dir,
+        domain_id=domain_id,
+        search_limit=search_limit,
+        top_papers=top_papers,
+        top_hypotheses=top_hypotheses,
+        candidate_top_k=candidate_top_k,
+        include_multimodal=multimodal,
+        run_vlm=vlm,
+        edge_mode=edge_mode,
+        link_prediction_backend=link_backend,
+        link_prediction_top_k=link_top_k,
+        annoy_metric=annoy_metric,
+        annoy_n_trees=annoy_n_trees,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
+        vlm_backend=vlm_backend,
+        vlm_model_id=vlm_model_id,
+    )
+    console.print(f"[green]Task 3 bundle prepared:[/green] {bundle.bundle_dir}")
+
+
+@app.command("task3-bundle")
+def task3_bundle(
+    trajectory: Path | None = typer.Option(None, help="Путь к Task 1 / trajectory YAML (опционально)."),
+    query: str = typer.Option("", help="Текстовый запрос для поиска статей (если не передан trajectory)."),
+    identifiers: str = typer.Option("", help="Список DOI/URL/arXiv/OpenAlex/PMID через запятую или перевод строки."),
+    identifiers_file: Path | None = typer.Option(None, help="Файл со списком DOI/URL/идентификаторов (по одному или через запятую)."),
+    processed_dir: Path | None = typer.Option(None, help="Готовая папка processed_papers для офлайн/smoke режима."),
+    out_dir: Path = typer.Option(Path("runs/task3_hypotheses"), help="Куда сохранить bundle Task 3."),
+    domain_id: str = typer.Option("science", help="ID домена (configs/domains/<id>.yaml)."),
+    search_limit: int = typer.Option(25, help="Сколько результатов запрашивать при поиске статей."),
+    top_papers: int = typer.Option(12, help="Сколько статей максимум брать в pipeline."),
+    top_hypotheses: int = typer.Option(8, help="Сколько итоговых гипотез сохранить."),
+    candidate_top_k: int = typer.Option(16, help="Сколько graph-кандидатов рассмотреть до финального ранжирования."),
+    multimodal: bool = typer.Option(True, help="Включить multimodal ingest PDF (страницы/таблицы/figure evidence)."),
+    vlm: bool = typer.Option(True, help="Разрешить VLM-этапы Task 3 (captioning, candidate-specific analysis)."),
+    edge_mode: str = typer.Option("auto", help="auto|llm_triplets|cooccurrence"),
+    link_backend: str = typer.Option("auto", help="auto|pygt_temporal|heuristic|tgn"),
+    link_top_k: int = typer.Option(24, help="Сколько temporal link predictions сохранить."),
+    annoy_metric: str = typer.Option("angular", help="Метрика Annoy: angular|euclidean|manhattan|dot."),
+    annoy_n_trees: int = typer.Option(32, help="Сколько деревьев строить в Annoy."),
+    g4f_model: str | None = typer.Option(None, "--g4f-model", help="Явно использовать g4f с указанной моделью."),
+    local_model: str | None = typer.Option(None, "--local-model", help="Явно использовать локальную Ollama модель."),
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="Явно задать текстовый LLM provider для Task 3."),
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Явно задать текстовую LLM модель для Task 3."),
+    vlm_backend: str | None = typer.Option(None, "--vlm-backend", help="Переопределить VLM backend (например g4f, qwen2_vl, qwen3_vl)."),
+    vlm_model_id: str | None = typer.Option(None, "--vlm-model-id", help="Явно задать VLM model id для HF/local backend."),
+) -> None:
+    """Alias for prepare-task3-hypotheses, kept for notebook/automation symmetry."""
+
+    parsed_identifiers = []
+    if identifiers.strip():
+        parsed_identifiers = [item.strip() for item in re.split(r"[,;\n]", identifiers) if item.strip()]
+
+    bundle = prepare_task3_hypothesis_bundle(
+        trajectory=trajectory,
+        query=query,
+        identifiers=parsed_identifiers,
+        identifiers_file=identifiers_file,
+        processed_dir=processed_dir,
+        out_dir=out_dir,
+        domain_id=domain_id,
+        search_limit=search_limit,
+        top_papers=top_papers,
+        top_hypotheses=top_hypotheses,
+        candidate_top_k=candidate_top_k,
+        include_multimodal=multimodal,
+        run_vlm=vlm,
+        edge_mode=edge_mode,
+        link_prediction_backend=link_backend,
+        link_prediction_top_k=link_top_k,
+        annoy_metric=annoy_metric,
+        annoy_n_trees=annoy_n_trees,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        g4f_model=g4f_model,
+        local_model=local_model,
+        vlm_backend=vlm_backend,
+        vlm_model_id=vlm_model_id,
+    )
+    console.print(f"[green]Task 3 bundle prepared:[/green] {bundle.bundle_dir}")
 
 
 @app.command("pybamm-fastcharge")

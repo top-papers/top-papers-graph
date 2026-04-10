@@ -4,6 +4,7 @@ This archive includes synchronized expert notebooks:
 
 - `task1_reasoning_trajectories_onine_offline_forms.ipynb`
 - `task2_temporal_graph_validation.ipynb`
+- `task3_multimodal_temporal_hypothesis_generation.ipynb`
 
 Both copies are aligned with the tested repository notebooks in `notebooks/` and use the current Task 2 pipeline with:
 
@@ -11,3 +12,11 @@ Both copies are aligned with the tested repository notebooks in `notebooks/` and
 - triplet importance scoring and threshold filtering
 - graph analytics in visualization pages (communities, cliques, centralities, k-core)
 - offline review package generation compatible with downstream VLM fine-tuning datasets
+
+
+Task 3 notebook adds:
+
+- query / identifier / commands / Task 1 YAML inputs
+- local Hugging Face / Transformers VLM routing and g4f routing
+- offline A/B expert review HTML generation
+- expert artifact ZIP packaging for hypothesis review

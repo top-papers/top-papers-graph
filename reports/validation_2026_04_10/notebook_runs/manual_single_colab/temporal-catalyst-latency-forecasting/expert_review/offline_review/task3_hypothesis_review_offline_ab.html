@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task 3 offline review — smoke_validation_-__0680eb31006c</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #d0d7de;
+      --text: #111827;
+      --muted: #475569;
+      --accent: #0f766e;
+      --accent-soft: #e6fffb;
+      --secondary: #3730a3;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); line-height: 1.45; }
+    .page { max-width: 1440px; margin: 0 auto; padding: 20px; }
+    .note, .card, details { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+    .note { padding: 14px 16px; margin-bottom: 14px; }
+    .muted { color: var(--muted); }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0 16px 0; }
+    .toolbar input, .toolbar select, .toolbar textarea, .toolbar button {
+      border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text);
+    }
+    .toolbar input[type="search"] { min-width: 280px; }
+    .toolbar button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .toolbar button.secondary { background: var(--secondary); color: white; border-color: var(--secondary); }
+    .stats { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; background: #eef2ff; color: #3730a3; }
+    .grid { display: grid; gap: 14px; }
+    .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+    .card { padding: 14px 16px; margin-bottom: 14px; }
+    .variant { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: #fff; min-height: 280px; }
+    .variant h4 { margin: 0 0 8px 0; }
+    .variant .label { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 10px; font-size: 12px; background: var(--accent-soft); color: var(--accent); margin-bottom: 8px; }
+    .kv { display: grid; grid-template-columns: 170px 1fr; gap: 6px 10px; font-size: 13px; }
+    .kv div.key { color: var(--muted); }
+    .controls { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 12px; }
+    .controls label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+    textarea { min-height: 88px; resize: vertical; }
+    details { box-shadow: none; margin-top: 10px; }
+    details > summary { cursor: pointer; padding: 10px 12px; font-weight: 600; }
+    details > div, details > pre { padding: 0 12px 12px 12px; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #f8fafc; padding: 12px; border-radius: 10px; overflow: auto; }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="note">
+      <h1>Task 3 — автономная A/B форма для эксперта</h1>
+      <div class="muted">Форма работает локально без ноутбука. Внутри уже встроены гипотезы, временной контекст и ключевые evidence snippets. Варианты A/B показывают <b>полную Task 3 гипотезу</b> и <b>baseline candidate template</b> в случайном слепом порядке.</div>
+    </div>
+
+    <div class="stats" id="meta-stats"></div>
+    <section id="review-section"></section>
+    <section id="summary-section"></section>
+    <div class="footer">Для надёжной передачи между устройствами используйте «Скачать draft JSON» или ZIP с результатами review.</div>
+  </div>
+
+  <script>
+  const APP = {"artifact_version": 1, "meta": {"topic": "temporal catalyst latency forecasting", "submission_id": "smoke_validation_-__0680eb31006c", "cutoff_year": "", "domain": "science", "bundle_dir": "/mnt/data/workrepo/top-papers-graph-main/reports/validation_2026_04_10/notebook_runs/manual_single_colab/temporal-catalyst-latency-forecasting", "reviewer_default": "smoke_validation_-"}, "records": [{"pair_id": "pair-001", "rank": 1, "candidate": {"kind": "tgnn_missing_link", "source": "improves forecast stability", "target": "links catalyst", "predicate": "may_relate_to", "score": 3.9393939393939394, "time_scope": "2022-2024", "graph_signals": {"tgnn_score": 0.3939393939393939, "tgnn_recent_window_years": 3.0, "tgnn_half_life_years": 2.0}}, "temporal_context": {"time_scope": "2022-2024", "ordering": "predicted_or_missing", "yearly_count": {}, "first_seen": null, "last_seen": null, "time_intervals": []}, "prediction_support": {"source": "improves forecast stability", "target": "links catalyst", "score": 0.3939393939393939, "backend": "heuristic"}, "left_variant": {"system_id": "task3_full", "system_title": "Task 3 full model", "title": "(mock) Graph-derived hypothesis", "premise": "(mock) Premise based on graph signals.", "mechanism": "(mock) Candidate mechanism.", "time_scope": "(mock)", "proposed_experiment": "(mock) Controlled experiment with metrics and ablations.", "supporting_evidence": [{"source_id": "paper-2:c1", "text_snippet": "{'paper_id': 'paper-2', 'chunk_id': 'paper-2:c1', 'modality': 'text', 'page': None, 'image_path': '', 'analysis_text': 'Catalyst A reduces latency and improves forecast stability in 2024 monitoring.…", "page": "", "locator": "text"}], "score": 5.90226445860935, "score_label": "final_score"}, "right_variant": {"system_id": "candidate_template", "system_title": "Candidate template baseline", "title": "improves forecast stability may_relate_to links catalyst", "premise": "Observed candidate relation: improves forecast stability may_relate_to links catalyst.", "mechanism": "Temporal graph evidence suggests the relation may evolve over time; ordering=predicted_or_missing; scope=2022-2024; predicted_link=0.394; backend=heuristic. This baseline keeps the claim close to the extracted candidate without extra generative expansion.", "time_scope": "2022-2024", "proposed_experiment": "Collect an independent time-sliced corpus where improves forecast stability and links catalyst co-occur, then test whether the strength or direction of `may_relate_to` remains stable across later time windows.", "supporting_evidence": [{"source_id": "paper-2:c1", "text_snippet": "{'paper_id': 'paper-2', 'chunk_id': 'paper-2:c1', 'modality': 'text', 'page': None, 'image_path': '', 'analysis_text': 'Catalyst A reduces latency and improves forecast stability in 2024 monitoring.…", "page": "", "locator": "text"}], "score": 3.9393939393939394, "score_label": "candidate_score"}, "left_truth": "task3_full", "right_truth": "candidate_template", "left_label": "A", "right_label": "B", "final_score": 5.90226445860935, "review_defaults": {"preferred_variant": "", "better_temporal": "", "better_evidence": "", "better_testability": "", "better_novelty": "", "global_verdict": "", "priority": "medium", "confidence": "3", "comments": ""}}, {"pair_id": "pair-002", "rank": 2, "candidate": {"kind": "tgnn_missing_link", "source": "forecasting outcomes", "target": "improves forecast stability", "predicate": "may_relate_to", "score": 3.9393939393939394, "time_scope": "2022-2024", "graph_signals": {"tgnn_score": 0.3939393939393939, "tgnn_recent_window_years": 3.0, "tgnn_half_life_years": 2.0}}, "temporal_context": {"time_scope": "2022-2024", "ordering": "predicted_or_missing", "yearly_count": {}, "first_seen": null, "last_seen": null, "time_intervals": []}, "prediction_support": {"source": "forecasting outcomes", "target": "improves forecast stability", "score": 0.3939393939393939, "backend": "heuristic"}, "left_variant": {"system_id": "task3_full", "system_title": "Task 3 full model", "title": "(mock) Graph-derived hypothesis", "premise": "(mock) Premise based on graph signals.", "mechanism": "(mock) Candidate mechanism.", "time_scope": "(mock)", "proposed_experiment": "(mock) Controlled experiment with metrics and ablations.", "supporting_evidence": [], "score": 5.718488806260355, "score_label": "final_score"}, "right_variant": {"system_id": "candidate_template", "system_title": "Candidate template baseline", "title": "forecasting outcomes may_relate_to improves forecast stability", "premise": "Observed candidate relation: forecasting outcomes may_relate_to improves forecast stability.", "mechanism": "Temporal graph evidence suggests the relation may evolve over time; ordering=predicted_or_missing; scope=2022-2024; predicted_link=0.394; backend=heuristic. This baseline keeps the claim close to the extracted candidate without extra generative expansion.", "time_scope": "2022-2024", "proposed_experiment": "Collect an independent time-sliced corpus where forecasting outcomes and improves forecast stability co-occur, then test whether the strength or direction of `may_relate_to` remains stable across later time windows.", "supporting_evidence": [], "score": 3.9393939393939394, "score_label": "candidate_score"}, "left_truth": "task3_full", "right_truth": "candidate_template", "left_label": "A", "right_label": "B", "final_score": 5.718488806260355, "review_defaults": {"preferred_variant": "", "better_temporal": "", "better_evidence": "", "better_testability": "", "better_novelty": "", "global_verdict": "", "priority": "medium", "confidence": "3", "comments": ""}}, {"pair_id": "pair-003", "rank": 3, "candidate": {"kind": "tgnn_missing_link", "source": "links catalyst", "target": "reduces latency", "predicate": "may_relate_to", "score": 3.671010702113229, "time_scope": "2022-2024", "graph_signals": {"tgnn_score": 0.36710107021132293, "tgnn_recent_window_years": 3.0, "tgnn_half_life_years": 2.0}}, "temporal_context": {"time_scope": "2022-2024", "ordering": "predicted_or_missing", "yearly_count": {}, "first_seen": null, "last_seen": null, "time_intervals": []}, "prediction_support": {"source": "links catalyst", "target": "reduces latency", "score": 0.36710107021132293, "backend": "heuristic"}, "left_variant": {"system_id": "task3_full", "system_title": "Task 3 full model", "title": "(mock) Graph-derived hypothesis", "premise": "(mock) Premise based on graph signals.", "mechanism": "(mock) Candidate mechanism.", "time_scope": "(mock)", "proposed_experiment": "(mock) Controlled experiment with metrics and ablations.", "supporting_evidence": [], "score": 5.385067846426628, "score_label": "final_score"}, "right_variant": {"system_id": "candidate_template", "system_title": "Candidate template baseline", "title": "links catalyst may_relate_to reduces latency", "premise": "Observed candidate relation: links catalyst may_relate_to reduces latency.", "mechanism": "Temporal graph evidence suggests the relation may evolve over time; ordering=predicted_or_missing; scope=2022-2024; predicted_link=0.367; backend=heuristic. This baseline keeps the claim close to the extracted candidate without extra generative expansion.", "time_scope": "2022-2024", "proposed_experiment": "Collect an independent time-sliced corpus where links catalyst and reduces latency co-occur, then test whether the strength or direction of `may_relate_to` remains stable across later time windows.", "supporting_evidence": [], "score": 3.671010702113229, "score_label": "candidate_score"}, "left_truth": "task3_full", "right_truth": "candidate_template", "left_label": "A", "right_label": "B", "final_score": 5.385067846426628, "review_defaults": {"preferred_variant": "", "better_temporal": "", "better_evidence": "", "better_testability": "", "better_novelty": "", "global_verdict": "", "priority": "medium", "confidence": "3", "comments": ""}}]};
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const el = (tag, attrs, ...children) => {
+    const node = document.createElement(tag);
+    if (attrs) {
+      Object.entries(attrs).forEach(([key, value]) => {
+        if (value === null || value === undefined) return;
+        if (key === 'class') node.className = value;
+        else if (key === 'text') node.textContent = value;
+        else if (key === 'html') node.innerHTML = value;
+        else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
+        else node.setAttribute(key, value);
+      });
+    }
+    children.flat().forEach((child) => {
+      if (child === null || child === undefined) return;
+      if (typeof child === 'string') node.appendChild(document.createTextNode(child));
+      else node.appendChild(child);
+    });
+    return node;
+  };
+
+  const STORAGE_KEY = `task3-offline-review:${APP.meta.submission_id || APP.meta.topic || 'bundle'}`;
+  const state = {
+    reviewer_id: APP.meta.reviewer_default || '',
+    filters: { search: '', verdict: 'all', pageSize: 4, page: 1 },
+    reviewState: Object.fromEntries(APP.records.map((row) => [row.pair_id, clone(row.review_defaults)])),
+  };
+
+  function safeLocalGet(key) { try { return window.localStorage.getItem(key); } catch (_) { return null; } }
+  function safeLocalSet(key, value) { try { window.localStorage.setItem(key, value); } catch (_) { /* noop */ } }
+  function htmlEscape(value) {
+    return String(value ?? '').replace(/[&<>\"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
+  }
+  function truncate(value, limit = 180) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1)).trim()}…`;
+  }
+  function downloadBytes(filename, mime, bytes) {
+    const blob = bytes instanceof Blob ? bytes : new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function downloadText(filename, mime, text) { downloadBytes(filename, mime, new Blob([text], { type: mime })); }
+  function toCsv(rows, columns) {
+    const escape = (value) => {
+      const text = value === null || value === undefined ? '' : String(value);
+      if (/[\",\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+      return text;
+    };
+    const lines = [columns.join(',')];
+    rows.forEach((row) => lines.push(columns.map((col) => escape(row[col])).join(',')));
+    return lines.join('\n');
+  }
+  const CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i += 1) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  function u16(n) { return [n & 255, (n >>> 8) & 255]; }
+  function u32(n) { return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]; }
+  function zipStore(files) {
+    const encoder = new TextEncoder();
+    let offset = 0;
+    const localParts = [];
+    const centralParts = [];
+    files.forEach((file) => {
+      const nameBytes = encoder.encode(file.name);
+      const dataBytes = file.data instanceof Uint8Array ? file.data : encoder.encode(file.data);
+      const crc = crc32(dataBytes);
+      const local = new Uint8Array(30 + nameBytes.length + dataBytes.length);
+      let p = 0;
+      local.set([0x50,0x4b,0x03,0x04], p); p += 4;
+      local.set(u16(20), p); p += 2;
+      local.set(u16(0), p); p += 2;
+      local.set(u16(0), p); p += 2;
+      local.set(u16(0), p); p += 2;
+      local.set(u16(0), p); p += 2;
+      local.set(u32(crc), p); p += 4;
+      local.set(u32(dataBytes.length), p); p += 4;
+      local.set(u32(dataBytes.length), p); p += 4;
+      local.set(u16(nameBytes.length), p); p += 2;
+      local.set(u16(0), p); p += 2;
+      local.set(nameBytes, p); p += nameBytes.length;
+      local.set(dataBytes, p);
+      localParts.push(local);
+
+      const central = new Uint8Array(46 + nameBytes.length);
+      p = 0;
+      central.set([0x50,0x4b,0x01,0x02], p); p += 4;
+      central.set(u16(20), p); p += 2;
+      central.set(u16(20), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u32(crc), p); p += 4;
+      central.set(u32(dataBytes.length), p); p += 4;
+      central.set(u32(dataBytes.length), p); p += 4;
+      central.set(u16(nameBytes.length), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u16(0), p); p += 2;
+      central.set(u32(0), p); p += 4;
+      central.set(u32(offset), p); p += 4;
+      central.set(nameBytes, p);
+      centralParts.push(central);
+      offset += local.length;
+    });
+    const centralSize = centralParts.reduce((acc, part) => acc + part.length, 0);
+    const end = new Uint8Array(22);
+    let p = 0;
+    end.set([0x50,0x4b,0x05,0x06], p); p += 4;
+    end.set(u16(0), p); p += 2;
+    end.set(u16(0), p); p += 2;
+    end.set(u16(files.length), p); p += 2;
+    end.set(u16(files.length), p); p += 2;
+    end.set(u32(centralSize), p); p += 4;
+    end.set(u32(offset), p); p += 4;
+    end.set(u16(0), p);
+    return new Blob([...localParts, ...centralParts, end], { type: 'application/zip' });
+  }
+
+  function snapshot(reason = 'manual') {
+    return {
+      artifact_version: APP.artifact_version || 1,
+      reason,
+      reviewer_id: state.reviewer_id,
+      meta: APP.meta,
+      filters: clone(state.filters),
+      review_state: clone(state.reviewState),
+      generated_at: new Date().toISOString(),
+    };
+  }
+  function autosave(reason = 'autosave') { safeLocalSet(STORAGE_KEY, JSON.stringify(snapshot(reason))); }
+  function loadAutosave() {
+    const raw = safeLocalGet(STORAGE_KEY);
+    if (!raw) return false;
+    try {
+      const payload = JSON.parse(raw);
+      mergeLoaded(payload);
+      return true;
+    } catch (_) { return false; }
+  }
+  function mergeLoaded(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    if (payload.reviewer_id) state.reviewer_id = String(payload.reviewer_id);
+    if (payload.filters && typeof payload.filters === 'object') {
+      state.filters = Object.assign({}, state.filters, payload.filters);
+    }
+    const loaded = payload.review_state || {};
+    Object.keys(loaded).forEach((pairId) => {
+      if (state.reviewState[pairId] && typeof loaded[pairId] === 'object') {
+        state.reviewState[pairId] = Object.assign({}, state.reviewState[pairId], loaded[pairId]);
+      }
+    });
+  }
+  function currentRows() {
+    let rows = APP.records.slice();
+    const query = String(state.filters.search || '').trim().toLowerCase();
+    if (query) {
+      rows = rows.filter((row) => {
+        const cand = row.candidate || {};
+        const hay = [row.left_variant?.title, row.right_variant?.title, cand.source, cand.predicate, cand.target, row.left_variant?.premise, row.right_variant?.premise].join(' ').toLowerCase();
+        return hay.includes(query);
+      });
+    }
+    if (state.filters.verdict && state.filters.verdict !== 'all') {
+      rows = rows.filter((row) => String((state.reviewState[row.pair_id] || {}).global_verdict || '') === state.filters.verdict);
+    }
+    return rows;
+  }
+  function summaryStats() {
+    const rows = APP.records;
+    const pref = { task3_full: 0, candidate_template: 0, tie: 0, skip: 0 };
+    const verdicts = {};
+    rows.forEach((row) => {
+      const rv = state.reviewState[row.pair_id] || {};
+      const v = String(rv.preferred_variant || '');
+      if (!v) pref.skip += 1;
+      else if (v === 'tie') pref.tie += 1;
+      else if (v === 'A') pref[row.left_truth] = (pref[row.left_truth] || 0) + 1;
+      else if (v === 'B') pref[row.right_truth] = (pref[row.right_truth] || 0) + 1;
+      const gv = String(rv.global_verdict || '');
+      if (gv) verdicts[gv] = (verdicts[gv] || 0) + 1;
+    });
+    return { pref, verdicts };
+  }
+
+  function buildReviewRows() {
+    return APP.records.map((row) => {
+      const rv = state.reviewState[row.pair_id] || {};
+      const preferredSystem = !rv.preferred_variant ? '' : (rv.preferred_variant === 'tie' ? 'tie' : (rv.preferred_variant === 'A' ? row.left_truth : row.right_truth));
+      const betterTemporalSystem = !rv.better_temporal ? '' : (rv.better_temporal === 'tie' ? 'tie' : (rv.better_temporal === 'A' ? row.left_truth : row.right_truth));
+      const betterEvidenceSystem = !rv.better_evidence ? '' : (rv.better_evidence === 'tie' ? 'tie' : (rv.better_evidence === 'A' ? row.left_truth : row.right_truth));
+      const betterTestabilitySystem = !rv.better_testability ? '' : (rv.better_testability === 'tie' ? 'tie' : (rv.better_testability === 'A' ? row.left_truth : row.right_truth));
+      const betterNoveltySystem = !rv.better_novelty ? '' : (rv.better_novelty === 'tie' ? 'tie' : (rv.better_novelty === 'A' ? row.left_truth : row.right_truth));
+      return {
+        pair_id: row.pair_id,
+        rank: row.rank,
+        reviewer_id: state.reviewer_id,
+        hypothesis_title_a: row.left_variant?.title || '',
+        hypothesis_title_b: row.right_variant?.title || '',
+        displayed_variant_a_system: row.left_truth,
+        displayed_variant_b_system: row.right_truth,
+        preferred_variant: rv.preferred_variant || '',
+        preferred_system: preferredSystem,
+        better_temporal: rv.better_temporal || '',
+        better_temporal_system: betterTemporalSystem,
+        better_evidence: rv.better_evidence || '',
+        better_evidence_system: betterEvidenceSystem,
+        better_testability: rv.better_testability || '',
+        better_testability_system: betterTestabilitySystem,
+        better_novelty: rv.better_novelty || '',
+        better_novelty_system: betterNoveltySystem,
+        global_verdict: rv.global_verdict || '',
+        priority: rv.priority || '',
+        confidence: rv.confidence || '',
+        comments: rv.comments || '',
+        candidate_source: row.candidate?.source || '',
+        candidate_predicate: row.candidate?.predicate || '',
+        candidate_target: row.candidate?.target || '',
+        final_score: row.final_score || 0,
+      };
+    });
+  }
+
+  function buildSummaryPayload() {
+    const rows = buildReviewRows();
+    const completed = rows.filter((row) => row.preferred_variant || row.global_verdict || row.comments).length;
+    const stats = summaryStats();
+    return {
+      artifact_version: APP.artifact_version || 1,
+      topic: APP.meta.topic,
+      submission_id: APP.meta.submission_id,
+      reviewer_id: state.reviewer_id,
+      timestamp: new Date().toISOString(),
+      total_pairs: APP.records.length,
+      completed_pairs: completed,
+      preference_counts: stats.pref,
+      verdict_counts: stats.verdicts,
+    };
+  }
+
+  function bindSelect(select, pairId, key) {
+    select.value = state.reviewState[pairId][key] || '';
+    select.addEventListener('change', () => {
+      state.reviewState[pairId][key] = select.value;
+      autosave('select');
+      renderSummary();
+    });
+    return select;
+  }
+  function bindTextarea(area, pairId, key) {
+    area.value = state.reviewState[pairId][key] || '';
+    area.addEventListener('input', () => {
+      state.reviewState[pairId][key] = area.value;
+      autosave('textarea');
+    });
+    return area;
+  }
+
+  function variantNode(label, variant) {
+    const evidence = Array.isArray(variant.supporting_evidence) ? variant.supporting_evidence : [];
+    const evidenceList = evidence.length ? el('ul', null, evidence.map((item) => el('li', { text: `${item.source_id ? `[${item.source_id}] ` : ''}${truncate(item.text_snippet, 180)}` }))) : el('div', { class: 'muted', text: 'Нет встроенных evidence snippets.' });
+    return el('div', { class: 'variant' },
+      el('div', { class: 'label', text: `Variant ${label}` }),
+      el('h4', { text: variant.title || '(без названия)' }),
+      el('div', { class: 'kv' },
+        el('div', { class: 'key', text: 'Premise' }), el('div', { text: variant.premise || '' }),
+        el('div', { class: 'key', text: 'Mechanism' }), el('div', { text: variant.mechanism || '' }),
+        el('div', { class: 'key', text: 'Time scope' }), el('div', { text: variant.time_scope || '' }),
+        el('div', { class: 'key', text: 'Experiment' }), el('div', { text: variant.proposed_experiment || '' }),
+        el('div', { class: 'key', text: variant.score_label || 'score' }), el('div', { text: String(variant.score ?? '') })
+      ),
+      el('details', { open: false },
+        el('summary', { text: 'Evidence' }),
+        el('div', null, evidenceList)
+      )
+    );
+  }
+
+  function renderMetaStats() {
+    const host = document.getElementById('meta-stats');
+    host.innerHTML = '';
+    const stats = summaryStats();
+    host.append(
+      el('span', { class: 'pill', text: `topic: ${APP.meta.topic || '—'}` }),
+      el('span', { class: 'pill', text: `submission_id: ${APP.meta.submission_id || '—'}` }),
+      el('span', { class: 'pill', text: `hypotheses: ${APP.records.length}` }),
+      el('span', { class: 'pill', text: `Task3 full preferred: ${stats.pref.task3_full || 0}` }),
+      el('span', { class: 'pill', text: `Baseline preferred: ${stats.pref.candidate_template || 0}` }),
+      el('span', { class: 'pill', text: `ties: ${stats.pref.tie || 0}` })
+    );
+  }
+
+  function renderReview() {
+    const host = document.getElementById('review-section');
+    host.innerHTML = '';
+    const reviewer = el('input', { type: 'text', value: state.reviewer_id || '', placeholder: 'reviewer_id / имя эксперта' });
+    reviewer.addEventListener('input', () => { state.reviewer_id = reviewer.value; autosave('reviewer'); renderSummary(); });
+    const search = el('input', { type: 'search', value: state.filters.search || '', placeholder: 'Поиск по hypothesis / source / target' });
+    search.addEventListener('input', () => { state.filters.search = search.value; state.filters.page = 1; renderReview(); });
+    const verdict = el('select', null,
+      el('option', { value: 'all', text: 'Все verdict' }),
+      el('option', { value: 'accept', text: 'accept' }),
+      el('option', { value: 'partial', text: 'partial' }),
+      el('option', { value: 'needs_fix', text: 'needs_fix' }),
+      el('option', { value: 'reject', text: 'reject' })
+    );
+    verdict.value = state.filters.verdict || 'all';
+    verdict.addEventListener('change', () => { state.filters.verdict = verdict.value; state.filters.page = 1; renderReview(); });
+    const pageSize = el('select', null, [4, 8, 12, 20].map((n) => el('option', { value: String(n), text: `${n} на страницу` })));
+    pageSize.value = String(state.filters.pageSize || 4);
+    pageSize.addEventListener('change', () => { state.filters.pageSize = Number(pageSize.value || 4); state.filters.page = 1; renderReview(); });
+    const saveDraft = el('button', { text: 'Скачать draft JSON' });
+    saveDraft.addEventListener('click', () => downloadText('review_state_latest.json', 'application/json', JSON.stringify(snapshot('download_draft'), null, 2)));
+    const importInput = el('input', { type: 'file', accept: '.json', class: 'hidden' });
+    const importBtn = el('button', { text: 'Импорт draft JSON' });
+    importBtn.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', async () => {
+      const file = importInput.files && importInput.files[0];
+      if (!file) return;
+      const text = await file.text();
+      mergeLoaded(JSON.parse(text));
+      autosave('import');
+      renderMetaStats();
+      renderReview();
+      renderSummary();
+    });
+    const exportZip = el('button', { class: 'primary', text: 'Скачать ZIP с результатами' });
+    exportZip.addEventListener('click', () => {
+      const rows = buildReviewRows();
+      const summary = buildSummaryPayload();
+      const files = [
+        { name: 'hypothesis_reviews.csv', data: toCsv(rows, ['pair_id','rank','reviewer_id','hypothesis_title_a','hypothesis_title_b','displayed_variant_a_system','displayed_variant_b_system','preferred_variant','preferred_system','better_temporal','better_temporal_system','better_evidence','better_evidence_system','better_testability','better_testability_system','better_novelty','better_novelty_system','global_verdict','priority','confidence','comments','candidate_source','candidate_predicate','candidate_target','final_score']) },
+        { name: 'hypothesis_reviews.json', data: JSON.stringify({ artifact_version: APP.artifact_version || 1, topic: APP.meta.topic, submission_id: APP.meta.submission_id, reviewer_id: state.reviewer_id, reviews: rows }, null, 2) },
+        { name: 'ab_test_summary.json', data: JSON.stringify(summary, null, 2) },
+        { name: 'review_state_latest.json', data: JSON.stringify(snapshot('export'), null, 2) },
+      ];
+      downloadBytes('expert_hypothesis_review_bundle.zip', 'application/zip', zipStore(files));
+    });
+    host.appendChild(el('div', { class: 'toolbar' }, reviewer, search, verdict, pageSize, saveDraft, importBtn, importInput, exportZip));
+
+    const rows = currentRows();
+    const totalPages = Math.max(1, Math.ceil(rows.length / state.filters.pageSize));
+    if (state.filters.page > totalPages) state.filters.page = totalPages;
+    const start = (state.filters.page - 1) * state.filters.pageSize;
+    const visible = rows.slice(start, start + state.filters.pageSize);
+    host.appendChild(el('div', { class: 'muted', text: `Показано ${visible.length} из ${rows.length} hypotheses. Страница ${state.filters.page}/${totalPages}.` }));
+
+    visible.forEach((row) => {
+      const cand = row.candidate || {};
+      const rv = state.reviewState[row.pair_id] || {};
+      const card = el('div', { class: 'card' });
+      card.appendChild(el('div', { html: `<b>H-${String(row.rank).padStart(3, '0')}</b> · ${htmlEscape(String(cand.source || 'source'))} <code>${htmlEscape(String(cand.predicate || 'related_to'))}</code> ${htmlEscape(String(cand.target || 'target'))}` }));
+      card.appendChild(el('div', { class: 'muted', text: `final_score=${Number(row.final_score || 0).toFixed(3)}` }));
+      card.appendChild(el('div', { class: 'grid cols-2' }, variantNode(row.left_label, row.left_variant), variantNode(row.right_label, row.right_variant)));
+      card.appendChild(el('details', { open: false },
+        el('summary', { text: 'Candidate + temporal context' }),
+        el('pre', { text: JSON.stringify({ candidate: row.candidate, temporal_context: row.temporal_context, prediction_support: row.prediction_support }, null, 2) })
+      ));
+      const controls = el('div', { class: 'controls' });
+      const pref = bindSelect(el('select', null,
+        el('option', { value: '', text: 'preferred variant?' }),
+        el('option', { value: 'A', text: 'A' }),
+        el('option', { value: 'B', text: 'B' }),
+        el('option', { value: 'tie', text: 'tie' })
+      ), row.pair_id, 'preferred_variant');
+      const betterTemporal = bindSelect(el('select', null,
+        el('option', { value: '', text: 'better temporal reasoning?' }),
+        el('option', { value: 'A', text: 'A' }),
+        el('option', { value: 'B', text: 'B' }),
+        el('option', { value: 'tie', text: 'tie' })
+      ), row.pair_id, 'better_temporal');
+      const betterEvidence = bindSelect(el('select', null,
+        el('option', { value: '', text: 'better evidence grounding?' }),
+        el('option', { value: 'A', text: 'A' }),
+        el('option', { value: 'B', text: 'B' }),
+        el('option', { value: 'tie', text: 'tie' })
+      ), row.pair_id, 'better_evidence');
+      const betterTestability = bindSelect(el('select', null,
+        el('option', { value: '', text: 'better testability?' }),
+        el('option', { value: 'A', text: 'A' }),
+        el('option', { value: 'B', text: 'B' }),
+        el('option', { value: 'tie', text: 'tie' })
+      ), row.pair_id, 'better_testability');
+      const betterNovelty = bindSelect(el('select', null,
+        el('option', { value: '', text: 'better novelty?' }),
+        el('option', { value: 'A', text: 'A' }),
+        el('option', { value: 'B', text: 'B' }),
+        el('option', { value: 'tie', text: 'tie' })
+      ), row.pair_id, 'better_novelty');
+      const verdictSelect = bindSelect(el('select', null,
+        el('option', { value: '', text: 'global verdict' }),
+        el('option', { value: 'accept', text: 'accept' }),
+        el('option', { value: 'partial', text: 'partial' }),
+        el('option', { value: 'needs_fix', text: 'needs_fix' }),
+        el('option', { value: 'reject', text: 'reject' })
+      ), row.pair_id, 'global_verdict');
+      const priority = bindSelect(el('select', null,
+        el('option', { value: 'high', text: 'high priority' }),
+        el('option', { value: 'medium', text: 'medium priority' }),
+        el('option', { value: 'low', text: 'low priority' })
+      ), row.pair_id, 'priority');
+      const confidence = bindSelect(el('select', null, [1,2,3,4,5].map((n) => el('option', { value: String(n), text: `confidence ${n}` }))), row.pair_id, 'confidence');
+      const comments = bindTextarea(el('textarea', { placeholder: 'Комментарий эксперта / почему выбран вариант / что исправить' }), row.pair_id, 'comments');
+      controls.append(
+        el('label', null, 'Preferred', pref),
+        el('label', null, 'Temporal', betterTemporal),
+        el('label', null, 'Evidence', betterEvidence),
+        el('label', null, 'Testability', betterTestability),
+        el('label', null, 'Novelty', betterNovelty),
+        el('label', null, 'Verdict', verdictSelect),
+        el('label', null, 'Priority', priority),
+        el('label', null, 'Confidence', confidence),
+        el('label', { style: 'grid-column: 1 / -1;' }, 'Comments', comments)
+      );
+      card.appendChild(controls);
+      host.appendChild(card);
+    });
+
+    const pager = el('div', { class: 'toolbar' });
+    const prev = el('button', { text: '← Prev' });
+    const next = el('button', { text: 'Next →' });
+    prev.disabled = state.filters.page <= 1;
+    next.disabled = state.filters.page >= totalPages;
+    prev.addEventListener('click', () => { if (state.filters.page > 1) { state.filters.page -= 1; renderReview(); } });
+    next.addEventListener('click', () => { if (state.filters.page < totalPages) { state.filters.page += 1; renderReview(); } });
+    pager.append(prev, el('span', { class: 'muted', text: `page ${state.filters.page}/${totalPages}` }), next);
+    host.appendChild(pager);
+  }
+
+  function renderSummary() {
+    const host = document.getElementById('summary-section');
+    host.innerHTML = '';
+    const rows = buildReviewRows();
+    const summary = buildSummaryPayload();
+    host.appendChild(el('div', { class: 'note', html: `<h2>Сводка A/B review</h2><div class="muted">Completed pairs: <b>${summary.completed_pairs}</b> / ${summary.total_pairs}</div>` }));
+    host.appendChild(el('pre', { text: JSON.stringify(summary, null, 2) }));
+    host.appendChild(el('details', { open: false }, el('summary', { text: 'Preview exported rows' }), el('pre', { text: JSON.stringify(rows.slice(0, 5), null, 2) })));
+  }
+
+  if (!loadAutosave()) autosave('init');
+  renderMetaStats();
+  renderReview();
+  renderSummary();
+  </script>
+</body>
+</html>

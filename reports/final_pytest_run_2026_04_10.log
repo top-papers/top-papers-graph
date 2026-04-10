@@ -1,0 +1,23 @@
+...s...................ss............................................... [ 81%]
+................                                                         [100%]
+=============================== warnings summary ===============================
+../../../../opt/pyvenv/lib/python3.13/site-packages/ddtrace/internal/module.py:313
+  /opt/pyvenv/lib/python3.13/site-packages/ddtrace/internal/module.py:313: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    self.loader.exec_module(module)
+
+tests/test_task2_llm_selection.py: 6 warnings
+tests/test_task2_notebook_compat.py: 3 warnings
+tests/test_task2_progress_and_timeout.py: 2 warnings
+  /mnt/data/workrepo/top-papers-graph-main/src/scireason/pipeline/task2_validation.py:109: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+tests/test_task2_out_of_box_defaults.py::test_review_state_roundtrip
+  /mnt/data/workrepo/top-papers-graph-main/src/scireason/task2_validation.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+tests/test_task2_out_of_box_defaults.py::test_review_state_roundtrip
+  /mnt/data/workrepo/top-papers-graph-main/src/scireason/task2_validation.py:47: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    body["saved_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+85 passed, 3 skipped, 14 warnings in 28.97s
