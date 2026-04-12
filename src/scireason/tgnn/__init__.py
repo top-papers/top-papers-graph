@@ -15,3 +15,5 @@ from .pygt_temporal_link_prediction import (
     pygt_temporal_available,
     pygt_temporal_link_prediction,
 )  # noqa: F401
+
+from .prediction_types import LinkPredictionRecord, SemanticEdgeKey, predicate_family, same_predicate_family  # noqa: F401

@@ -35,6 +35,7 @@ from ..temporal.temporal_kg_builder import EdgeStats, PaperRecord, TemporalKnowl
 from ..tgnn.event_dataset import build_event_stream
 from ..tgnn.pygt_temporal_link_prediction import PyGTemporalLinkPredConfig, PyGTemporalUnavailableError, pygt_temporal_link_prediction
 from ..tgnn.tgn_link_prediction import TGNLinkPredConfig, tgn_link_prediction
+from ..tgnn.prediction_types import LinkPredictionRecord, SemanticEdgeKey, same_predicate_family, normalize_predicate, normalize_term
 
 try:  # pragma: no cover
     from ..mm.mm_embed import embed_images as mm_embed_images
@@ -63,22 +64,6 @@ class Task3BundleResult:
     bundle_dir: Path
     manifest_path: Path
     hypotheses_path: Path
-
-
-@dataclass(frozen=True)
-class LinkPredictionRecord:
-    source: str
-    target: str
-    score: float
-    backend: str
-
-    def to_json_dict(self) -> Dict[str, Any]:
-        return {
-            "source": self.source,
-            "target": self.target,
-            "score": float(self.score),
-            "backend": self.backend,
-        }
 
 
 def _slugify(text: str) -> str:
@@ -553,11 +538,39 @@ def _candidate_temporal_context(kg: TemporalKnowledgeGraph, candidate: Hypothesi
     }
 
 
+def _candidate_semantic_key(candidate: HypothesisCandidate) -> SemanticEdgeKey:
+    return SemanticEdgeKey(
+        source=candidate.source,
+        predicate=candidate.predicate,
+        target=candidate.target,
+        direction="directed",
+        time_bucket=(str(candidate.time_scope or "").strip() or None),
+    ).normalized()
+
+
 def _match_link_prediction(candidate: HypothesisCandidate, predictions: Sequence[LinkPredictionRecord]) -> Optional[LinkPredictionRecord]:
-    a = {candidate.source, candidate.target}
+    ck = _candidate_semantic_key(candidate)
+
+    # 1) exact semantic match
     for pred in predictions:
-        if {pred.source, pred.target} == a:
+        if pred.edge_key() == ck:
             return pred
+
+    # 2) exact nodes + predicate family match (temporal bucket may differ)
+    for pred in predictions:
+        pk = pred.edge_key()
+        if pk.source == ck.source and pk.target == ck.target and same_predicate_family(pk.predicate, ck.predicate):
+            return pred
+
+    # 3) undirected relaxation only for undirected predicates
+    if ck.direction == "undirected" or normalize_predicate(candidate.predicate) == "cooccurs_with":
+        for pred in predictions:
+            pk = pred.edge_key()
+            if pk.direction != "undirected":
+                continue
+            if {pk.source, pk.target} == {ck.source, ck.target} and same_predicate_family(pk.predicate, ck.predicate):
+                return pred
+
     return None
 
 
@@ -793,11 +806,140 @@ def _llm_hypothesis_from_context(
     return HypothesisDraft.model_validate(data)
 
 
+def _positive_squash(value: float, *, scale: float = 1.0) -> float:
+    v = max(0.0, float(value or 0.0))
+    s = max(1e-6, float(scale or 1.0))
+    return 1.0 - (2.718281828459045 ** (-v / s))
+
+
+def _std(values: Sequence[float]) -> float:
+    xs = [float(v) for v in values]
+    if not xs:
+        return 0.0
+    mean = sum(xs) / float(len(xs))
+    return (sum((x - mean) ** 2 for x in xs) / float(len(xs))) ** 0.5
+
+
+def _hypothesis_calibration_payload(
+    *,
+    candidate: HypothesisCandidate,
+    draft: HypothesisDraft,
+    temporal_context: Mapping[str, Any],
+    prediction_score: float,
+    retrieval_score: float,
+    multimodal_score: float,
+    reward_score: float,
+    neighbors: Sequence[Dict[str, Any]],
+    matched_triplets: Sequence[Dict[str, Any]],
+    vlm_analyses: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    normalized_components = [
+        _positive_squash(float(candidate.score), scale=6.0),
+        _positive_squash(float(prediction_score), scale=0.75),
+        _positive_squash(float(multimodal_score), scale=0.8),
+        _positive_squash(float(retrieval_score), scale=0.8),
+        _positive_squash(float(reward_score), scale=3.0),
+    ]
+    agreement = max(0.0, 1.0 - min(1.0, _std(normalized_components)))
+    support_density = min(1.0, (len(neighbors[:6]) + len(matched_triplets[:6]) + len(vlm_analyses[:4])) / 10.0)
+    evidence_density = min(1.0, len(list(getattr(draft, 'supporting_evidence', []) or [])) / 4.0)
+    ordering = str(temporal_context.get('ordering') or '')
+    temporal_grounding = 1.0 if ordering in {'stable', 'strengthening', 'weakening', 'persistent', 'predicted_missing_link'} else 0.45
+    calibration_score = 0.4 * agreement + 0.25 * support_density + 0.2 * evidence_density + 0.15 * temporal_grounding
+    return {
+        'calibration_score': float(calibration_score),
+        'calibration_components': {
+            'agreement': float(agreement),
+            'support_density': float(support_density),
+            'evidence_density': float(evidence_density),
+            'temporal_grounding': float(temporal_grounding),
+        },
+    }
+
+
+def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
+    if not left or not right:
+        return 0.0
+    n = min(len(left), len(right))
+    if n <= 0:
+        return 0.0
+    dot = sum(float(left[i]) * float(right[i]) for i in range(n))
+    ln = sum(float(left[i]) ** 2 for i in range(n)) ** 0.5
+    rn = sum(float(right[i]) ** 2 for i in range(n)) ** 0.5
+    if ln <= 0.0 or rn <= 0.0:
+        return 0.0
+    return max(-1.0, min(1.0, dot / (ln * rn)))
+
+
+def _ranking_text(row: Mapping[str, Any]) -> str:
+    hyp = row.get('hypothesis') or {}
+    cand = row.get('candidate') or {}
+    parts = [
+        str(hyp.get('title') or ''),
+        str(hyp.get('premise') or ''),
+        str(hyp.get('mechanism') or ''),
+        str(cand.get('source') or ''),
+        str(cand.get('predicate') or ''),
+        str(cand.get('target') or ''),
+    ]
+    return ' '.join(part for part in parts if part).strip()
+
+
+def _candidate_similarity(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
+    lc = left.get('candidate') or {}
+    rc = right.get('candidate') or {}
+    edge_overlap = 0.0
+    if str(lc.get('source') or '') == str(rc.get('source') or '') and str(lc.get('target') or '') == str(rc.get('target') or ''):
+        edge_overlap = 1.0
+    elif same_predicate_family(lc.get('predicate') or '', rc.get('predicate') or '') and ({str(lc.get('source') or ''), str(lc.get('target') or '')} & {str(rc.get('source') or ''), str(rc.get('target') or '')}):
+        edge_overlap = 0.7
+    lv = left.get('_rank_vec') or []
+    rv = right.get('_rank_vec') or []
+    return max(edge_overlap, _cosine_similarity(lv, rv))
+
+
+def _apply_mmr_rerank(records: Sequence[Dict[str, Any]], *, top_k: int, lambda_mult: float = 0.72) -> List[Dict[str, Any]]:
+    rows = [dict(row) for row in records]
+    if not rows:
+        return []
+    texts = [_ranking_text(row) for row in rows]
+    vecs = embed(texts) if texts else []
+    for row, vec in zip(rows, vecs):
+        row['_rank_vec'] = vec
+        row['_relevance'] = float(row.get('calibrated_final_score') or row.get('final_score') or 0.0)
+    remaining = rows[:]
+    selected: list[dict[str, Any]] = []
+    lam = max(0.0, min(1.0, float(lambda_mult)))
+    while remaining and len(selected) < int(top_k):
+        best_row = None
+        best_score = None
+        for row in remaining:
+            relevance = float(row.get('_relevance') or 0.0)
+            redundancy = max((_candidate_similarity(row, picked) for picked in selected), default=0.0)
+            mmr_score = lam * relevance - (1.0 - lam) * redundancy
+            row['_mmr_score'] = float(mmr_score)
+            row['_redundancy'] = float(redundancy)
+            if best_score is None or mmr_score > best_score:
+                best_score = mmr_score
+                best_row = row
+        assert best_row is not None
+        remaining.remove(best_row)
+        selected.append(best_row)
+    for rank, row in enumerate(selected, start=1):
+        row['diversity_rank'] = rank
+        row['diversity_penalty'] = float(row.pop('_redundancy', 0.0))
+        row['mmr_score'] = float(row.pop('_mmr_score', row.get('_relevance', 0.0)))
+        row.pop('_rank_vec', None)
+        row.pop('_relevance', None)
+    return selected
+
+
 def _score_hypothesis_record(
     *,
     candidate: HypothesisCandidate,
     draft: HypothesisDraft,
     reward: RuleBasedReward,
+    temporal_context: Mapping[str, Any],
     link_prediction: Optional[LinkPredictionRecord],
     neighbors: Sequence[Dict[str, Any]],
     matched_triplets: Sequence[Dict[str, Any]],
@@ -805,14 +947,14 @@ def _score_hypothesis_record(
 ) -> Dict[str, Any]:
     neighbor_strengths: List[float] = []
     for row in neighbors[:6]:
-        if "score" in row:
-            neighbor_strengths.append(float(row.get("score") or 0.0))
-        elif "distance" in row:
-            neighbor_strengths.append(max(0.0, 1.0 / (1.0 + float(row.get("distance") or 0.0))))
+        if 'score' in row:
+            neighbor_strengths.append(float(row.get('score') or 0.0))
+        elif 'distance' in row:
+            neighbor_strengths.append(max(0.0, 1.0 / (1.0 + float(row.get('distance') or 0.0))))
     retrieval_score = sum(neighbor_strengths) / float(max(1, len(neighbor_strengths)))
     prediction_score = float(link_prediction.score) if link_prediction is not None else 0.0
     multimodal_score = min(1.0, 0.2 * len(matched_triplets) + 0.15 * len(vlm_analyses))
-    reward_breakdown = reward.score(draft.model_dump(mode="json"))
+    reward_breakdown = reward.score(draft.model_dump(mode='json'))
     final_score = (
         1.6 * float(candidate.score)
         + 0.9 * prediction_score
@@ -820,16 +962,32 @@ def _score_hypothesis_record(
         + 0.6 * retrieval_score
         + float(reward_breakdown.score)
     )
+    calibration_payload = _hypothesis_calibration_payload(
+        candidate=candidate,
+        draft=draft,
+        temporal_context=temporal_context,
+        prediction_score=prediction_score,
+        retrieval_score=retrieval_score,
+        multimodal_score=multimodal_score,
+        reward_score=float(reward_breakdown.score),
+        neighbors=neighbors,
+        matched_triplets=matched_triplets,
+        vlm_analyses=vlm_analyses,
+    )
+    calibration_score = float(calibration_payload['calibration_score']) if bool(getattr(settings, 'task3_calibration_enabled', True)) else 1.0
+    calibrated_final_score = float(final_score) * (0.7 + 0.3 * calibration_score)
     return {
-        "final_score": final_score,
-        "score_components": {
-            "candidate_score": float(candidate.score),
-            "prediction_score": prediction_score,
-            "multimodal_score": multimodal_score,
-            "retrieval_score": retrieval_score,
-            "reward_score": float(reward_breakdown.score),
-            "reward_reasons": reward_breakdown.reasons,
+        'final_score': final_score,
+        'calibrated_final_score': calibrated_final_score,
+        'score_components': {
+            'candidate_score': float(candidate.score),
+            'prediction_score': prediction_score,
+            'multimodal_score': multimodal_score,
+            'retrieval_score': retrieval_score,
+            'reward_score': float(reward_breakdown.score),
+            'reward_reasons': reward_breakdown.reasons,
         },
+        **calibration_payload,
     }
 
 
@@ -842,12 +1000,14 @@ def _prediction_records(
     requested = str(backend or "auto").strip().lower()
     used_backend = "tgn"
     error: Optional[str] = None
-    predictions: List[Tuple[str, str, float]] = []
+    predictions: List[LinkPredictionRecord] = []
 
     if requested in {"auto", "pygt", "pygt_temporal", "pyg_temporal"}:
         try:
             cfg = PyGTemporalLinkPredConfig(
                 hidden_dim=int(getattr(settings, "hyp_tgnn_memory_dim", 64) or 64),
+                relation_dim=int(getattr(settings, "hyp_tgnn_relation_dim", 24) or 24),
+                time_dim=int(getattr(settings, "hyp_tgnn_time_dim", 16) or 16),
                 epochs=int(getattr(settings, "hyp_tgnn_epochs", 25) or 25),
                 recent_window_years=int(getattr(settings, "hyp_tgnn_recent_window_years", 3) or 3),
                 min_candidate_score=float(getattr(settings, "hyp_tgnn_min_candidate_score", 0.05) or 0.05),
@@ -870,8 +1030,23 @@ def _prediction_records(
         predictions = tgn_link_prediction(events, top_k=top_k, config=tgn_cfg)
         used_backend = "tgn" if requested != "heuristic" else "heuristic"
 
-    rows = [LinkPredictionRecord(source=u, target=v, score=float(score), backend=used_backend) for u, v, score in predictions]
-    meta = {"requested_backend": requested, "used_backend": used_backend, "fallback_error": error}
+    rows = [
+        LinkPredictionRecord(
+            source=row.source,
+            predicate=row.predicate,
+            target=row.target,
+            score=float(row.score),
+            backend=used_backend or row.backend,
+            polarity=row.polarity,
+            direction=row.direction,
+            ts_pred=row.ts_pred,
+            relation_family=row.relation_family,
+            evidence_path=list(row.evidence_path),
+            aux=dict(row.aux),
+        )
+        for row in predictions
+    ]
+    meta = {"requested_backend": requested, "used_backend": used_backend, "fallback_error": error, "n_predictions": len(rows)}
     return rows, meta
 
 
@@ -1043,6 +1218,7 @@ def prepare_task3_hypothesis_bundle(
                 query=effective_query,
                 domain=domain.title,
                 top_k=max(candidate_top_k, top_hypotheses),
+                prediction_records=link_predictions,
             )
             candidate_rows = []
             for cand in candidates:
@@ -1116,6 +1292,7 @@ def prepare_task3_hypothesis_bundle(
                     candidate=cand,
                     draft=draft,
                     reward=reward,
+                    temporal_context=temporal_context,
                     link_prediction=prediction_match,
                     neighbors=neighbors,
                     matched_triplets=matched_triplets,
@@ -1145,7 +1322,13 @@ def prepare_task3_hypothesis_bundle(
             if vlm_analysis_rows:
                 _write_jsonl(bundle_dir / "automatic_graph" / "vlm_candidate_analysis.jsonl", vlm_analysis_rows)
 
-            ranked_records.sort(key=lambda row: float(row.get("final_score") or 0.0), reverse=True)
+            ranked_records.sort(key=lambda row: float(row.get("calibrated_final_score") or row.get("final_score") or 0.0), reverse=True)
+            if bool(getattr(settings, "task3_mmr_enabled", True)):
+                ranked_records = _apply_mmr_rerank(
+                    ranked_records,
+                    top_k=max(top_hypotheses, len(ranked_records)),
+                    lambda_mult=float(getattr(settings, "task3_mmr_lambda", 0.72) or 0.72),
+                )
             for rank, row in enumerate(ranked_records[:top_hypotheses], start=1):
                 row["rank"] = rank
             hypotheses_path = bundle_dir / "hypotheses_ranked.json"
@@ -1159,6 +1342,8 @@ def prepare_task3_hypothesis_bundle(
                         f"## H-{int(row.get('rank') or 0):03d}: {hyp.get('title', '')}",
                         "",
                         f"**Final score:** {float(row.get('final_score') or 0.0):.3f}",
+                        f"**Calibrated score:** {float(row.get('calibrated_final_score') or 0.0):.3f}",
+                        f"**Calibration:** {float(row.get('calibration_score') or 0.0):.3f}",
                         "",
                         f"**Premise:** {hyp.get('premise', '')}",
                         "",

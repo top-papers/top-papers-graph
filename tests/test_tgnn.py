@@ -38,7 +38,7 @@ def test_build_event_stream_and_split() -> None:
     assert len(train) + len(valid) + len(test) == len(events)
 
 
-def test_tgn_link_prediction_returns_pairs() -> None:
+def test_tgn_link_prediction_returns_semantic_records() -> None:
     events = [
         TemporalEvent(paper_id="p1", subject="a", predicate="rel", object="b", ts_start="2022", ts_end="2022"),
         TemporalEvent(paper_id="p2", subject="b", predicate="rel", object="c", ts_start="2023", ts_end="2023"),
@@ -49,7 +49,8 @@ def test_tgn_link_prediction_returns_pairs() -> None:
     assert isinstance(tgnn_available(), bool)
     assert isinstance(preds, list)
     assert preds
-    assert all(len(item) == 3 for item in preds)
+    assert all(getattr(item, "predicate", None) for item in preds)
+    assert all(getattr(item, "source", None) and getattr(item, "target", None) for item in preds)
 
 
 def test_generate_candidates_prefers_tgnn_when_enabled() -> None:

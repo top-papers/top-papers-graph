@@ -22,6 +22,7 @@ from ..schemas import Citation, HypothesisDraft
 from ..temporal.temporal_kg_builder import EdgeStats, PaperRecord, TemporalKnowledgeGraph
 from ..tgnn.event_dataset import build_event_stream
 from ..tgnn.tgn_link_prediction import TGNLinkPredConfig, tgn_link_prediction
+from ..tgnn.prediction_types import LinkPredictionRecord
 
 # Optional GNN link prediction (PyTorch Geometric). Must not break base installation.
 try:  # pragma: no cover
@@ -108,6 +109,7 @@ def generate_candidates(
     top_k: int = 10,
     recent_window_years: int = 3,
     min_edge_count: int = 2,
+    prediction_records: Optional[Sequence[LinkPredictionRecord]] = None,
 ) -> List[HypothesisCandidate]:
     """Generate hypothesis candidates based on temporal KG signals."""
 
@@ -254,46 +256,50 @@ def generate_candidates(
 
     # ---- 2b) Missing links via TGNN/TGN-style temporal prediction (preferred) ----
     tgnn_missing: List[HypothesisCandidate] = []
-    if bool(getattr(settings, "hyp_tgnn_enabled", True)):
+    preds: Sequence[LinkPredictionRecord] = prediction_records or []
+    tgn_cfg = TGNLinkPredConfig(
+        recent_window_years=int(getattr(settings, "hyp_tgnn_recent_window_years", recent_window_years) or recent_window_years),
+        recency_half_life_years=float(getattr(settings, "hyp_tgnn_half_life_years", 2.0) or 2.0),
+        min_candidate_score=float(getattr(settings, "hyp_tgnn_min_candidate_score", 0.05) or 0.05),
+    )
+    if not preds and bool(getattr(settings, "hyp_tgnn_enabled", True)):
         try:
             events = build_event_stream(kg, papers=papers)
-            tgn_cfg = TGNLinkPredConfig(
-                recent_window_years=int(getattr(settings, "hyp_tgnn_recent_window_years", recent_window_years) or recent_window_years),
-                recency_half_life_years=float(getattr(settings, "hyp_tgnn_half_life_years", 2.0) or 2.0),
-                min_candidate_score=float(getattr(settings, "hyp_tgnn_min_candidate_score", 0.05) or 0.05),
-            )
             preds = tgn_link_prediction(events, top_k=int(top_k), config=tgn_cfg)
         except Exception as e:
             console.print("[yellow]TGNN link prediction failed:[/yellow] ", end="")
             console.print(f"{type(e).__name__}: {e}", markup=False)
             preds = []
 
-        for u, w, prob in preds:
-            ev: List[Citation] = []
-            ul, wl = str(u).lower(), str(w).lower()
-            for pr in papers:
-                low = pr.text.lower()
-                if ul in low and wl in low:
-                    ev.append(Citation(source_id=pr.paper_id, text_snippet=_sentence_snippet(pr.text, ul, wl)))
-                if len(ev) >= 3:
-                    break
+    for pred in preds:
+        ev: List[Citation] = []
+        src = str(pred.source)
+        dst = str(pred.target)
+        ul, wl = src.lower(), dst.lower()
+        for pr in papers:
+            low = pr.text.lower()
+            if ul in low and wl in low:
+                ev.append(Citation(source_id=pr.paper_id, text_snippet=_sentence_snippet(pr.text, ul, wl)))
+            if len(ev) >= 3:
+                break
 
-            tgnn_missing.append(
-                HypothesisCandidate(
-                    kind="tgnn_missing_link",
-                    source=str(u),
-                    target=str(w),
-                    predicate="may_relate_to",
-                    score=float(prob) * 10.0,
-                    time_scope=time_scope,
-                    evidence=ev,
-                    graph_signals={
-                        "tgnn_score": float(prob),
-                        "tgnn_recent_window_years": float(tgn_cfg.recent_window_years),
-                        "tgnn_half_life_years": float(tgn_cfg.recency_half_life_years),
-                    },
-                )
+        tgnn_missing.append(
+            HypothesisCandidate(
+                kind="tgnn_missing_link",
+                source=src,
+                target=dst,
+                predicate=str(pred.predicate or "may_relate_to"),
+                score=float(pred.score) * 10.0,
+                time_scope=str(pred.ts_pred or time_scope or ""),
+                evidence=ev,
+                graph_signals={
+                    "tgnn_score": float(pred.score),
+                    "tgnn_recent_window_years": float(tgn_cfg.recent_window_years),
+                    "tgnn_half_life_years": float(tgn_cfg.recency_half_life_years),
+                    "relation_family": str(pred.relation_family or ""),
+                },
             )
+        )
 
     # ---- 2b) Missing links via GNN (optional; PyTorch Geometric) ----
     # This is intentionally best-effort: if PyG is not installed, we fall back to classic methods.

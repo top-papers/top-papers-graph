@@ -23,7 +23,8 @@ from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Set, 
 from rich.console import Console
 
 from ..domain import DomainConfig
-from ..temporal.schemas import TemporalTriplet
+from ..temporal.schemas import TemporalTriplet, TimeInterval
+from ..temporal.extraction_contracts import validate_verification_payload
 from ..config import settings
 from ..llm import _resolve_llm_selection
 from ..temporal.temporal_triplet_extractor import (
@@ -397,6 +398,8 @@ async def _extract_triplets_batch_async(
     concurrency = max(1, int(getattr(settings, "g4f_async_max_concurrency", 3) or 3))
     semaphore = asyncio.Semaphore(concurrency)
 
+    unit_contexts = {unit.unit_id: _contextualize_unit_text(units, idx) for idx, unit in enumerate(units)}
+
     async def _worker(unit: PaperEvidenceUnit):
         try:
             triplets = await extract_temporal_triplets_async(
@@ -407,7 +410,13 @@ async def _extract_triplets_batch_async(
                 llm_model=llm_model,
                 semaphore=semaphore,
             )
-            return unit, triplets, None
+            verified = _verify_triplets_against_context(
+                triplets,
+                unit_text=str(unit.text or ""),
+                context_text=unit_contexts.get(unit.unit_id, str(unit.text or "")),
+                paper_year=pr.year,
+            )
+            return unit, verified, None
         except Exception as exc:
             return unit, [], exc
 
@@ -470,6 +479,163 @@ def _iter_paper_units(pr: PaperRecord) -> List[PaperEvidenceUnit]:
             source_kind="text_chunk",
         )
     ]
+
+
+def _contextualize_unit_text(units: Sequence[PaperEvidenceUnit], index: int, *, max_chars: int = 1800) -> str:
+    current = str(units[index].text or "").strip()
+    if not current:
+        return ""
+    prev_text = str(units[index - 1].text or "").strip() if index > 0 else ""
+    next_text = str(units[index + 1].text or "").strip() if index + 1 < len(units) else ""
+    parts = []
+    if prev_text:
+        parts.append(prev_text[-320:])
+    parts.append(current)
+    if next_text:
+        parts.append(next_text[:320])
+    text = "\n\n".join(part for part in parts if part).strip()
+    return text[:max_chars]
+
+
+def _fallback_evidence_quote(text: str, max_len: int = 200) -> str:
+    sentence = _sentences(text)[0] if text else ""
+    sentence = sentence.strip()
+    if len(sentence) > max_len:
+        return sentence[: max_len - 1] + "…"
+    return sentence
+
+
+def _verify_triplets_against_context(
+    triplets: Sequence[TemporalTriplet],
+    *,
+    unit_text: str,
+    context_text: str,
+    paper_year: Optional[int],
+) -> list[TemporalTriplet]:
+    haystack = f"{context_text or ''}\n{unit_text or ''}".lower()
+    verification_rows: list[dict[str, Any]] = []
+    for tr in triplets:
+        subject = _norm_term(tr.subject)
+        object_ = _norm_term(tr.object)
+        predicate = _norm_term(tr.predicate)
+        support = 0
+        if subject and subject in haystack:
+            support += 1
+        if object_ and object_ in haystack:
+            support += 1
+        if predicate and predicate.replace('_', ' ') in haystack:
+            support += 1
+        evidence_quote = str(tr.evidence_quote or '').strip().lower()
+        if evidence_quote:
+            if evidence_quote in haystack:
+                support += 1
+            if subject and subject in evidence_quote:
+                support += 1
+            if object_ and object_ in evidence_quote:
+                support += 1
+
+        supported = support > 0
+        support_level = 'none'
+        confidence = float(tr.confidence)
+        if support == 1:
+            support_level = 'weak'
+            confidence = max(0.35, confidence * 0.75)
+        elif support == 2:
+            support_level = 'moderate'
+        elif support >= 3:
+            support_level = 'strong'
+            confidence = min(1.0, confidence + 0.05)
+
+        verification_rows.append(
+            {
+                'subject': tr.subject,
+                'predicate': tr.predicate,
+                'object': tr.object,
+                'supported': supported,
+                'support_level': support_level,
+                'confidence': confidence,
+                'polarity': tr.polarity,
+                'evidence_quote': tr.evidence_quote or _fallback_evidence_quote(unit_text or context_text),
+                'time': tr.time.model_dump(mode='json') if tr.time is not None else ({'start': str(paper_year), 'end': str(paper_year), 'granularity': 'year'} if paper_year is not None else None),
+                'time_source': getattr(tr, 'time_source', 'extracted') if tr.time is not None else ('paper_year_fallback' if paper_year is not None else 'extracted'),
+                'rationale': f'heuristic_context_support={support}',
+            }
+        )
+
+    verified_payload = validate_verification_payload({'verifications': verification_rows})
+    verified: list[TemporalTriplet] = []
+    for row in verified_payload:
+        if not row.supported:
+            continue
+        verified.append(
+            TemporalTriplet(
+                subject=row.subject,
+                predicate=row.predicate,
+                object=row.object,
+                confidence=row.confidence,
+                polarity=row.polarity,
+                evidence_quote=row.evidence_quote,
+                time=row.time,
+                time_source=row.time_source,
+            )
+        )
+    return verified
+
+
+def _extract_triplets_with_degradation(
+    *,
+    domain: DomainConfig,
+    pr: PaperRecord,
+    unit: PaperEvidenceUnit,
+    contextual_text: str,
+    llm_provider: Optional[str],
+    llm_model: Optional[str],
+) -> tuple[list[TemporalTriplet], bool, Exception | None]:
+    unit_text = str(unit.text or "").strip()
+    if not unit_text:
+        return [], False, None
+
+    reduced_prompt_used = False
+    try:
+        rows = extract_temporal_triplets(
+            domain=domain.title,
+            chunk_text=unit_text,
+            paper_year=pr.year,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+        )
+        verified = _verify_triplets_against_context(
+            rows,
+            unit_text=unit_text,
+            context_text=contextual_text,
+            paper_year=pr.year,
+        )
+        if verified:
+            return verified, reduced_prompt_used, None
+        return [], reduced_prompt_used, None
+    except TimeoutError as exc:
+        reduced_prompt_used = True
+        try:
+            rows = extract_temporal_triplets(
+                domain=domain.title,
+                chunk_text=unit_text[:1200],
+                paper_year=pr.year,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+            )
+            verified = _verify_triplets_against_context(
+                rows,
+                unit_text=unit_text,
+                context_text=contextual_text,
+                paper_year=pr.year,
+            )
+            if verified:
+                return verified, reduced_prompt_used, None
+            return [], reduced_prompt_used, exc
+        except Exception as inner_exc:
+            return [], reduced_prompt_used, inner_exc
+    except Exception as exc:
+        return [], reduced_prompt_used, exc
 
 
 def _time_payload_from_triplet(tr: TemporalTriplet, *, paper_id: str, unit: PaperEvidenceUnit, paper_year: Optional[int]) -> Optional[Dict[str, Any]]:
@@ -684,7 +850,8 @@ def build_temporal_kg(
     llm_failures = 0
     localized_fallbacks = 0
     heuristic_fallbacks = 0
-    llm_disabled_after_timeout = False
+    llm_timeouts = 0
+    reduced_prompt_attempts = 0
     selected_provider, _selected_model = _resolve_llm_selection(llm_provider=llm_provider, llm_model=llm_model)
     use_g4f_async_batch = (
         base_mode == "llm_triplets"
@@ -715,6 +882,12 @@ def build_temporal_kg(
 
                 localized_fallbacks += 1
                 fallback_triplets = extract_temporal_triplets_localized_fallback(str(unit.text or ""), paper_year=pr.year)
+                fallback_triplets = _verify_triplets_against_context(
+                    fallback_triplets,
+                    unit_text=str(unit.text or ""),
+                    context_text=str(unit.text or ""),
+                    paper_year=pr.year,
+                )
                 if fallback_triplets:
                     heuristic_fallbacks += 1
                     if error is not None:
@@ -746,61 +919,41 @@ def build_temporal_kg(
                 unit_text = str(unit.text or "").strip()
                 if not unit_text:
                     continue
-                unit_mode = "cooccurrence" if (base_mode == "llm_triplets" and llm_disabled_after_timeout) else base_mode
+                unit_mode = base_mode
 
                 if unit_mode == "llm_triplets":
-                    try:
-                        triplets = extract_temporal_triplets(
-                            domain=domain.title,
-                            chunk_text=unit_text,
-                            paper_year=pr.year,
-                            llm_provider=llm_provider,
-                            llm_model=llm_model,
-                        )
-                    except TimeoutError as e:
-                        llm_failures += 1
-                        localized_fallbacks += 1
-                        llm_disabled_after_timeout = True
-                        console.print(
-                            f"[yellow]Temporal triplets timed out for {pr.paper_id}/{unit.unit_id}: {e}. "
-                            "Disabling LLM triplet extraction for the remaining evidence units and switching to heuristic/co-occurrence fallback.[/yellow]"
-                        )
-                        triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
-                        if triplets:
-                            heuristic_fallbacks += 1
-                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
-                            continue
-                        unit_mode = "cooccurrence"
-                    except Exception as e:
-                        llm_failures += 1
-                        localized_fallbacks += 1
-                        triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
-                        if triplets:
-                            heuristic_fallbacks += 1
-                            console.print(
-                                f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {e}. "
-                                "Using localized heuristic triplet fallback for this evidence unit only.[/yellow]"
-                            )
-                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
-                            continue
-                        console.print(
-                            f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {e}. "
-                            "Using localized co-occurrence fallback for this evidence unit only.[/yellow]"
-                        )
-                        unit_mode = "cooccurrence"
-                    else:
-                        if triplets:
-                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
-                            continue
-                        localized_fallbacks += 1
-                        triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
-                        if triplets:
-                            heuristic_fallbacks += 1
-                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
-                            continue
-                        unit_mode = "cooccurrence"
-                elif base_mode == "llm_triplets" and llm_disabled_after_timeout:
+                    contextual_text = _contextualize_unit_text(units, units.index(unit))
+                    triplets, reduced_used, error = _extract_triplets_with_degradation(
+                        domain=domain,
+                        pr=pr,
+                        unit=unit,
+                        contextual_text=contextual_text,
+                        llm_provider=llm_provider,
+                        llm_model=llm_model,
+                    )
+                    if reduced_used:
+                        reduced_prompt_attempts += 1
+                    if triplets:
+                        _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
+                        continue
+
                     localized_fallbacks += 1
+                    if error is not None:
+                        llm_failures += 1
+                        if isinstance(error, TimeoutError):
+                            llm_timeouts += 1
+                        console.print(
+                            f"[yellow]Temporal triplets failed for {pr.paper_id}/{unit.unit_id}: {error}. "
+                            "Using localized heuristic/co-occurrence fallback for this evidence unit only.[/yellow]"
+                        )
+
+                    triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
+                    triplets = _verify_triplets_against_context(triplets, unit_text=unit_text, context_text=contextual_text, paper_year=pr.year)
+                    if triplets:
+                        heuristic_fallbacks += 1
+                        _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
+                        continue
+                    unit_mode = "cooccurrence"
 
                 if unit_mode == "cooccurrence":
                     _merge_cooccurrence_into_graph(
@@ -893,7 +1046,9 @@ def build_temporal_kg(
             "localized_fallbacks": localized_fallbacks,
             "heuristic_fallbacks": heuristic_fallbacks,
             "llm_failures": llm_failures,
-            "llm_disabled_after_timeout": llm_disabled_after_timeout,
+            "llm_timeouts": llm_timeouts,
+            "reduced_prompt_attempts": reduced_prompt_attempts,
+            "llm_disabled_after_timeout": False,
             "g4f_async_batch": use_g4f_async_batch,
             "g4f_async_max_concurrency": int(getattr(settings, "g4f_async_max_concurrency", 3) or 3) if use_g4f_async_batch else 0,
             "multimodal_enabled": any(bool(getattr(pr, "multimodal_text", "").strip()) for pr in papers),

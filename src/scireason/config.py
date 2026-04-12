@@ -123,7 +123,13 @@ class Settings(BaseSettings):
     hyp_tgnn_min_candidate_score: float = 0.05
     hyp_tgnn_memory_dim: int = 64
     hyp_tgnn_time_dim: int = 16
+    hyp_tgnn_relation_dim: int = 24
     hyp_tgnn_epochs: int = 25
+
+    # ===== Task 3 ranking =====
+    task3_calibration_enabled: bool = True
+    task3_mmr_enabled: bool = True
+    task3_mmr_lambda: float = 0.72
 
     # ===== Static GNN baseline =====
     hyp_gnn_enabled: bool = False
