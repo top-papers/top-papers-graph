@@ -6,6 +6,7 @@ import re
 import threading
 from typing import List, Optional
 
+from pydantic import TypeAdapter
 
 from ..config import settings
 from ..demos.render import render_demos_block
@@ -17,10 +18,6 @@ from ..llm import (
     temporary_llm_selection,
 )
 from .schemas import TemporalTriplet, normalize_granularity
-from .extraction_contracts import (
-    EXTRACTION_SCHEMA_HINT,
-    validate_extraction_payload,
-)
 from .time_parse import default_time_from_paper_year
 
 
@@ -362,8 +359,29 @@ def _rule_based_triplets(chunk_text: str, paper_year: Optional[int] = None) -> L
     return _filter_triplets(out)
 
 
-TEMPORAL_TRIPLET_SCHEMA_HINT = EXTRACTION_SCHEMA_HINT
-
+TEMPORAL_TRIPLET_SCHEMA_HINT = """Ожидается JSON массив объектов:
+[
+  {
+    "subject": "...",
+    "predicate": "...",
+    "object": "...",
+    "confidence": 0.0-1.0,
+    "polarity": "supports|contradicts|unknown",
+    "evidence_quote": "короткая цитата из фрагмента (<=200 символов)",
+    "time": {"start": "YYYY or YYYY-MM or YYYY-MM-DD", "end": "...", "granularity": "year|month|day|interval"} | null
+  }
+]
+Правила:
+- Извлекай только содержательные направленные или темпорально-якоренные связи, которые реально опираются на текст.
+- Предпочитай причинно-следственные и темпоральные предикаты: causes, leads_to, results_in, prevents, inhibits, improves, reduces, predicts, precedes, follows.
+- Не возвращай слабые общетематические связи, простое совместное упоминание сущностей и "section/show/states" как предикаты.
+- НЕ выдумывай факты. Если не уверен — polarity="unknown" и confidence <= 0.5.
+- Если в тексте есть точная дата/месяц/период — обязательно сохрани её с максимально доступной гранулярностью.
+- Для диапазонов и периодов используй granularity="interval".
+- Время: если в фрагменте явно указан период — заполни time.
+  Если времени нет в тексте — оставь null (мы подставим год публикации из meta).
+- evidence_quote: возьми дословный кусок из фрагмента (можно укоротить), не придумывай.
+"""
 
 
 def _build_temporal_triplet_prompt_parts(domain: str, chunk_text: str, use_demos: Optional[bool]) -> tuple[str, str]:
@@ -391,29 +409,32 @@ def _build_temporal_triplet_prompt_parts(domain: str, chunk_text: str, use_demos
     user = f"""{demo_block}Фрагмент:
 {chunk_text}
 
-Извлеки 3-10 самых важных утверждений. Для каждого триплета используй компактные сущности и канонический предикат в snake_case. Верни объект с ключом triplets по строгой JSON schema."""
+Извлеки 3-10 самых важных утверждений. Для каждого триплета используй компактные сущности и канонический предикат в snake_case."""
     return system, user
 
 
 def _validate_triplet_payload(data) -> List[TemporalTriplet]:
-    rows = validate_extraction_payload(data)
-    normalized: list[dict] = []
-    for item in rows:
-        row = item.model_dump(mode="json")
-        row["predicate"] = _canonicalize_predicate(row.get("predicate") or "")
-        time_obj = row.get("time")
-        if isinstance(time_obj, dict):
-            time_payload = dict(time_obj)
-            time_payload["granularity"] = normalize_granularity(
-                time_payload.get("granularity"),
-                start=time_payload.get("start"),
-                end=time_payload.get("end"),
-                default="year",
-            )
-            row["time"] = time_payload
-        normalized.append(row)
-    return [TemporalTriplet.model_validate(row) for row in normalized]
-
+    if isinstance(data, list):
+        normalized = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            row['predicate'] = _canonicalize_predicate(row.get('predicate') or '')
+            time_obj = row.get("time")
+            if isinstance(time_obj, dict):
+                time_payload = dict(time_obj)
+                time_payload["granularity"] = normalize_granularity(
+                    time_payload.get("granularity"),
+                    start=time_payload.get("start"),
+                    end=time_payload.get("end"),
+                    default="year",
+                )
+                row["time"] = time_payload
+            normalized.append(row)
+        data = normalized
+    adapter = TypeAdapter(List[TemporalTriplet])
+    return adapter.validate_python(data)
 
 
 def _finalize_triplets(triplets: List[TemporalTriplet], paper_year: Optional[int]) -> List[TemporalTriplet]:

@@ -6,7 +6,7 @@ import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import yaml  # type: ignore
@@ -35,7 +35,6 @@ from ..temporal.temporal_kg_builder import EdgeStats, PaperRecord, TemporalKnowl
 from ..tgnn.event_dataset import build_event_stream
 from ..tgnn.pygt_temporal_link_prediction import PyGTemporalLinkPredConfig, PyGTemporalUnavailableError, pygt_temporal_link_prediction
 from ..tgnn.tgn_link_prediction import TGNLinkPredConfig, tgn_link_prediction
-from ..tgnn.prediction_types import LinkPredictionRecord, SemanticEdgeKey, same_predicate_family, normalize_predicate, normalize_term
 
 try:  # pragma: no cover
     from ..mm.mm_embed import embed_images as mm_embed_images
@@ -44,6 +43,29 @@ except Exception:  # pragma: no cover
 
 
 console = Console()
+
+
+def _emit_progress(
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+    *,
+    stage: str,
+    current: int,
+    total: int,
+    message: str,
+    **extra: Any,
+) -> None:
+    payload: Dict[str, Any] = {
+        "stage": stage,
+        "current": current,
+        "total": total,
+        "message": message,
+        "percent": 0 if total <= 0 else int(round((current / total) * 100)),
+    }
+    payload.update(extra)
+    console.print(f"[blue][Task3 {current}/{total}][/blue] {message}")
+    if progress_callback is not None:
+        progress_callback(payload)
+
 
 
 TASK3_HYP_SCHEMA_HINT = """Ожидается JSON объект HypothesisDraft:
@@ -64,6 +86,22 @@ class Task3BundleResult:
     bundle_dir: Path
     manifest_path: Path
     hypotheses_path: Path
+
+
+@dataclass(frozen=True)
+class LinkPredictionRecord:
+    source: str
+    target: str
+    score: float
+    backend: str
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "target": self.target,
+            "score": float(self.score),
+            "backend": self.backend,
+        }
 
 
 def _slugify(text: str) -> str:
@@ -275,27 +313,144 @@ def _acquire_and_ingest_papers(
     bundle_dir: Path,
     include_multimodal: bool,
     run_vlm: bool,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    acquire_stage_current: int = 2,
+    ingest_stage_current: int = 3,
+    total_stages: int = 14,
 ) -> tuple[Path, List[AcquireResult]]:
     raw_dir = bundle_dir / "raw_pdfs"
     meta_dir = bundle_dir / "raw_meta"
     processed_dir = bundle_dir / "processed_papers"
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    acquire_results = acquire_pdfs(papers, raw_dir=raw_dir, meta_dir=meta_dir)
-    for paper, result in zip(papers, acquire_results):
+    acquire_results: List[AcquireResult] = []
+    total_papers = len(papers)
+    if total_papers <= 0:
+        _emit_progress(
+            progress_callback,
+            stage="acquire",
+            current=acquire_stage_current,
+            total=total_stages,
+            message="Список публикаций пуст — этап acquire пропущен",
+            item_current=0,
+            item_total=0,
+        )
+        _emit_progress(
+            progress_callback,
+            stage="ingest",
+            current=ingest_stage_current,
+            total=total_stages,
+            message="Нет PDF для парсинга — этап ingest пропущен",
+            item_current=0,
+            item_total=0,
+        )
+        return processed_dir, acquire_results
+
+    for idx, paper in enumerate(papers, start=1):
+        title_hint = paper.title or paper.id
+        _emit_progress(
+            progress_callback,
+            stage="acquire",
+            current=acquire_stage_current,
+            total=total_stages,
+            message=f"Скачиваю PDF и сохраняю метаданные: {idx}/{total_papers} — {title_hint[:80]}",
+            item_current=idx,
+            item_total=total_papers,
+            paper_id=paper.id,
+            paper_title=title_hint,
+        )
+        try:
+            result_rows = acquire_pdfs([paper], raw_dir=raw_dir, meta_dir=meta_dir)
+            result = result_rows[0] if result_rows else AcquireResult(
+                paper_id=paper.id,
+                pdf_path=None,
+                meta_path=meta_dir / f"{_slugify(paper.id)}.json",
+                error="acquire_pdfs returned empty result",
+            )
+        except Exception as exc:
+            console.print(f"[yellow]Task3 acquire fallback for {paper.id}: {type(exc).__name__}: {exc}[/yellow]")
+            result = AcquireResult(
+                paper_id=paper.id,
+                pdf_path=None,
+                meta_path=meta_dir / f"{_slugify(paper.id)}.json",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        acquire_results.append(result)
+
         if result.pdf_path:
+            _emit_progress(
+                progress_callback,
+                stage="ingest",
+                current=ingest_stage_current,
+                total=total_stages,
+                message=f"Парсю PDF и строю multimodal представление: {idx}/{total_papers} — {title_hint[:80]}",
+                item_current=idx,
+                item_total=total_papers,
+                paper_id=paper.id,
+                paper_title=title_hint,
+            )
             try:
                 if include_multimodal:
-                    ingest_pdf_multimodal_auto(result.pdf_path, paper.model_dump(mode="json"), processed_dir, run_vlm=run_vlm)
+                    ingest_pdf_multimodal_auto(
+                        result.pdf_path,
+                        paper.model_dump(mode="json"),
+                        processed_dir,
+                        run_vlm=run_vlm,
+                        progress_callback=(
+                            (lambda payload, *, paper=paper, idx=idx, total_papers=total_papers, title_hint=title_hint: _emit_progress(
+                                progress_callback,
+                                stage="pages",
+                                current=ingest_stage_current,
+                                total=total_stages,
+                                message=f"{title_hint[:80]}: {payload.get('message') or ''}",
+                                item_current=idx,
+                                item_total=total_papers,
+                                paper_id=paper.id,
+                                paper_title=title_hint,
+                                page_current=payload.get("current"),
+                                page_total=payload.get("total"),
+                            )) if progress_callback is not None else None
+                        ),
+                    )
                 else:
-                    ingest_pdf_auto(result.pdf_path, paper.model_dump(mode="json"), processed_dir)
+                    ingest_pdf_auto(
+                        result.pdf_path,
+                        paper.model_dump(mode="json"),
+                        processed_dir,
+                        progress_callback=(
+                            (lambda payload, *, paper=paper, idx=idx, total_papers=total_papers, title_hint=title_hint: _emit_progress(
+                                progress_callback,
+                                stage="pages",
+                                current=ingest_stage_current,
+                                total=total_stages,
+                                message=f"{title_hint[:80]}: {payload.get('message') or ''}",
+                                item_current=idx,
+                                item_total=total_papers,
+                                paper_id=paper.id,
+                                paper_title=title_hint,
+                                page_current=payload.get("current"),
+                                page_total=payload.get("total"),
+                            )) if progress_callback is not None else None
+                        ),
+                    )
                 continue
             except Exception as exc:
                 console.print(f"[yellow]Task3 ingest fallback for {paper.id}: {type(exc).__name__}: {exc}[/yellow]")
+
+        _emit_progress(
+            progress_callback,
+            stage="ingest",
+            current=ingest_stage_current,
+            total=total_stages,
+            message=f"Не удалось получить PDF для {title_hint[:80]} — сохраняю metadata-only запись",
+            item_current=idx,
+            item_total=total_papers,
+            paper_id=paper.id,
+            paper_title=title_hint,
+        )
         _ingest_metadata_only(paper, processed_dir)
 
     return processed_dir, acquire_results
-
 
 def _load_chunk_registry(processed_dir: Path) -> List[ChunkRecord]:
     out: List[ChunkRecord] = []
@@ -538,39 +693,11 @@ def _candidate_temporal_context(kg: TemporalKnowledgeGraph, candidate: Hypothesi
     }
 
 
-def _candidate_semantic_key(candidate: HypothesisCandidate) -> SemanticEdgeKey:
-    return SemanticEdgeKey(
-        source=candidate.source,
-        predicate=candidate.predicate,
-        target=candidate.target,
-        direction="directed",
-        time_bucket=(str(candidate.time_scope or "").strip() or None),
-    ).normalized()
-
-
 def _match_link_prediction(candidate: HypothesisCandidate, predictions: Sequence[LinkPredictionRecord]) -> Optional[LinkPredictionRecord]:
-    ck = _candidate_semantic_key(candidate)
-
-    # 1) exact semantic match
+    a = {candidate.source, candidate.target}
     for pred in predictions:
-        if pred.edge_key() == ck:
+        if {pred.source, pred.target} == a:
             return pred
-
-    # 2) exact nodes + predicate family match (temporal bucket may differ)
-    for pred in predictions:
-        pk = pred.edge_key()
-        if pk.source == ck.source and pk.target == ck.target and same_predicate_family(pk.predicate, ck.predicate):
-            return pred
-
-    # 3) undirected relaxation only for undirected predicates
-    if ck.direction == "undirected" or normalize_predicate(candidate.predicate) == "cooccurs_with":
-        for pred in predictions:
-            pk = pred.edge_key()
-            if pk.direction != "undirected":
-                continue
-            if {pk.source, pk.target} == {ck.source, ck.target} and same_predicate_family(pk.predicate, ck.predicate):
-                return pred
-
     return None
 
 
@@ -806,140 +933,11 @@ def _llm_hypothesis_from_context(
     return HypothesisDraft.model_validate(data)
 
 
-def _positive_squash(value: float, *, scale: float = 1.0) -> float:
-    v = max(0.0, float(value or 0.0))
-    s = max(1e-6, float(scale or 1.0))
-    return 1.0 - (2.718281828459045 ** (-v / s))
-
-
-def _std(values: Sequence[float]) -> float:
-    xs = [float(v) for v in values]
-    if not xs:
-        return 0.0
-    mean = sum(xs) / float(len(xs))
-    return (sum((x - mean) ** 2 for x in xs) / float(len(xs))) ** 0.5
-
-
-def _hypothesis_calibration_payload(
-    *,
-    candidate: HypothesisCandidate,
-    draft: HypothesisDraft,
-    temporal_context: Mapping[str, Any],
-    prediction_score: float,
-    retrieval_score: float,
-    multimodal_score: float,
-    reward_score: float,
-    neighbors: Sequence[Dict[str, Any]],
-    matched_triplets: Sequence[Dict[str, Any]],
-    vlm_analyses: Sequence[Dict[str, Any]],
-) -> Dict[str, Any]:
-    normalized_components = [
-        _positive_squash(float(candidate.score), scale=6.0),
-        _positive_squash(float(prediction_score), scale=0.75),
-        _positive_squash(float(multimodal_score), scale=0.8),
-        _positive_squash(float(retrieval_score), scale=0.8),
-        _positive_squash(float(reward_score), scale=3.0),
-    ]
-    agreement = max(0.0, 1.0 - min(1.0, _std(normalized_components)))
-    support_density = min(1.0, (len(neighbors[:6]) + len(matched_triplets[:6]) + len(vlm_analyses[:4])) / 10.0)
-    evidence_density = min(1.0, len(list(getattr(draft, 'supporting_evidence', []) or [])) / 4.0)
-    ordering = str(temporal_context.get('ordering') or '')
-    temporal_grounding = 1.0 if ordering in {'stable', 'strengthening', 'weakening', 'persistent', 'predicted_missing_link'} else 0.45
-    calibration_score = 0.4 * agreement + 0.25 * support_density + 0.2 * evidence_density + 0.15 * temporal_grounding
-    return {
-        'calibration_score': float(calibration_score),
-        'calibration_components': {
-            'agreement': float(agreement),
-            'support_density': float(support_density),
-            'evidence_density': float(evidence_density),
-            'temporal_grounding': float(temporal_grounding),
-        },
-    }
-
-
-def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
-    if not left or not right:
-        return 0.0
-    n = min(len(left), len(right))
-    if n <= 0:
-        return 0.0
-    dot = sum(float(left[i]) * float(right[i]) for i in range(n))
-    ln = sum(float(left[i]) ** 2 for i in range(n)) ** 0.5
-    rn = sum(float(right[i]) ** 2 for i in range(n)) ** 0.5
-    if ln <= 0.0 or rn <= 0.0:
-        return 0.0
-    return max(-1.0, min(1.0, dot / (ln * rn)))
-
-
-def _ranking_text(row: Mapping[str, Any]) -> str:
-    hyp = row.get('hypothesis') or {}
-    cand = row.get('candidate') or {}
-    parts = [
-        str(hyp.get('title') or ''),
-        str(hyp.get('premise') or ''),
-        str(hyp.get('mechanism') or ''),
-        str(cand.get('source') or ''),
-        str(cand.get('predicate') or ''),
-        str(cand.get('target') or ''),
-    ]
-    return ' '.join(part for part in parts if part).strip()
-
-
-def _candidate_similarity(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
-    lc = left.get('candidate') or {}
-    rc = right.get('candidate') or {}
-    edge_overlap = 0.0
-    if str(lc.get('source') or '') == str(rc.get('source') or '') and str(lc.get('target') or '') == str(rc.get('target') or ''):
-        edge_overlap = 1.0
-    elif same_predicate_family(lc.get('predicate') or '', rc.get('predicate') or '') and ({str(lc.get('source') or ''), str(lc.get('target') or '')} & {str(rc.get('source') or ''), str(rc.get('target') or '')}):
-        edge_overlap = 0.7
-    lv = left.get('_rank_vec') or []
-    rv = right.get('_rank_vec') or []
-    return max(edge_overlap, _cosine_similarity(lv, rv))
-
-
-def _apply_mmr_rerank(records: Sequence[Dict[str, Any]], *, top_k: int, lambda_mult: float = 0.72) -> List[Dict[str, Any]]:
-    rows = [dict(row) for row in records]
-    if not rows:
-        return []
-    texts = [_ranking_text(row) for row in rows]
-    vecs = embed(texts) if texts else []
-    for row, vec in zip(rows, vecs):
-        row['_rank_vec'] = vec
-        row['_relevance'] = float(row.get('calibrated_final_score') or row.get('final_score') or 0.0)
-    remaining = rows[:]
-    selected: list[dict[str, Any]] = []
-    lam = max(0.0, min(1.0, float(lambda_mult)))
-    while remaining and len(selected) < int(top_k):
-        best_row = None
-        best_score = None
-        for row in remaining:
-            relevance = float(row.get('_relevance') or 0.0)
-            redundancy = max((_candidate_similarity(row, picked) for picked in selected), default=0.0)
-            mmr_score = lam * relevance - (1.0 - lam) * redundancy
-            row['_mmr_score'] = float(mmr_score)
-            row['_redundancy'] = float(redundancy)
-            if best_score is None or mmr_score > best_score:
-                best_score = mmr_score
-                best_row = row
-        assert best_row is not None
-        remaining.remove(best_row)
-        selected.append(best_row)
-    for rank, row in enumerate(selected, start=1):
-        row['diversity_rank'] = rank
-        row['diversity_penalty'] = float(row.pop('_redundancy', 0.0))
-        row['mmr_score'] = float(row.pop('_mmr_score', row.get('_relevance', 0.0)))
-        row.pop('_rank_vec', None)
-        row.pop('_relevance', None)
-    return selected
-
-
 def _score_hypothesis_record(
     *,
     candidate: HypothesisCandidate,
     draft: HypothesisDraft,
     reward: RuleBasedReward,
-    temporal_context: Mapping[str, Any],
     link_prediction: Optional[LinkPredictionRecord],
     neighbors: Sequence[Dict[str, Any]],
     matched_triplets: Sequence[Dict[str, Any]],
@@ -947,14 +945,14 @@ def _score_hypothesis_record(
 ) -> Dict[str, Any]:
     neighbor_strengths: List[float] = []
     for row in neighbors[:6]:
-        if 'score' in row:
-            neighbor_strengths.append(float(row.get('score') or 0.0))
-        elif 'distance' in row:
-            neighbor_strengths.append(max(0.0, 1.0 / (1.0 + float(row.get('distance') or 0.0))))
+        if "score" in row:
+            neighbor_strengths.append(float(row.get("score") or 0.0))
+        elif "distance" in row:
+            neighbor_strengths.append(max(0.0, 1.0 / (1.0 + float(row.get("distance") or 0.0))))
     retrieval_score = sum(neighbor_strengths) / float(max(1, len(neighbor_strengths)))
     prediction_score = float(link_prediction.score) if link_prediction is not None else 0.0
     multimodal_score = min(1.0, 0.2 * len(matched_triplets) + 0.15 * len(vlm_analyses))
-    reward_breakdown = reward.score(draft.model_dump(mode='json'))
+    reward_breakdown = reward.score(draft.model_dump(mode="json"))
     final_score = (
         1.6 * float(candidate.score)
         + 0.9 * prediction_score
@@ -962,32 +960,16 @@ def _score_hypothesis_record(
         + 0.6 * retrieval_score
         + float(reward_breakdown.score)
     )
-    calibration_payload = _hypothesis_calibration_payload(
-        candidate=candidate,
-        draft=draft,
-        temporal_context=temporal_context,
-        prediction_score=prediction_score,
-        retrieval_score=retrieval_score,
-        multimodal_score=multimodal_score,
-        reward_score=float(reward_breakdown.score),
-        neighbors=neighbors,
-        matched_triplets=matched_triplets,
-        vlm_analyses=vlm_analyses,
-    )
-    calibration_score = float(calibration_payload['calibration_score']) if bool(getattr(settings, 'task3_calibration_enabled', True)) else 1.0
-    calibrated_final_score = float(final_score) * (0.7 + 0.3 * calibration_score)
     return {
-        'final_score': final_score,
-        'calibrated_final_score': calibrated_final_score,
-        'score_components': {
-            'candidate_score': float(candidate.score),
-            'prediction_score': prediction_score,
-            'multimodal_score': multimodal_score,
-            'retrieval_score': retrieval_score,
-            'reward_score': float(reward_breakdown.score),
-            'reward_reasons': reward_breakdown.reasons,
+        "final_score": final_score,
+        "score_components": {
+            "candidate_score": float(candidate.score),
+            "prediction_score": prediction_score,
+            "multimodal_score": multimodal_score,
+            "retrieval_score": retrieval_score,
+            "reward_score": float(reward_breakdown.score),
+            "reward_reasons": reward_breakdown.reasons,
         },
-        **calibration_payload,
     }
 
 
@@ -1000,14 +982,12 @@ def _prediction_records(
     requested = str(backend or "auto").strip().lower()
     used_backend = "tgn"
     error: Optional[str] = None
-    predictions: List[LinkPredictionRecord] = []
+    predictions: List[Tuple[str, str, float]] = []
 
     if requested in {"auto", "pygt", "pygt_temporal", "pyg_temporal"}:
         try:
             cfg = PyGTemporalLinkPredConfig(
                 hidden_dim=int(getattr(settings, "hyp_tgnn_memory_dim", 64) or 64),
-                relation_dim=int(getattr(settings, "hyp_tgnn_relation_dim", 24) or 24),
-                time_dim=int(getattr(settings, "hyp_tgnn_time_dim", 16) or 16),
                 epochs=int(getattr(settings, "hyp_tgnn_epochs", 25) or 25),
                 recent_window_years=int(getattr(settings, "hyp_tgnn_recent_window_years", 3) or 3),
                 min_candidate_score=float(getattr(settings, "hyp_tgnn_min_candidate_score", 0.05) or 0.05),
@@ -1030,23 +1010,8 @@ def _prediction_records(
         predictions = tgn_link_prediction(events, top_k=top_k, config=tgn_cfg)
         used_backend = "tgn" if requested != "heuristic" else "heuristic"
 
-    rows = [
-        LinkPredictionRecord(
-            source=row.source,
-            predicate=row.predicate,
-            target=row.target,
-            score=float(row.score),
-            backend=used_backend or row.backend,
-            polarity=row.polarity,
-            direction=row.direction,
-            ts_pred=row.ts_pred,
-            relation_family=row.relation_family,
-            evidence_path=list(row.evidence_path),
-            aux=dict(row.aux),
-        )
-        for row in predictions
-    ]
-    meta = {"requested_backend": requested, "used_backend": used_backend, "fallback_error": error, "n_predictions": len(rows)}
+    rows = [LinkPredictionRecord(source=u, target=v, score=float(score), backend=used_backend) for u, v, score in predictions]
+    meta = {"requested_backend": requested, "used_backend": used_backend, "fallback_error": error}
     return rows, meta
 
 
@@ -1077,9 +1042,19 @@ def prepare_task3_hypothesis_bundle(
     local_model: str | None = None,
     vlm_backend: str | None = None,
     vlm_model_id: str | None = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Task3BundleResult:
     domain = load_domain_config(domain_id)
     out_dir = Path(out_dir)
+    total_stages = 14
+
+    _emit_progress(
+        progress_callback,
+        stage="resolve_inputs",
+        current=1,
+        total=total_stages,
+        message="Готовлю входные данные, query и список публикаций",
+    )
 
     input_identifiers: List[str] = list(identifiers or [])
     if identifiers_file is not None and Path(identifiers_file).exists():
@@ -1141,20 +1116,43 @@ def prepare_task3_hypothesis_bundle(
             _write_json(bundle_dir / "papers_selected.json", [paper.model_dump(mode="json") for paper in resolved_papers])
 
             if processed_dir is not None:
+                _emit_progress(
+                    progress_callback,
+                    stage="prepare_processed",
+                    current=2,
+                    total=total_stages,
+                    message=f"Копирую готовый processed dir: {Path(processed_dir)}",
+                    item_current=1,
+                    item_total=1,
+                )
                 prepared_processed_dir = _copy_processed_tree(Path(processed_dir), bundle_dir / "processed_papers")
-                acquire_results: List[AcquireResult] = []
+                acquire_results = []
+                _emit_progress(
+                    progress_callback,
+                    stage="ingest",
+                    current=3,
+                    total=total_stages,
+                    message="Использую готовые processed papers — этап ingest пропущен",
+                    item_current=0,
+                    item_total=0,
+                )
             else:
                 prepared_processed_dir, acquire_results = _acquire_and_ingest_papers(
                     resolved_papers,
                     bundle_dir=bundle_dir,
                     include_multimodal=include_multimodal,
                     run_vlm=run_vlm,
+                    progress_callback=progress_callback,
+                    acquire_stage_current=2,
+                    ingest_stage_current=3,
+                    total_stages=total_stages,
                 )
             _write_json(
                 bundle_dir / "acquire_results.json",
                 [asdict(item) | {"pdf_path": str(item.pdf_path) if item.pdf_path else None, "meta_path": str(item.meta_path)} for item in acquire_results],
             )
 
+            _emit_progress(progress_callback, stage="records", current=4, total=total_stages, message="Собираю paper records для temporal KG")
             paper_records_processed = load_papers_from_processed(prepared_processed_dir)
             processed_lookup = {paper.paper_id: paper for paper in paper_records_processed}
             paper_records: List[PaperRecord] = []
@@ -1164,10 +1162,14 @@ def prepare_task3_hypothesis_bundle(
                 paper_records = paper_records_processed
             _write_json(bundle_dir / "paper_records.json", [asdict(item) for item in paper_records])
 
+            _emit_progress(progress_callback, stage="chunks", current=5, total=total_stages, message="Читаю chunk registry из processed papers")
             chunk_records = _load_chunk_registry(prepared_processed_dir)
             _write_jsonl(bundle_dir / "chunk_registry.jsonl", [record.model_dump(mode="json") for record in chunk_records])
 
+            _emit_progress(progress_callback, stage="embeddings", current=6, total=total_stages, message=f"Строю dense embeddings для {len(chunk_records)} chunks")
             vectors, annoy_payloads = _build_chunk_embeddings(chunk_records)
+
+            _emit_progress(progress_callback, stage="annoy", current=7, total=total_stages, message="Строю Annoy index для retrieval")
             annoy_bundle = build_annoy_index(
                 vectors,
                 [record.chunk_id for record in chunk_records],
@@ -1177,6 +1179,7 @@ def prepare_task3_hypothesis_bundle(
                 item_payloads=annoy_payloads,
             )
 
+            _emit_progress(progress_callback, stage="kg", current=8, total=total_stages, message="Строю temporal knowledge graph")
             kg = build_temporal_kg(
                 paper_records,
                 domain=domain,
@@ -1189,9 +1192,11 @@ def prepare_task3_hypothesis_bundle(
             kg_path = bundle_dir / "automatic_graph" / "temporal_kg.json"
             kg.dump_json(kg_path)
 
+            _emit_progress(progress_callback, stage="events", current=9, total=total_stages, message="Собираю event stream для temporal модели")
             events = build_event_stream(kg, papers=paper_records)
             _write_jsonl(bundle_dir / "automatic_graph" / "events.jsonl", [event.model_dump(mode="json") for event in events])
 
+            _emit_progress(progress_callback, stage="multimodal_triplets", current=10, total=total_stages, message="Извлекаю multimodal triplets")
             paper_years = {paper.paper_id: paper.year for paper in paper_records}
             mm_triplets = extract_multimodal_triplets(
                 chunk_records,
@@ -1206,19 +1211,20 @@ def prepare_task3_hypothesis_bundle(
             mm_triplets_path = bundle_dir / "automatic_graph" / "multimodal_triplets.jsonl"
             dump_multimodal_triplets(mm_triplets_path, mm_triplets)
 
+            _emit_progress(progress_callback, stage="link_predictions", current=11, total=total_stages, message="Считаю link prediction кандидатов")
             link_predictions, link_meta = _prediction_records(events=events, backend=link_prediction_backend, top_k=link_prediction_top_k)
             _write_json(
                 bundle_dir / "automatic_graph" / "link_predictions.json",
                 {"meta": link_meta, "predictions": [row.to_json_dict() for row in link_predictions]},
             )
 
+            _emit_progress(progress_callback, stage="candidates", current=12, total=total_stages, message="Генерирую кандидатов в гипотезы")
             candidates = generate_candidates(
                 kg,
                 papers=paper_records,
                 query=effective_query,
                 domain=domain.title,
                 top_k=max(candidate_top_k, top_hypotheses),
-                prediction_records=link_predictions,
             )
             candidate_rows = []
             for cand in candidates:
@@ -1239,7 +1245,30 @@ def prepare_task3_hypothesis_bundle(
             reward = RuleBasedReward(overrides_path=overrides_path)
             ranked_records: List[Dict[str, Any]] = []
             vlm_analysis_rows: List[Dict[str, Any]] = []
-            for cand in candidates[: max(candidate_top_k, top_hypotheses)]:
+            total_candidates = min(len(candidates), max(candidate_top_k, top_hypotheses))
+            if total_candidates <= 0:
+                _emit_progress(
+                    progress_callback,
+                    stage="hypotheses",
+                    current=13,
+                    total=total_stages,
+                    message="Кандидаты в гипотезы не найдены",
+                    item_current=0,
+                    item_total=0,
+                )
+            for index, cand in enumerate(candidates[: max(candidate_top_k, top_hypotheses)], start=1):
+                _emit_progress(
+                    progress_callback,
+                    stage="hypotheses",
+                    current=13,
+                    total=total_stages,
+                    message=f"Генерирую и ранжирую гипотезы: {index}/{total_candidates} — {cand.source} | {cand.predicate} | {cand.target}",
+                    item_current=index,
+                    item_total=total_candidates,
+                    candidate_source=cand.source,
+                    candidate_target=cand.target,
+                    candidate_predicate=cand.predicate,
+                )
                 temporal_context = _candidate_temporal_context(kg, cand)
                 prediction_match = _match_link_prediction(cand, link_predictions)
                 neighbors = _candidate_neighbor_evidence(cand, annoy_bundle=annoy_bundle, top_k=annoy_top_k) if annoy_bundle.size > 0 else []
@@ -1292,7 +1321,6 @@ def prepare_task3_hypothesis_bundle(
                     candidate=cand,
                     draft=draft,
                     reward=reward,
-                    temporal_context=temporal_context,
                     link_prediction=prediction_match,
                     neighbors=neighbors,
                     matched_triplets=matched_triplets,
@@ -1322,13 +1350,7 @@ def prepare_task3_hypothesis_bundle(
             if vlm_analysis_rows:
                 _write_jsonl(bundle_dir / "automatic_graph" / "vlm_candidate_analysis.jsonl", vlm_analysis_rows)
 
-            ranked_records.sort(key=lambda row: float(row.get("calibrated_final_score") or row.get("final_score") or 0.0), reverse=True)
-            if bool(getattr(settings, "task3_mmr_enabled", True)):
-                ranked_records = _apply_mmr_rerank(
-                    ranked_records,
-                    top_k=max(top_hypotheses, len(ranked_records)),
-                    lambda_mult=float(getattr(settings, "task3_mmr_lambda", 0.72) or 0.72),
-                )
+            ranked_records.sort(key=lambda row: float(row.get("final_score") or 0.0), reverse=True)
             for rank, row in enumerate(ranked_records[:top_hypotheses], start=1):
                 row["rank"] = rank
             hypotheses_path = bundle_dir / "hypotheses_ranked.json"
@@ -1342,8 +1364,6 @@ def prepare_task3_hypothesis_bundle(
                         f"## H-{int(row.get('rank') or 0):03d}: {hyp.get('title', '')}",
                         "",
                         f"**Final score:** {float(row.get('final_score') or 0.0):.3f}",
-                        f"**Calibrated score:** {float(row.get('calibrated_final_score') or 0.0):.3f}",
-                        f"**Calibration:** {float(row.get('calibration_score') or 0.0):.3f}",
                         "",
                         f"**Premise:** {hyp.get('premise', '')}",
                         "",
@@ -1364,6 +1384,7 @@ def prepare_task3_hypothesis_bundle(
                     md_lines.append("")
             (bundle_dir / "hypotheses_ranked.md").write_text("\n".join(md_lines), encoding="utf-8")
 
+            _emit_progress(progress_callback, stage="finalize", current=14, total=total_stages, message="Сохраняю manifest и финальные артефакты")
             manifest = {
                 "bundle_dir": str(bundle_dir),
                 "generated_at": _utc_now(),
