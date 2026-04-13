@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     open_clip_pretrained: str = "laion2b_s34b_b79k"
     pdf_render_dpi: int = 150
     vlm_request_timeout_seconds: int = 45
+    local_vlm_request_timeout_seconds: int = 120
     vlm_min_pixels: int = 256 * 28 * 28
     vlm_max_pixels: int = 1280 * 28 * 28
     local_vlm_allow_inprocess_fallback: bool = False

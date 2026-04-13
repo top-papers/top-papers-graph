@@ -119,7 +119,9 @@ def _has_g4f() -> bool:
 
 
 def _run_isolated_python(code: str, *args: str, timeout: int = 180) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
+    env = _augment_pythonpath_for_repo(os.environ.copy())
+    env.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    env.setdefault("TOKENIZERS_PARALLELISM", "false")
     return subprocess.run(
         [sys.executable, "-c", code, *[str(a) for a in args]],
         capture_output=True,
@@ -129,6 +131,28 @@ def _run_isolated_python(code: str, *args: str, timeout: int = 180) -> subproces
     )
 
 
+
+def _readline_with_timeout(stream, timeout_seconds: float) -> str:
+    timeout_seconds = float(timeout_seconds or 0)
+    if timeout_seconds <= 0:
+        return stream.readline()
+
+    state: dict[str, object] = {}
+
+    def _target() -> None:
+        try:
+            state["line"] = stream.readline()
+        except Exception as exc:  # pragma: no cover - mirrors caller fallback
+            state["error"] = exc
+
+    thread = threading.Thread(target=_target, name="vlm-worker-readline", daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    if thread.is_alive():
+        raise TimeoutError(f"local_vlm_worker_timeout_after_{timeout_seconds:g}s")
+    if "error" in state:
+        raise state["error"]  # type: ignore[misc]
+    return str(state.get("line") or "")
 
 
 def _tail_worker_stderr(worker, limit: int = 8000) -> str:
@@ -207,6 +231,7 @@ def _ensure_local_vlm_worker(model_id: str):
         env = _augment_pythonpath_for_repo(os.environ.copy())
         env.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
         env.setdefault("TOKENIZERS_PARALLELISM", "false")
+        env.setdefault("TRANSFORMERS_VERBOSITY", "error")
         stderr_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
         worker = subprocess.Popen(
             cmd,
@@ -239,7 +264,12 @@ def _describe_image_qwen_worker(image_path: Path, prompt: str, model_id: str, ma
     try:
         worker.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
         worker.stdin.flush()
-        line = worker.stdout.readline()
+        timeout_seconds = float(
+            os.environ.get("SCIREASON_LOCAL_VLM_REQUEST_TIMEOUT_SECONDS")
+            or getattr(settings, "local_vlm_request_timeout_seconds", 120)
+            or 120
+        )
+        line = _readline_with_timeout(worker.stdout, timeout_seconds)
     except Exception as exc:
         _close_local_vlm_worker()
         raise RuntimeError(f"local_vlm_worker_io_error: {type(exc).__name__}: {exc}") from exc
