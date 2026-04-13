@@ -179,6 +179,12 @@ def main() -> int:
     os.environ.setdefault("LLM_REQUEST_TIMEOUT_SECONDS", "25")
     os.environ.setdefault("VLM_REQUEST_TIMEOUT_SECONDS", "45")
     os.environ.setdefault("TASK3_NOTEBOOK_PLATFORM", "kaggle")
+    os.environ.setdefault("TASK3_NOTEBOOK_REPO_ROOT", str(REPO_ROOT))
+    current_pythonpath = str(os.environ.get("PYTHONPATH") or "").strip()
+    pythonpath_parts = [str(SRC_DIR), str(REPO_ROOT)]
+    if current_pythonpath:
+        pythonpath_parts.append(current_pythonpath)
+    os.environ["PYTHONPATH"] = os.pathsep.join(part for part in pythonpath_parts if part)
 
     if args.hf_offline:
         os.environ["HF_HUB_OFFLINE"] = "1"

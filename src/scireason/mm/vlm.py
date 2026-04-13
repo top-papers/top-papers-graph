@@ -179,6 +179,22 @@ def _close_local_vlm_worker() -> None:
             pass
 
 
+def _augment_pythonpath_for_repo(env: dict[str, str]) -> dict[str, str]:
+    env = dict(env)
+    repo_root = Path(__file__).resolve().parents[3]
+    src_dir = repo_root / "src"
+    parts: list[str] = []
+    existing = str(env.get("PYTHONPATH") or "").strip()
+    if src_dir.exists():
+        parts.append(str(src_dir))
+    if repo_root.exists():
+        parts.append(str(repo_root))
+    if existing:
+        parts.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in parts if p)
+    return env
+
+
 def _ensure_local_vlm_worker(model_id: str):
     global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID
     model_id = str(model_id or "").strip()
@@ -188,7 +204,7 @@ def _ensure_local_vlm_worker(model_id: str):
             return worker
         _close_local_vlm_worker()
         cmd = [sys.executable, "-m", "scireason.mm.vlm_worker", model_id]
-        env = os.environ.copy()
+        env = _augment_pythonpath_for_repo(os.environ.copy())
         env.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
         env.setdefault("TOKENIZERS_PARALLELISM", "false")
         stderr_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
@@ -200,6 +216,7 @@ def _ensure_local_vlm_worker(model_id: str):
             text=True,
             bufsize=1,
             env=env,
+            cwd=str(Path(__file__).resolve().parents[3]),
         )
         setattr(worker, "_scireason_stderr_file", stderr_file)
         _LOCAL_VLM_WORKER = worker

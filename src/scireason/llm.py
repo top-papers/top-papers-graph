@@ -674,7 +674,7 @@ def _escape_json_string_control_chars(text: str) -> str:
 
 
 def _escape_invalid_json_string_backslashes(text: str) -> str:
-    """Repair invalid backslash escapes that occur inside JSON string values.
+    r"""Repair invalid backslash escapes that occur inside JSON string values.
 
     LLMs sometimes emit JSON-looking payloads with substrings like ``\\alpha`` or
     ``\\mathrm`` inside quoted strings. Those are valid text fragments but invalid
