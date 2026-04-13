@@ -11,6 +11,8 @@ from typing import Any
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+_PRELOADED_MODELS: set[str] = set()
+
 
 def _emit(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -119,6 +121,19 @@ def _load_transformers_vlm(model_id: str, device_mode: str = 'auto'):
     model = _GenericImageTextModel.from_pretrained(model_id, trust_remote_code=True, **kwargs)
     model.eval()
     return processor, model, 'generic'
+
+
+def _preload_model(model_id: str) -> dict[str, Any]:
+    processor, model, family = _load_transformers_vlm(model_id, 'auto')
+    device = _model_device(model)
+    device_text = str(device) if device is not None else 'unknown'
+    _PRELOADED_MODELS.add(model_id)
+    return {
+        'model_id': model_id,
+        'family': family,
+        'device': device_text,
+        'processor': processor.__class__.__name__,
+    }
 
 
 def _model_device(model):
@@ -238,13 +253,20 @@ def main() -> int:
         if cmd == 'shutdown':
             _emit({'ok': True, 'status': 'bye'})
             return 0
+        if cmd == 'ping':
+            _emit({'ok': True, 'status': 'pong'})
+            continue
         model_id = str(payload.get('model_id') or default_model or 'Qwen/Qwen2.5-VL-3B-Instruct')
         try:
+            if cmd == 'preload':
+                meta = _preload_model(model_id)
+                _emit({'ok': True, 'status': 'ready', **meta})
+                continue
             result = _describe(
                 image_path=Path(str(payload.get('image_path') or '')),
                 prompt=str(payload.get('prompt') or ''),
                 model_id=model_id,
-                max_new_tokens=int(payload.get('max_new_tokens') or 512),
+                max_new_tokens=int(payload.get('max_new_tokens') or 256),
             )
             _emit({'ok': True, **result})
         except Exception as exc:

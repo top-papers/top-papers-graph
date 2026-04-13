@@ -27,6 +27,7 @@ _LOCAL_VLM_DISABLED = False
 _LOCAL_VLM_DISABLE_REASON = ""
 _LOCAL_VLM_WORKER = None
 _LOCAL_VLM_WORKER_MODEL_ID = ""
+_LOCAL_VLM_WORKER_PRELOADED = False
 _LOCAL_VLM_WORKER_LOCK = threading.Lock()
 
 
@@ -172,10 +173,11 @@ def _tail_worker_stderr(worker, limit: int = 8000) -> str:
 
 
 def _close_local_vlm_worker() -> None:
-    global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID
+    global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID, _LOCAL_VLM_WORKER_PRELOADED
     worker = _LOCAL_VLM_WORKER
     _LOCAL_VLM_WORKER = None
     _LOCAL_VLM_WORKER_MODEL_ID = ""
+    _LOCAL_VLM_WORKER_PRELOADED = False
     if worker is None:
         return
     try:
@@ -219,12 +221,70 @@ def _augment_pythonpath_for_repo(env: dict[str, str]) -> dict[str, str]:
     return env
 
 
+
+
+def _request_local_vlm_worker(worker, payload: dict, timeout_seconds: float) -> dict:
+    if worker.stdin is None or worker.stdout is None:
+        raise RuntimeError('local_vlm_worker_pipes_unavailable')
+    worker.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    worker.stdin.flush()
+    line = _readline_with_timeout(worker.stdout, timeout_seconds)
+    if not line:
+        stderr = _tail_worker_stderr(worker)
+        detail = stderr or f'worker_exited={worker.poll()}'
+        raise RuntimeError(f'local_vlm_worker_no_response: {detail}')
+    try:
+        reply = json.loads(line)
+    except Exception as exc:
+        raise RuntimeError(f'local_vlm_worker_bad_json: {line[:500]}') from exc
+    return reply
+
+
+def _local_vlm_startup_timeout_seconds() -> float:
+    raw = (
+        os.environ.get('SCIREASON_LOCAL_VLM_STARTUP_TIMEOUT_SECONDS')
+        or os.environ.get('LOCAL_VLM_STARTUP_TIMEOUT_SECONDS')
+        or getattr(settings, 'local_vlm_startup_timeout_seconds', 900)
+        or 900
+    )
+    return float(raw)
+
+
+def _local_vlm_request_timeout_seconds() -> float:
+    raw = (
+        os.environ.get('SCIREASON_LOCAL_VLM_REQUEST_TIMEOUT_SECONDS')
+        or os.environ.get('LOCAL_VLM_REQUEST_TIMEOUT_SECONDS')
+        or getattr(settings, 'local_vlm_request_timeout_seconds', 180)
+        or 180
+    )
+    return float(raw)
+
+
+def _preload_local_vlm_worker(worker, model_id: str) -> None:
+    global _LOCAL_VLM_WORKER_PRELOADED
+    if _LOCAL_VLM_WORKER_PRELOADED:
+        return
+    try:
+        reply = _request_local_vlm_worker(
+            worker,
+            {'cmd': 'preload', 'model_id': model_id},
+            _local_vlm_startup_timeout_seconds(),
+        )
+    except Exception:
+        _close_local_vlm_worker()
+        raise
+    if not bool(reply.get('ok')):
+        _close_local_vlm_worker()
+        raise RuntimeError(str(reply.get('error') or 'local_vlm_worker_preload_failed'))
+    _LOCAL_VLM_WORKER_PRELOADED = True
+
 def _ensure_local_vlm_worker(model_id: str):
-    global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID
+    global _LOCAL_VLM_WORKER, _LOCAL_VLM_WORKER_MODEL_ID, _LOCAL_VLM_WORKER_PRELOADED
     model_id = str(model_id or "").strip()
     with _LOCAL_VLM_WORKER_LOCK:
         worker = _LOCAL_VLM_WORKER
         if worker is not None and worker.poll() is None and _LOCAL_VLM_WORKER_MODEL_ID == model_id:
+            _preload_local_vlm_worker(worker, model_id)
             return worker
         _close_local_vlm_worker()
         cmd = [sys.executable, "-m", "scireason.mm.vlm_worker", model_id]
@@ -246,6 +306,8 @@ def _ensure_local_vlm_worker(model_id: str):
         setattr(worker, "_scireason_stderr_file", stderr_file)
         _LOCAL_VLM_WORKER = worker
         _LOCAL_VLM_WORKER_MODEL_ID = model_id
+        _LOCAL_VLM_WORKER_PRELOADED = False
+        _preload_local_vlm_worker(worker, model_id)
         return worker
 
 
@@ -262,29 +324,10 @@ def _describe_image_qwen_worker(image_path: Path, prompt: str, model_id: str, ma
         "max_new_tokens": int(max_new_tokens),
     }
     try:
-        worker.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        worker.stdin.flush()
-        timeout_seconds = float(
-            os.environ.get("SCIREASON_LOCAL_VLM_REQUEST_TIMEOUT_SECONDS")
-            or getattr(settings, "local_vlm_request_timeout_seconds", 120)
-            or 120
-        )
-        line = _readline_with_timeout(worker.stdout, timeout_seconds)
+        reply = _request_local_vlm_worker(worker, payload, _local_vlm_request_timeout_seconds())
     except Exception as exc:
         _close_local_vlm_worker()
         raise RuntimeError(f"local_vlm_worker_io_error: {type(exc).__name__}: {exc}") from exc
-
-    if not line:
-        stderr = _tail_worker_stderr(worker)
-        _close_local_vlm_worker()
-        detail = stderr or f"worker_exited={worker.poll()}"
-        raise RuntimeError(f"local_vlm_worker_no_response: {detail}")
-
-    try:
-        reply = json.loads(line)
-    except Exception as exc:
-        _close_local_vlm_worker()
-        raise RuntimeError(f"local_vlm_worker_bad_json: {line[:500]}") from exc
 
     if not bool(reply.get("ok")):
         raise RuntimeError(str(reply.get("error") or "local_vlm_worker_failed"))
@@ -709,7 +752,7 @@ def describe_image(
     prompt: str,
     backend: Optional[Backend] = None,
     model_id: Optional[str] = None,
-    max_new_tokens: int = 512,
+    max_new_tokens: Optional[int] = None,
 ) -> VLMResult:
     """Описывает изображение (страница PDF / figure / table) через VL-модель.
 
@@ -722,6 +765,8 @@ def describe_image(
 
     if effective_backend == "none":
         return VLMResult(caption="")
+
+    effective_max_new_tokens = int(max_new_tokens or getattr(settings, "vlm_max_new_tokens", 256) or 256)
 
     try:
         if effective_backend == "g4f":
@@ -738,7 +783,7 @@ def describe_image(
             image_path=image_path,
             prompt=prompt,
             model_id=effective_model_id,
-            max_new_tokens=max_new_tokens,
+            max_new_tokens=effective_max_new_tokens,
         )
     except Exception as e:
         global _G4F_AUTH_DISABLED, _G4F_TIMEOUT_DISABLED, _LOCAL_VLM_DISABLED
@@ -754,7 +799,7 @@ def describe_image(
                         image_path=image_path,
                         prompt=prompt,
                         model_id=fallback_model,
-                        max_new_tokens=max_new_tokens,
+                        max_new_tokens=effective_max_new_tokens,
                     )
                 except Exception as inner_e:
                     console.print(
@@ -778,7 +823,7 @@ def describe_image(
                         image_path=image_path,
                         prompt=prompt,
                         model_id=fallback_model,
-                        max_new_tokens=max_new_tokens,
+                        max_new_tokens=effective_max_new_tokens,
                     )
                 except Exception as inner_e:
                     console.print(

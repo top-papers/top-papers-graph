@@ -81,14 +81,15 @@ class Settings(BaseSettings):
     # ===== Multimodal =====
     vlm_backend: str = "g4f"  # g4f(default)|none|qwen2_vl|qwen3_vl|llava|phi3_vision
     vlm_model_id: str = "auto"
-    vlm_max_new_tokens: int = 512
+    vlm_max_new_tokens: int = 256
     vlm_structured_output: bool = True
     mm_embed_backend: str = "none"  # none|open_clip
     open_clip_model: str = "ViT-B-32"
     open_clip_pretrained: str = "laion2b_s34b_b79k"
     pdf_render_dpi: int = 150
     vlm_request_timeout_seconds: int = 45
-    local_vlm_request_timeout_seconds: int = 120
+    local_vlm_request_timeout_seconds: int = 180
+    local_vlm_startup_timeout_seconds: int = 900
     vlm_min_pixels: int = 256 * 28 * 28
     vlm_max_pixels: int = 1280 * 28 * 28
     local_vlm_allow_inprocess_fallback: bool = False
