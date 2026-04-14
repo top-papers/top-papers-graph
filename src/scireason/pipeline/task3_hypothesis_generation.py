@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from dataclasses import asdict, dataclass
@@ -294,20 +295,95 @@ def _ingest_metadata_only(paper: PaperMetadata, processed_dir: Path) -> Path:
     return save_paper(processed_dir, meta=paper.model_dump(mode="json"), chunks=[chunk])
 
 
-def _copy_processed_tree(src: Path, dst: Path) -> Path:
-    if src.resolve() == dst.resolve():
+def _rewrite_mm_pages_jsonl(src_file: Path, dst_file: Path, *, src_root: Path, dst_root: Path, strip_vlm_metadata: bool) -> None:
+    src_root_resolved = src_root.resolve()
+    dst_root_resolved = dst_root.resolve()
+    dst_file.parent.mkdir(parents=True, exist_ok=True)
+    with src_file.open("r", encoding="utf-8") as src_fh, dst_file.open("w", encoding="utf-8") as dst_fh:
+        for line in src_fh:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                dst_fh.write(line if line.endswith("\n") else line + "\n")
+                continue
+
+            image_path = str(payload.get("image_path") or "").strip()
+            if image_path:
+                try:
+                    image_path_obj = Path(image_path)
+                    if image_path_obj.is_absolute():
+                        image_resolved = image_path_obj.resolve()
+                        try:
+                            rel = image_resolved.relative_to(src_root_resolved)
+                        except Exception:
+                            rel = None
+                        if rel is not None:
+                            payload["image_path"] = str((dst_root_resolved / rel).as_posix())
+                except Exception:
+                    pass
+
+            if strip_vlm_metadata:
+                payload["vlm_caption"] = ""
+                payload["tables_md"] = ""
+                payload["equations_md"] = ""
+
+            dst_fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _copy_processed_tree(
+    src: Path,
+    dst: Path,
+    *,
+    link_files: bool = False,
+    strip_mm_vlm_metadata: bool = False,
+) -> Path:
+    src_resolved = src.resolve()
+    dst_resolved = dst.resolve()
+    if src_resolved == dst_resolved:
         return dst
+
     dst.mkdir(parents=True, exist_ok=True)
-    for item in src.iterdir():
-        target = dst / item.name
+    for item in src.rglob("*"):
+        rel = item.relative_to(src)
+        target = dst / rel
         if item.is_dir():
-            shutil.copytree(item, target, dirs_exist_ok=True)
-        else:
-            shutil.copy2(item, target)
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+
+        needs_mm_rewrite = item.name == "pages.jsonl" and "mm" in item.parts
+        if needs_mm_rewrite:
+            _rewrite_mm_pages_jsonl(
+                item,
+                target,
+                src_root=src_resolved,
+                dst_root=dst_resolved,
+                strip_vlm_metadata=strip_mm_vlm_metadata,
+            )
+            continue
+
+        if link_files:
+            try:
+                os.link(item, target)
+                continue
+            except OSError:
+                pass
+
+        shutil.copy2(item, target)
     return dst
 
 
 def _acquire_and_ingest_papers(
+
     papers: Sequence[PaperMetadata],
     *,
     bundle_dir: Path,
@@ -1030,6 +1106,8 @@ def prepare_task3_hypothesis_bundle(
     candidate_top_k: int = 16,
     include_multimodal: bool = True,
     run_vlm: bool = True,
+    processed_dir_link_mode: str = "copy",
+    processed_dir_strip_mm_vlm_metadata: bool = False,
     edge_mode: str = "auto",
     link_prediction_backend: str = "auto",
     link_prediction_top_k: int = 24,
@@ -1125,7 +1203,12 @@ def prepare_task3_hypothesis_bundle(
                     item_current=1,
                     item_total=1,
                 )
-                prepared_processed_dir = _copy_processed_tree(Path(processed_dir), bundle_dir / "processed_papers")
+                prepared_processed_dir = _copy_processed_tree(
+                    Path(processed_dir),
+                    bundle_dir / "processed_papers",
+                    link_files=str(processed_dir_link_mode or "copy").strip().lower() == "hardlink",
+                    strip_mm_vlm_metadata=bool(processed_dir_strip_mm_vlm_metadata),
+                )
                 acquire_results = []
                 _emit_progress(
                     progress_callback,
@@ -1403,6 +1486,8 @@ def prepare_task3_hypothesis_bundle(
                 "inputs": {
                     "include_multimodal": include_multimodal,
                     "run_vlm": run_vlm,
+                    "processed_dir_link_mode": str(processed_dir_link_mode or "copy"),
+                    "processed_dir_strip_mm_vlm_metadata": bool(processed_dir_strip_mm_vlm_metadata),
                     "edge_mode": edge_mode,
                     "link_prediction_backend": link_prediction_backend,
                     "annoy_metric": annoy_metric,

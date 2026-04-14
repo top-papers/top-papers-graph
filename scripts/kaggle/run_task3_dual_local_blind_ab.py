@@ -311,6 +311,8 @@ def main() -> int:
         beta_kwargs = dict(
             **common_kwargs,
             processed_dir=Path(shared_processed_dir),
+            processed_dir_link_mode="hardlink",
+            processed_dir_strip_mm_vlm_metadata=True,
             out_dir=out_dir / "variant_beta",
             local_model=model_b_cfg["local_text_model"],
             vlm_backend=model_b_cfg["vlm_backend"],
