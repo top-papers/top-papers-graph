@@ -5,10 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from rich.console import Console
+
 from ..contracts import ChunkRecord
 from ..temporal.schemas import TemporalTriplet
 from ..temporal.temporal_triplet_extractor import extract_temporal_triplets
-from .vlm import describe_image
+from .vlm import VLMResult, describe_image
+
+
+console = Console()
 
 
 @dataclass(frozen=True)
@@ -77,12 +82,23 @@ def _compose_analysis_text(
     return ""
 
 
+def _has_cached_vlm_artifacts(record: ChunkRecord) -> bool:
+    return any(
+        bool(_metadata_text(record, key))
+        for key in ("vlm_caption", "tables_md", "equations_md")
+    )
+
+
 def _should_request_vlm(record: ChunkRecord, *, run_vlm: bool) -> bool:
     if not run_vlm:
         return False
     if not record.image_path:
         return False
+    if _has_cached_vlm_artifacts(record):
+        return False
     modality = str(record.modality or "unknown").strip().lower()
+    if modality in {"table", "formula"} and bool(str(record.text or "").strip()):
+        return False
     return modality in {"page", "figure", "table", "formula", "unknown"} or not bool(str(record.text or "").strip())
 
 
@@ -121,6 +137,7 @@ def extract_multimodal_triplets(
 
     out: List[MultimodalTripletArtifact] = []
     limit = int(max_chunks) if max_chunks not in (None, 0) else None
+    vlm_cache: Dict[str, VLMResult] = {}
 
     for idx, record in enumerate(chunk_records):
         if limit is not None and idx >= limit:
@@ -132,13 +149,19 @@ def extract_multimodal_triplets(
         extraction_backend = "text_only"
 
         if _should_request_vlm(record, run_vlm=run_vlm):
+            image_key = str(record.image_path or "").strip()
             try:
-                result = describe_image(
-                    image_path=Path(str(record.image_path)),
-                    prompt=_vlm_prompt(record),
-                    backend=vlm_backend,  # type: ignore[arg-type]
-                    model_id=vlm_model_id,
-                )
+                cached = vlm_cache.get(image_key) if image_key else None
+                result = cached
+                if result is None:
+                    result = describe_image(
+                        image_path=Path(str(record.image_path)),
+                        prompt=_vlm_prompt(record),
+                        backend=vlm_backend,  # type: ignore[arg-type]
+                        model_id=vlm_model_id,
+                    )
+                    if image_key:
+                        vlm_cache[image_key] = result
                 if result.caption:
                     vlm_caption = str(result.caption).strip()
                 if result.extracted_tables_md:
@@ -146,7 +169,11 @@ def extract_multimodal_triplets(
                 if result.extracted_equations_md:
                     equations_md = str(result.extracted_equations_md).strip()
                 extraction_backend = "vlm_augmented"
-            except Exception:
+            except Exception as exc:
+                console.print(
+                    f"[yellow]Multimodal triplets fallback for {record.chunk_id}: {type(exc).__name__}: {exc}. "
+                    "Продолжаю без дополнительного VLM-анализа.[/yellow]"
+                )
                 extraction_backend = "text_only"
 
         analysis_text = _compose_analysis_text(record, vlm_caption=vlm_caption, tables_md=tables_md, equations_md=equations_md)

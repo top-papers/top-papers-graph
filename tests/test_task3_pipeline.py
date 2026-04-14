@@ -6,6 +6,9 @@ from pathlib import Path
 
 from scireason.cli import app
 from scireason.config import settings
+from scireason.contracts import ChunkRecord
+from scireason.mm.multimodal_triplets import extract_multimodal_triplets
+from scireason.mm.vlm import VLMResult
 from scireason.pipeline.task3_hypothesis_generation import prepare_task3_hypothesis_bundle
 
 
@@ -238,3 +241,97 @@ def test_prepare_task3_bundle_can_hardlink_processed_dir_and_scrub_mm_metadata(t
     assert source_payload["tables_md"] == "alpha tables"
     assert source_payload["equations_md"] == "alpha equations"
     assert os.stat(source_image).st_ino == os.stat(copied_image).st_ino
+
+
+def test_extract_multimodal_triplets_reuses_cached_vlm_metadata(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "page.png"
+    image_path.write_bytes(b"fake-image")
+
+    calls = {"count": 0}
+
+    def _fake_describe_image(*args, **kwargs):
+        calls["count"] += 1
+        return VLMResult(caption="fresh caption")
+
+    monkeypatch.setattr("scireason.mm.multimodal_triplets.describe_image", _fake_describe_image)
+    monkeypatch.setattr("scireason.mm.multimodal_triplets.extract_temporal_triplets", lambda **kwargs: [])
+
+    records = [
+        ChunkRecord(
+            chunk_id="paper-1:mm:1",
+            paper_id="paper-1",
+            page=1,
+            modality="page",
+            text="Observed transport map remains stable.",
+            image_path=str(image_path),
+            source_backend="mm_pdf",
+            metadata={
+                "vlm_caption": "cached caption",
+                "tables_md": "epoch | score\n1 | 0.91",
+                "equations_md": "",
+            },
+        )
+    ]
+
+    out = extract_multimodal_triplets(
+        records,
+        paper_years={"paper-1": 2024},
+        domain="science",
+        run_vlm=True,
+    )
+
+    assert calls["count"] == 0
+    assert out
+    assert out[0].vlm_caption == "cached caption"
+    assert out[0].tables_md == "epoch | score\n1 | 0.91"
+    assert out[0].extraction_backend == "text_only"
+
+
+def test_extract_multimodal_triplets_deduplicates_vlm_calls_per_image(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "page.png"
+    image_path.write_bytes(b"fake-image")
+
+    calls = {"count": 0}
+
+    def _fake_describe_image(*args, **kwargs):
+        calls["count"] += 1
+        return VLMResult(caption="shared caption", extracted_tables_md="shared tables")
+
+    monkeypatch.setattr("scireason.mm.multimodal_triplets.describe_image", _fake_describe_image)
+    monkeypatch.setattr("scireason.mm.multimodal_triplets.extract_temporal_triplets", lambda **kwargs: [])
+
+    records = [
+        ChunkRecord(
+            chunk_id="paper-1:mm:1",
+            paper_id="paper-1",
+            page=1,
+            modality="page",
+            text="",
+            image_path=str(image_path),
+            source_backend="mm_pdf",
+            metadata={},
+        ),
+        ChunkRecord(
+            chunk_id="paper-1:mm:1:dup",
+            paper_id="paper-1",
+            page=1,
+            modality="page",
+            text="",
+            image_path=str(image_path),
+            source_backend="mm_pdf",
+            metadata={},
+        ),
+    ]
+
+    out = extract_multimodal_triplets(
+        records,
+        paper_years={"paper-1": 2024},
+        domain="science",
+        run_vlm=True,
+    )
+
+    assert calls["count"] == 1
+    assert len(out) == 2
+    assert {row.vlm_caption for row in out} == {"shared caption"}
+    assert {row.tables_md for row in out} == {"shared tables"}
+    assert {row.extraction_backend for row in out} == {"vlm_augmented"}

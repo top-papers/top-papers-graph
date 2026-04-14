@@ -63,9 +63,10 @@ def _emit_progress(
         "percent": 0 if total <= 0 else int(round((current / total) * 100)),
     }
     payload.update(extra)
-    console.print(f"[blue][Task3 {current}/{total}][/blue] {message}")
     if progress_callback is not None:
         progress_callback(payload)
+    else:
+        console.print(f"[blue][Task3 {current}/{total}][/blue] {message}")
 
 
 
