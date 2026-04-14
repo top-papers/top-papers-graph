@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import gc
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -12,6 +13,25 @@ from .vlm import describe_image, VLMResult
 
 
 console = Console()
+
+
+def _page_progress_every() -> int:
+    raw = str(os.environ.get("TASK3_PAGE_PROGRESS_EVERY", "5") or "5").strip()
+    try:
+        value = int(raw)
+    except Exception:
+        value = 5
+    return max(1, value)
+
+
+def _should_emit_page_progress(page_index: int, total_pages: int, *, every: int) -> bool:
+    if total_pages <= 1:
+        return True
+    if page_index <= 0 or page_index >= total_pages - 1:
+        return True
+    if every <= 1:
+        return True
+    return ((page_index + 1) % every) == 0
 
 
 @dataclass
@@ -65,6 +85,7 @@ def extract_pages(
     pages_path = mm_root / "pages.jsonl"
     with fitz.open(str(pdf_path)) as doc:
         total_pages = len(doc)
+        progress_every = _page_progress_every()
 
         if progress_callback is not None:
             progress_callback({
@@ -79,7 +100,9 @@ def extract_pages(
         with pages_path.open("w", encoding="utf-8") as fh:
             for i in range(total_pages):
                 page = doc.load_page(i)
-                console.print(f"[cyan]MM page {i + 1}/{total_pages}:[/cyan] {pdf_path.name}")
+                emit_progress = _should_emit_page_progress(i, total_pages, every=progress_every)
+                if emit_progress:
+                    console.print(f"[cyan]MM page {i + 1}/{total_pages}:[/cyan] {pdf_path.name}")
                 text = (page.get_text("text") or "").strip()
 
                 pix = page.get_pixmap(matrix=matrix, alpha=False)
@@ -112,7 +135,7 @@ def extract_pages(
                 if collect_records:
                     pages.append(rec)
 
-                if progress_callback is not None:
+                if progress_callback is not None and emit_progress:
                     progress_callback({
                         "event": "page",
                         "paper_id": paper_id,

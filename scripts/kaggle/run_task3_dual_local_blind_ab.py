@@ -185,6 +185,7 @@ def main() -> int:
     os.environ.setdefault("PDF_RENDER_DPI", "110")
     os.environ.setdefault("VLM_MAX_PIXELS", str(768 * 28 * 28))
     os.environ.setdefault("VLM_MAX_NEW_TOKENS", "192")
+    os.environ.setdefault("TASK3_PAGE_PROGRESS_EVERY", "5")
     os.environ.setdefault("HF_HOME", "/kaggle/working/.hf")
     os.environ.setdefault("HF_HUB_CACHE", "/kaggle/working/.hf/hub")
     os.environ.setdefault("TRANSFORMERS_CACHE", "/kaggle/working/.hf/hub")
