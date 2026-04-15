@@ -47,6 +47,161 @@ from ..config import settings
 console = Console()
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _coerce_graph_signals(value: Any) -> Dict[str, float]:
+    if isinstance(value, dict):
+        out: Dict[str, float] = {}
+        for key, raw in value.items():
+            try:
+                out[str(key)] = float(raw)
+            except Exception:
+                continue
+        return out
+    if isinstance(value, list):
+        out: Dict[str, float] = {}
+        for idx, raw in enumerate(value, start=1):
+            try:
+                out[f"signal_{idx}"] = float(raw)
+            except Exception:
+                continue
+        return out
+    return {}
+
+
+def _coerce_candidate_row(row: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(row, dict):
+        if isinstance(row.get("candidate"), dict):
+            merged = dict(row["candidate"])
+            for key, value in row.items():
+                merged.setdefault(key, value)
+            row = merged
+        return {
+            "kind": str(row.get("kind") or "link_prediction"),
+            "source": str(row.get("source") or row.get("u") or row.get("subject") or ""),
+            "target": str(row.get("target") or row.get("v") or row.get("object") or ""),
+            "predicate": str(row.get("predicate") or row.get("relation") or "may_relate_to"),
+            "score": _safe_float(row.get("score") or row.get("weight") or row.get("confidence") or 0.0),
+            "graph_signals": _coerce_graph_signals(row.get("graph_signals") or row.get("signals") or row.get("features") or {}),
+        }
+    if isinstance(row, (list, tuple)):
+        values = list(row)
+        if len(values) >= 5:
+            return {
+                "kind": str(values[0] or "link_prediction"),
+                "source": str(values[1] or ""),
+                "target": str(values[2] or ""),
+                "predicate": str(values[3] or "may_relate_to"),
+                "score": _safe_float(values[4], 0.0),
+                "graph_signals": _coerce_graph_signals(values[5] if len(values) > 5 else {}),
+            }
+        if len(values) == 3:
+            return {
+                "kind": "link_prediction",
+                "source": str(values[0] or ""),
+                "target": str(values[1] or ""),
+                "predicate": "may_relate_to",
+                "score": _safe_float(values[2], 0.0),
+                "graph_signals": {},
+            }
+    return None
+
+
+def _deterministic_agent_candidates(
+    kg: TemporalKnowledgeGraph,
+    *,
+    papers: Sequence[PaperRecord],
+    top_k: int,
+    time_scope: str,
+) -> List[AgentCandidate]:
+    """Rule-based backup for the graph candidate agent.
+
+    This keeps the candidate-generation stage productive even if the LLM agent emits
+    malformed code or returns an unexpected schema.
+    """
+
+    G = build_nx_graph(kg, directed=False, min_total_count=1)
+    if G.number_of_nodes() == 0:
+        return []
+
+    comms = communities_greedy_modularity(G)
+    pagerank_rows = top_central_nodes(G, k=max(10, top_k * 2)).get("pagerank", [])
+    pagerank = {str(node): _safe_float(score) for node, score in pagerank_rows}
+
+    out: List[AgentCandidate] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def _push(kind: str, source: str, target: str, score: float, signals: Dict[str, float]) -> None:
+        src = str(source or "").strip().lower()
+        tgt = str(target or "").strip().lower()
+        if not src or not tgt or src == tgt:
+            return
+        key = (src, "may_relate_to", tgt)
+        rev = (tgt, "may_relate_to", src)
+        if key in seen or rev in seen:
+            return
+        seen.add(key)
+        out.append(
+            AgentCandidate(
+                kind=kind,
+                source=src,
+                target=tgt,
+                predicate="may_relate_to",
+                score=float(score),
+                time_scope=time_scope,
+                graph_signals=signals,
+                evidence=_evidence_stub(papers, src, tgt, k=2),
+            )
+        )
+
+    for u, v, score in cross_community_bridges(G, comms, top_k=max(top_k * 2, 12)):
+        _push(
+            "cross_bridge",
+            u,
+            v,
+            float(score) + 0.25 * (pagerank.get(str(u), 0.0) + pagerank.get(str(v), 0.0)),
+            {
+                "adamic_adar": float(score),
+                "pagerank_u": pagerank.get(str(u), 0.0),
+                "pagerank_v": pagerank.get(str(v), 0.0),
+            },
+        )
+
+    for u, v, score in link_prediction(G, method="adamic_adar", k=max(top_k * 3, 20)):
+        _push(
+            "link_prediction",
+            u,
+            v,
+            float(score) + 0.1 * (pagerank.get(str(u), 0.0) + pagerank.get(str(v), 0.0)),
+            {
+                "adamic_adar": float(score),
+                "pagerank_u": pagerank.get(str(u), 0.0),
+                "pagerank_v": pagerank.get(str(v), 0.0),
+            },
+        )
+
+    for u, v, score in spectral_link_prediction(G, dim=8, k=max(top_k * 2, 12)):
+        _push(
+            "central_emergence",
+            u,
+            v,
+            float(score) + 0.15 * (pagerank.get(str(u), 0.0) + pagerank.get(str(v), 0.0)),
+            {
+                "spectral_score": float(score),
+                "pagerank_u": pagerank.get(str(u), 0.0),
+                "pagerank_v": pagerank.get(str(v), 0.0),
+            },
+        )
+
+    out.sort(key=lambda c: c.score, reverse=True)
+    return out[: int(top_k)]
+
+
 @dataclass(frozen=True)
 class AgentCandidate:
     kind: str
@@ -264,12 +419,20 @@ IMPORTANT: end by calling final_answer(<the_list>).""".format(k=int(top_k))
 
         task = (
             "Using the temporal knowledge graph, propose up to {k} candidate hypotheses as edges (source, predicate, target).\n"
-            "Return a LIST of dicts with keys: kind, source, target, predicate, score, graph_signals.\n"
-            "Where:\n"
+            "Return ONLY a Python list of dicts. Each dict must contain: kind, source, target, predicate, score, graph_signals.\n"
+            "Tool return shapes (important):\n"
+            "- communities(G) -> list[list[str]]\n"
+            "- centrality(G, k=...) -> dict with keys like 'pagerank', values are lists of [node, score] pairs\n"
+            "- link_prediction(...) -> list of [source, target, score]\n"
+            "- spectral_link_prediction(...) -> list of [source, target, score]\n"
+            "- cross_bridges(...) -> list of [source, target, score]\n"
+            "Rules:\n"
             "- kind is one of: cross_bridge, link_prediction, central_emergence\n"
             "- predicate is a short snake_case relation like may_relate_to, influences, correlates_with\n"
-            "- score is a float where higher is better\n"
-            "- graph_signals is a dict of floats (e.g. adamic_adar, pagerank_u, pagerank_v, comm_u, comm_v)\n"
+            "- graph_signals must be a dict of floats\n"
+            "- use plain ASCII punctuation in code and output keys\n"
+            "- handle missing keys/types defensively; do not call .get() on lists\n"
+            "Example final_answer value: [{{'kind':'cross_bridge','source':'term_a','target':'term_b','predicate':'may_relate_to','score':1.23,'graph_signals':{{'adamic_adar':1.23}}}}]\n"
             "You may call: build_graph(), communities(G), centrality(G), link_prediction(G, method=..., k=...), spectral_link_prediction(G, dim=..., k=...), cross_bridges(G, comms, top_k=...)."
         ).format(k=int(top_k))
 
@@ -279,9 +442,9 @@ IMPORTANT: end by calling final_answer(<the_list>).""".format(k=int(top_k))
             raw = agent.run(task, context=context)
         except Exception as e:
             console.print(
-                f"[yellow]Graph candidate agent failed ({type(e).__name__}: {e}). Falling back.[/yellow]"
+                f"[yellow]Graph candidate agent failed ({type(e).__name__}: {e}). Falling back to deterministic graph heuristics.[/yellow]"
             )
-            return []
+            return _deterministic_agent_candidates(kg, papers=papers, top_k=top_k, time_scope=time_scope)
 
 
     # Normalize
@@ -304,7 +467,8 @@ IMPORTANT: end by calling final_answer(<the_list>).""".format(k=int(top_k))
     if not isinstance(raw, list):
         return []
 
-    for r in raw[: int(top_k)]:
+    for row in raw[: int(top_k)]:
+        r = _coerce_candidate_row(row)
         if not isinstance(r, dict):
             continue
         src = str(r.get("source") or "").strip().lower()
@@ -312,18 +476,9 @@ IMPORTANT: end by calling final_answer(<the_list>).""".format(k=int(top_k))
         if not src or not tgt or src == tgt:
             continue
         kind = str(r.get("kind") or "link_prediction")
-        pred = str(r.get("predicate") or "may_relate_to").strip()
-        try:
-            score = float(r.get("score") or 0.0)
-        except Exception:
-            score = 0.0
-        gs = r.get("graph_signals") if isinstance(r.get("graph_signals"), dict) else {}
-        graph_signals: Dict[str, float] = {}
-        for k, v in (gs or {}).items():
-            try:
-                graph_signals[str(k)] = float(v)
-            except Exception:
-                continue
+        pred = str(r.get("predicate") or "may_relate_to").strip() or "may_relate_to"
+        score = _safe_float(r.get("score"), 0.0)
+        graph_signals = _coerce_graph_signals(r.get("graph_signals") or {})
 
         ev = _evidence_stub(papers, src, tgt, k=2)
         out.append(
@@ -338,6 +493,9 @@ IMPORTANT: end by calling final_answer(<the_list>).""".format(k=int(top_k))
                 evidence=ev,
             )
         )
+
+    if not out:
+        return _deterministic_agent_candidates(kg, papers=papers, top_k=top_k, time_scope=time_scope)
 
     # stable sort
     out.sort(key=lambda c: c.score, reverse=True)

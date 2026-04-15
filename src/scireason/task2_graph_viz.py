@@ -848,7 +848,7 @@ def _build_light_graph_html(payload: Dict[str, Any], analytics: Dict[str, Any], 
     const edges = Array.isArray(APP.graph.edges) ? APP.graph.edges : [];
 
     function edgeKey(src, pred, tgt) {{
-      return [src, pred, tgt].map((v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ')).join(' | ');
+      return [src, pred, tgt].map((v) => String(v ?? '').trim().toLowerCase().replace(/\\s+/g, ' ')).join(' | ');
     }}
     function nodeValue(nodeId, metric) {{
       const row = nodeMetrics[nodeId] || {{}};

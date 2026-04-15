@@ -21,6 +21,7 @@ prompts.
 
 import ast
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
@@ -37,6 +38,109 @@ class Tool:
 
 class SandboxError(RuntimeError):
     pass
+
+
+_CODE_FENCE_RE = re.compile(r"```(?:python|py)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+
+
+class SafeList(list):
+    """List with a permissive `.get()` for brittle LLM-generated code."""
+
+    _SELF_KEYS = {
+        "items", "data", "results", "rows", "values", "predictions", "communities",
+        "candidates", "nodes", "edges", "links", "pairs", "records",
+    }
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if isinstance(key, int):
+            try:
+                return self[key]
+            except Exception:
+                return default
+        if isinstance(key, str):
+            lowered = key.strip().lower()
+            if lowered.isdigit():
+                try:
+                    return self[int(lowered)]
+                except Exception:
+                    return default
+            if lowered in self._SELF_KEYS:
+                return self
+        return default
+
+
+class SafeDict(dict):
+    """Dict wrapper that recursively exposes tolerant child containers."""
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        value = super().get(key, default)
+        return _wrap_sandbox_value(value)
+
+    def items(self):
+        for key, value in super().items():
+            yield key, _wrap_sandbox_value(value)
+
+    def values(self):
+        for value in super().values():
+            yield _wrap_sandbox_value(value)
+
+
+def _wrap_sandbox_value(value: Any) -> Any:
+    if isinstance(value, SafeList | SafeDict):
+        return value
+    if isinstance(value, dict):
+        return SafeDict({k: _wrap_sandbox_value(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return SafeList(_wrap_sandbox_value(v) for v in value)
+    if isinstance(value, tuple):
+        return tuple(_wrap_sandbox_value(v) for v in value)
+    return value
+
+
+def _extract_python_payload(text: str) -> str:
+    payload = (text or "").strip()
+    if not payload:
+        return payload
+    match = _CODE_FENCE_RE.search(payload)
+    if match:
+        return match.group(1).strip()
+    if payload.startswith("```"):
+        payload = payload.split("\n", 1)[1] if "\n" in payload else ""
+        payload = payload.rsplit("```", 1)[0].strip()
+    if payload.lower().startswith("python\n"):
+        payload = payload.split("\n", 1)[1].strip()
+    return payload
+
+
+def _normalize_generated_code(code: str) -> str:
+    payload = _extract_python_payload(code)
+    if not payload:
+        return payload
+    translation = str.maketrans({
+        "﻿": "",
+        "​": "",
+        "‌": "",
+        "‍": "",
+        "⁠": "",
+        " ": " ",
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "-",
+        "−": "-",
+        "，": ",",
+        "：": ":",
+        "；": ";",
+        "（": "(",
+        "）": ")",
+        "［": "[",
+        "］": "]",
+        "｛": "{",
+        "｝": "}",
+    })
+    return payload.translate(translation).strip()
 
 
 class _NoImportVisitor(ast.NodeVisitor):
@@ -103,7 +207,7 @@ def run_in_sandbox(
     The code must end by setting a variable named `final_answer`.
     """
 
-    code = (code or "").strip()
+    code = _normalize_generated_code(code)
     if not code:
         raise SandboxError("Empty code")
 
@@ -117,12 +221,17 @@ def run_in_sandbox(
         raise SandboxError(f"Invalid python code: {e}") from e
 
     # 2) Build execution namespace
+    wrapped_tools = {
+        name: (lambda *args, __fn=fn, **kwargs: _wrap_sandbox_value(__fn(*args, **kwargs)))
+        for name, fn in tools.items()
+    }
+
     env: Dict[str, Any] = {
         "__builtins__": _safe_builtins(),
-        "tools": dict(tools),
+        "tools": wrapped_tools,
     }
     # Expose tool call shorthand: e.g. `kg = build_graph(...)` instead of `tools['build_graph'](...)`
-    env.update({name: fn for name, fn in tools.items()})
+    env.update(wrapped_tools)
 
     if globals_extra:
         env.update(globals_extra)
@@ -179,14 +288,7 @@ class CodeAgent:
                 + "3) Keep code short and robust; handle missing data.\n"
             )
 
-            code = chat_text(sys, user, temperature=0.2)
-
-            # If the model wrapped code in fences, strip them.
-            code = code.strip()
-            if code.startswith("```"):
-                code = code.split("\n", 1)[1]
-                if code.rstrip().endswith("```"):
-                    code = code.rsplit("```", 1)[0]
+            code = _normalize_generated_code(chat_text(sys, user, temperature=0.2))
 
             try:
                 env = run_in_sandbox(
