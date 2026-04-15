@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import traceback
 import zipfile
@@ -97,6 +98,19 @@ def _build_export_zip(out_dir: Path) -> Path | None:
                     continue
                 zf.write(path, arcname=str(path.relative_to(out_dir.parent)))
         return export_zip
+    except Exception:
+        return None
+
+
+def _export_offline_review_html(out_dir: Path, offline_form_path: str | None) -> Path | None:
+    src = Path(str(offline_form_path or '').strip()) if offline_form_path else None
+    if src is None or not src.exists() or not src.is_file():
+        return None
+    try:
+        export_html = out_dir.parent / f"{out_dir.name}__offline_review.html"
+        if src.resolve() != export_html.resolve():
+            shutil.copy2(src, export_html)
+        return export_html
     except Exception:
         return None
 
@@ -393,9 +407,12 @@ def main() -> int:
 
         run_manifest_path = _write_json(out_dir / "task3_dual_run_manifest.json", manifest_payload)
         export_zip = _build_export_zip(out_dir)
+        export_html = _export_offline_review_html(out_dir, manifest_payload["artifacts"].get("offline_form"))
         if export_zip is not None:
             manifest_payload["artifacts"]["kaggle_export_zip"] = str(export_zip)
-            _write_json(run_manifest_path, manifest_payload)
+        if export_html is not None:
+            manifest_payload["artifacts"]["offline_form_export_html"] = str(export_html)
+        _write_json(run_manifest_path, manifest_payload)
 
         print("[success] Dual-local blind A/B completed", flush=True)
         print(json.dumps(
@@ -403,6 +420,7 @@ def main() -> int:
                 "run_manifest": str(run_manifest_path),
                 "kaggle_export_zip": str(export_zip) if export_zip else None,
                 "offline_form": manifest_payload["artifacts"]["offline_form"],
+                "offline_form_export_html": str(export_html) if export_html else None,
                 "owner_key": manifest_payload["artifacts"]["owner_key"],
                 "expert_bundle": manifest_payload["artifacts"]["expert_bundle"],
             },
