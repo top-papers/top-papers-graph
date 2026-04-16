@@ -77,8 +77,8 @@ def test_task3_dual_model_review_assets_and_bundle(tmp_path: Path) -> None:
     assert assets.public_manifest_path.exists()
 
     html_text = assets.offline_html_path.read_text(encoding="utf-8")
-    assert "Blind A/B review" in html_text
-    assert "Hidden model α" in html_text
+    assert "слепое A/B-сравнение" in html_text
+    assert "Скрытая модель α" in html_text
     assert "/models/base-local-vlm" not in html_text
     assert "/models/finetuned-local-vlm" not in html_text
 

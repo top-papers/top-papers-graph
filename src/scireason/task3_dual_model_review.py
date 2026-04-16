@@ -393,20 +393,20 @@ _HTML_TEMPLATE = r"""<!doctype html>
 <body>
   <div class="page">
     <section class="hero">
-      <h1>Task 3 — Blind A/B review for dual local models</h1>
+      <h1>Задача 3 — слепое A/B-сравнение двух локальных моделей</h1>
       <div class="muted">Эксперт видит только варианты A/B и анонимные системы. Ключ соответствия хранится отдельно у владельца запуска.</div>
       <div id="meta-stats" class="toolbar"></div>
     </section>
 
     <div class="note">
       <b>Как работать с формой:</b>
-      1) сравните две гипотезы, 2) отметьте лучший вариант по критериям, 3) регулярно сохраняйте draft JSON или ZIP с review.
-      В этой HTML-странице результаты могут также автоматически сохраняться в localStorage браузера.
+      1) сравните две гипотезы, 2) отметьте лучший вариант по критериям, 3) регулярно сохраняйте черновик JSON или ZIP с результатами ревью.
+      В этой HTML-странице результаты также могут автоматически сохраняться в localStorage браузера.
     </div>
 
     <section id="review-section"></section>
     <section id="summary-section"></section>
-    <div class="footer">Файл автономный: интернет не нужен. Для передачи между устройствами используйте export JSON или ZIP.</div>
+    <div class="footer">Файл автономный: интернет не нужен. Для передачи между устройствами используйте экспорт JSON или ZIP.</div>
   </div>
 
   <script>
@@ -687,19 +687,19 @@ _HTML_TEMPLATE = r"""<!doctype html>
 
   function variantNode(label, variant) {
     const evidence = Array.isArray(variant.supporting_evidence) ? variant.supporting_evidence : [];
-    const evidenceList = evidence.length ? el('ul', null, evidence.map((item) => el('li', { text: `${item.source_id ? `[${item.source_id}] ` : ''}${truncate(item.text_snippet, 180)}` }))) : el('div', { class: 'muted', text: 'Нет встроенных evidence snippets.' });
+    const evidenceList = evidence.length ? el('ul', null, evidence.map((item) => el('li', { text: `${item.source_id ? `[${item.source_id}] ` : ''}${truncate(item.text_snippet, 180)}` }))) : el('div', { class: 'muted', text: 'Нет встроенных фрагментов доказательств.' });
     return el('div', { class: 'variant' },
-      el('div', { class: 'label', text: `Variant ${label}` }),
+      el('div', { class: 'label', text: `Вариант ${label}` }),
       el('h4', { text: variant.title || '(без названия)' }),
       el('div', { class: 'kv' },
-        el('div', { class: 'key', text: 'Premise' }), el('div', { text: variant.premise || '' }),
-        el('div', { class: 'key', text: 'Mechanism' }), el('div', { text: variant.mechanism || '' }),
-        el('div', { class: 'key', text: 'Time scope' }), el('div', { text: variant.time_scope || '' }),
-        el('div', { class: 'key', text: 'Experiment' }), el('div', { text: variant.proposed_experiment || '' }),
+        el('div', { class: 'key', text: 'Предпосылка' }), el('div', { text: variant.premise || '' }),
+        el('div', { class: 'key', text: 'Механизм' }), el('div', { text: variant.mechanism || '' }),
+        el('div', { class: 'key', text: 'Временной диапазон' }), el('div', { text: variant.time_scope || '' }),
+        el('div', { class: 'key', text: 'Эксперимент' }), el('div', { text: variant.proposed_experiment || '' }),
         el('div', { class: 'key', text: variant.score_label || 'score' }), el('div', { text: String(variant.score ?? '') })
       ),
       el('details', { open: false },
-        el('summary', { text: 'Evidence' }),
+        el('summary', { text: 'Доказательства' }),
         el('div', null, evidenceList)
       )
     );
@@ -710,9 +710,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
     host.innerHTML = '';
     const stats = summaryStats();
     host.append(
-      el('span', { class: 'pill', text: `topic: ${APP.meta.topic || '—'}` }),
-      el('span', { class: 'pill', text: `submission_id: ${APP.meta.submission_id || '—'}` }),
-      el('span', { class: 'pill', text: `pairs: ${APP.records.length}` })
+      el('span', { class: 'pill', text: `тема: ${APP.meta.topic || '—'}` }),
+      el('span', { class: 'pill', text: `ID отправки: ${APP.meta.submission_id || '—'}` }),
+      el('span', { class: 'pill', text: `пар: ${APP.records.length}` })
     );
     (APP.meta.anonymous_systems || []).forEach((row) => host.append(el('span', { class: 'pill', text: `${row.display_label || row.system_id}: ${stats.pref[row.system_id] || 0}` })));
     host.append(el('span', { class: 'pill', text: `ties: ${stats.pref.tie || 0}` }));
@@ -768,15 +768,15 @@ _HTML_TEMPLATE = r"""<!doctype html>
   function renderReview() {
     const host = document.getElementById('review-section');
     host.innerHTML = '';
-    const reviewer = el('input', { type: 'text', value: state.reviewer_id || '', placeholder: 'reviewer_id / имя эксперта' });
+    const reviewer = el('input', { type: 'text', value: state.reviewer_id || '', placeholder: 'ID ревьюера / имя эксперта' });
     reviewer.addEventListener('input', () => { state.reviewer_id = reviewer.value; autosave('reviewer'); renderSummary(); });
-    const search = el('input', { type: 'search', value: state.filters.search || '', placeholder: 'Поиск по hypothesis / source / target' });
+    const search = el('input', { type: 'search', value: state.filters.search || '', placeholder: 'Поиск по гипотезе / источнику / цели / предпосылке' });
     search.addEventListener('input', () => { state.filters.search = search.value; state.filters.page = 1; renderReview(); });
     const verdict = el('select', null,
-      el('option', { value: 'all', text: 'Все verdict' }),
-      el('option', { value: 'accept', text: 'accept' }),
-      el('option', { value: 'needs_revision', text: 'needs_revision' }),
-      el('option', { value: 'reject', text: 'reject' })
+      el('option', { value: 'all', text: 'Все вердикты' }),
+      el('option', { value: 'accept', text: 'Принять' }),
+      el('option', { value: 'needs_revision', text: 'Нужна доработка' }),
+      el('option', { value: 'reject', text: 'Отклонить' })
     );
     verdict.value = state.filters.verdict || 'all';
     verdict.addEventListener('change', () => { state.filters.verdict = verdict.value; state.filters.page = 1; renderReview(); });
@@ -784,13 +784,13 @@ _HTML_TEMPLATE = r"""<!doctype html>
     fileInput.addEventListener('change', () => restoreFromFile(fileInput.files && fileInput.files[0]));
 
     host.appendChild(el('div', { class: 'toolbar' },
-      el('span', { class: 'pill', text: 'blind mode: on' }),
+      el('span', { class: 'pill', text: 'слепой режим: включён' }),
       reviewer,
       search,
       verdict,
-      el('button', { class: 'secondary', text: 'Скачать draft JSON', onclick: downloadDraftJson }),
-      el('button', { class: 'secondary', text: 'Скачать review JSON', onclick: downloadReviewJson }),
-      el('button', { class: 'secondary', text: 'Скачать review CSV', onclick: downloadReviewCsv }),
+      el('button', { class: 'secondary', text: 'Скачать черновик JSON', onclick: downloadDraftJson }),
+      el('button', { class: 'secondary', text: 'Скачать JSON с результатами', onclick: downloadReviewJson }),
+      el('button', { class: 'secondary', text: 'Скачать CSV с результатами', onclick: downloadReviewCsv }),
       el('button', { class: 'primary', text: 'Скачать ZIP', onclick: downloadReviewZip }),
       fileInput
     ));
@@ -806,9 +806,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
       card.append(
         el('div', { class: 'toolbar' },
           el('span', { class: 'pill', text: `${row.pair_id}` }),
-          el('span', { class: 'pill', text: `match=${row.match_mode || '—'}` }),
-          el('span', { class: 'pill', text: `rank α=${row.rank_model_a || '—'}` }),
-          el('span', { class: 'pill', text: `rank β=${row.rank_model_b || '—'}` }),
+          el('span', { class: 'pill', text: `сопоставление=${row.match_mode || '—'}` }),
+          el('span', { class: 'pill', text: `ранг α=${row.rank_model_a || '—'}` }),
+          el('span', { class: 'pill', text: `ранг β=${row.rank_model_b || '—'}` }),
           el('span', { class: 'pill', text: `${row.candidate?.source || '—'} / ${row.candidate?.predicate || '—'} / ${row.candidate?.target || '—'}` })
         )
       );
@@ -816,71 +816,71 @@ _HTML_TEMPLATE = r"""<!doctype html>
 
       const controls = el('div', { class: 'controls' });
       const pref = bindSelect(el('select', null,
-        el('option', { value: '', text: 'preferred variant?' }),
+        el('option', { value: '', text: 'предпочтительный вариант?' }),
         el('option', { value: 'A', text: 'A' }),
         el('option', { value: 'B', text: 'B' }),
-        el('option', { value: 'tie', text: 'tie' })
+        el('option', { value: 'tie', text: 'Ничья' })
       ), row.pair_id, 'preferred_variant');
       const betterTemporal = bindSelect(el('select', null,
-        el('option', { value: '', text: 'better temporal?' }),
+        el('option', { value: '', text: 'лучше по времени?' }),
         el('option', { value: 'A', text: 'A' }),
         el('option', { value: 'B', text: 'B' }),
-        el('option', { value: 'tie', text: 'tie' })
+        el('option', { value: 'tie', text: 'Ничья' })
       ), row.pair_id, 'better_temporal');
       const betterEvidence = bindSelect(el('select', null,
-        el('option', { value: '', text: 'better evidence?' }),
+        el('option', { value: '', text: 'лучше по доказательствам?' }),
         el('option', { value: 'A', text: 'A' }),
         el('option', { value: 'B', text: 'B' }),
-        el('option', { value: 'tie', text: 'tie' })
+        el('option', { value: 'tie', text: 'Ничья' })
       ), row.pair_id, 'better_evidence');
       const betterTestability = bindSelect(el('select', null,
-        el('option', { value: '', text: 'better testability?' }),
+        el('option', { value: '', text: 'лучше по проверяемости?' }),
         el('option', { value: 'A', text: 'A' }),
         el('option', { value: 'B', text: 'B' }),
-        el('option', { value: 'tie', text: 'tie' })
+        el('option', { value: 'tie', text: 'Ничья' })
       ), row.pair_id, 'better_testability');
       const betterNovelty = bindSelect(el('select', null,
-        el('option', { value: '', text: 'better novelty?' }),
+        el('option', { value: '', text: 'лучше по новизне?' }),
         el('option', { value: 'A', text: 'A' }),
         el('option', { value: 'B', text: 'B' }),
-        el('option', { value: 'tie', text: 'tie' })
+        el('option', { value: 'tie', text: 'Ничья' })
       ), row.pair_id, 'better_novelty');
       const verdictSelect = bindSelect(el('select', null,
-        el('option', { value: '', text: 'verdict?' }),
-        el('option', { value: 'accept', text: 'accept' }),
-        el('option', { value: 'needs_revision', text: 'needs_revision' }),
-        el('option', { value: 'reject', text: 'reject' })
+        el('option', { value: '', text: 'вердикт?' }),
+        el('option', { value: 'accept', text: 'Принять' }),
+        el('option', { value: 'needs_revision', text: 'Нужна доработка' }),
+        el('option', { value: 'reject', text: 'Отклонить' })
       ), row.pair_id, 'global_verdict');
       const priority = bindSelect(el('select', null,
-        el('option', { value: 'low', text: 'low' }),
-        el('option', { value: 'medium', text: 'medium' }),
-        el('option', { value: 'high', text: 'high' })
+        el('option', { value: 'low', text: 'Низкий' }),
+        el('option', { value: 'medium', text: 'Средний' }),
+        el('option', { value: 'high', text: 'Высокий' })
       ), row.pair_id, 'priority');
-      const confidence = bindSelect(el('select', null, [1,2,3,4,5].map((n) => el('option', { value: String(n), text: `confidence ${n}` }))), row.pair_id, 'confidence');
+      const confidence = bindSelect(el('select', null, [1,2,3,4,5].map((n) => el('option', { value: String(n), text: `уверенность ${n}` }))), row.pair_id, 'confidence');
       const comments = bindTextarea(el('textarea', { placeholder: 'Комментарий эксперта / почему выбран вариант / что исправить' }), row.pair_id, 'comments');
       controls.append(
-        el('label', null, 'Preferred', pref),
-        el('label', null, 'Temporal', betterTemporal),
-        el('label', null, 'Evidence', betterEvidence),
-        el('label', null, 'Testability', betterTestability),
-        el('label', null, 'Novelty', betterNovelty),
-        el('label', null, 'Verdict', verdictSelect),
-        el('label', null, 'Priority', priority),
-        el('label', null, 'Confidence', confidence),
-        el('label', { style: 'grid-column: 1 / -1;' }, 'Comments', comments)
+        el('label', null, 'Предпочтение', pref),
+        el('label', null, 'Временной аспект', betterTemporal),
+        el('label', null, 'Доказательства', betterEvidence),
+        el('label', null, 'Проверяемость', betterTestability),
+        el('label', null, 'Новизна', betterNovelty),
+        el('label', null, 'Вердикт', verdictSelect),
+        el('label', null, 'Приоритет', priority),
+        el('label', null, 'Уверенность', confidence),
+        el('label', { style: 'grid-column: 1 / -1;' }, 'Комментарий', comments)
       );
       card.appendChild(controls);
       host.appendChild(card);
     });
 
     const pager = el('div', { class: 'toolbar' });
-    const prev = el('button', { text: '← Prev' });
-    const next = el('button', { text: 'Next →' });
+    const prev = el('button', { text: '← Назад' });
+    const next = el('button', { text: 'Далее →' });
     prev.disabled = state.filters.page <= 1;
     next.disabled = state.filters.page >= totalPages;
     prev.addEventListener('click', () => { if (state.filters.page > 1) { state.filters.page -= 1; renderReview(); } });
     next.addEventListener('click', () => { if (state.filters.page < totalPages) { state.filters.page += 1; renderReview(); } });
-    pager.append(prev, el('span', { class: 'muted', text: `page ${state.filters.page}/${totalPages}` }), next);
+    pager.append(prev, el('span', { class: 'muted', text: `страница ${state.filters.page}/${totalPages}` }), next);
     host.appendChild(pager);
   }
 
@@ -889,9 +889,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
     host.innerHTML = '';
     const rows = buildReviewRows();
     const summary = buildSummaryPayload();
-    host.appendChild(el('div', { class: 'note', html: `<h2>Сводка blind A/B review</h2><div class="muted">Completed pairs: <b>${summary.completed_pairs}</b> / ${summary.total_pairs}</div>` }));
+    host.appendChild(el('div', { class: 'note', html: `<h2>Сводка слепого A/B-ревью</h2><div class="muted">Заполнено пар: <b>${summary.completed_pairs}</b> / ${summary.total_pairs}</div>` }));
     host.appendChild(el('pre', { text: JSON.stringify(summary, null, 2) }));
-    host.appendChild(el('details', { open: false }, el('summary', { text: 'Preview exported rows' }), el('pre', { text: JSON.stringify(rows.slice(0, 5), null, 2) })));
+    host.appendChild(el('details', { open: false }, el('summary', { text: 'Предпросмотр экспортируемых строк' }), el('pre', { text: JSON.stringify(rows.slice(0, 5), null, 2) })));
   }
 
   if (!loadAutosave()) autosave('init');
@@ -941,8 +941,8 @@ def build_task3_dual_model_offline_review_package(
     seed_b = json.dumps(model_b_descriptor or manifest_b.get("runtime") or {}, ensure_ascii=False, sort_keys=True) + str(bundle_dir_b)
     anon_a = _anon_system_id(seed_a, "alpha")
     anon_b = _anon_system_id(seed_b, "beta")
-    label_a = "Hidden model α"
-    label_b = "Hidden model β"
+    label_a = "Скрытая модель α"
+    label_b = "Скрытая модель β"
 
     records = _build_records(rows_a, rows_b, anon_a=anon_a, anon_b=anon_b, label_a=label_a, label_b=label_b, top_pairs=top_pairs)
 
@@ -955,13 +955,13 @@ def build_task3_dual_model_offline_review_package(
                 {"system_id": anon_a, "display_label": label_a},
                 {"system_id": anon_b, "display_label": label_b},
             ],
-            "owner_key_note": "Model identities are stored only in the owner-side key file and are not included in the expert package.",
+            "owner_key_note": "Идентичности моделей хранятся только в файле ключа владельца и не входят в пакет для эксперта.",
         }
     )
 
     app_data = {"artifact_version": ARTIFACT_VERSION, "meta": meta, "records": records}
     app_json = json.dumps(app_data, ensure_ascii=False).replace("</", "<\\/")
-    page_title = html.escape(f"Task 3 dual local blind review — {meta['submission_id'] or meta['topic'] or 'bundle'}")
+    page_title = html.escape(f"Задача 3 — слепое сравнение локальных моделей — {meta['submission_id'] or meta['topic'] or 'bundle'}")
     html_text = _HTML_TEMPLATE.replace("__APP_DATA__", app_json).replace("__PAGE_TITLE__", page_title)
     output.write_text(html_text, encoding="utf-8")
 
@@ -990,7 +990,7 @@ def build_task3_dual_model_offline_review_package(
             },
         ],
         "pair_count": len(records),
-        "owner_warning": "Do not share this file with the expert if blind review must be preserved.",
+        "owner_warning": "Не передавайте этот файл эксперту, если нужно сохранить слепое ревью.",
     }
     owner_mapping_path = Path(owner_mapping_path) if owner_mapping_path else comparison_dir / "owner_only" / "task3_dual_local_model_blind_key.json"
     _write_json(owner_mapping_path, owner_mapping)
@@ -1062,14 +1062,14 @@ def build_task3_dual_model_expert_bundle(
         paths.append((md_b, "variant_beta/hypotheses_ranked.md"))
 
     readme = (
-        "Task 3 dual local model blind review bundle\n"
+        "Пакет слепого ревью двух локальных моделей для задачи 3\n"
         "\n"
-        "Contents:\n"
+        "Содержимое:\n"
         "- offline_review/task3_dual_local_model_review_offline_ab.html\n"
-        "- variant_alpha/* and variant_beta/* : anonymized hypothesis outputs\n"
+        "- variant_alpha/* и variant_beta/* : анонимизированные гипотезы\n"
         "- expert_review/task3_dual_local_model_review_manifest.json\n"
         "\n"
-        "Important: owner-side identity key is intentionally excluded to preserve blind review.\n"
+        "Важно: файл с ключом соответствия владельца намеренно исключён, чтобы сохранить слепое ревью.\n"
     )
 
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
