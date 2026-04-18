@@ -45,6 +45,7 @@ from .pipeline.demo import run_demo_pipeline
 from .pipeline.task2_validation import prepare_task2_validation_bundle as prepare_task2_validation_pipeline_bundle
 from .task2_validation import build_task2_validation_bundle
 from .task3_hypothesis_generation import prepare_task3_hypothesis_bundle
+from .scidatapipe_bridge import export_dataset as export_scidatapipe_dataset
 
 
 app = typer.Typer(help="top-papers-graph CLI (ex SciReason)", add_completion=False)
@@ -682,6 +683,79 @@ def task2_bundle(
         importance_threshold=importance_threshold,
     )
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle.bundle_dir}")
+
+
+@app.command("export-scidatapipe")
+def export_scidatapipe(
+    task1: list[Path] = typer.Option(None, "--task1", help="Путь к Task 1 YAML. Можно передать несколько раз."),
+    task1_dir: list[Path] = typer.Option(None, "--task1-dir", help="Директория с Task 1 YAML. Можно передать несколько раз; файлы ищутся автоматически."),
+    task2: list[Path] = typer.Option(None, "--task2", help="Путь к Task 2 bundle directory/zip. Можно передать несколько раз."),
+    task2_dir: list[Path] = typer.Option(None, "--task2-dir", help="Директория с Task 2 bundle zip/папками. Можно передать несколько раз; bundle ищутся автоматически."),
+    input_dir: list[Path] = typer.Option(None, "--input-dir", help="Смешанная директория, внутри которой bridge сам находит и Task 1 YAML, и Task 2 bundles/zip. Можно передать несколько раз."),
+    processed_papers_dir: list[Path] = typer.Option(None, "--processed-papers-dir", help="Папка processed_papers с mm/pages.jsonl и изображениями. Можно передать несколько раз."),
+    out_dir: Path = typer.Option(Path("data/derived/scidatapipe_export"), help="Куда сохранить нормализованные артефакты и JSONL датасеты."),
+    copy_assets: bool = typer.Option(True, help="Копировать прикреплённые изображения в out_dir/assets."),
+    max_images_per_sample: int = typer.Option(8, help="Сколько изображений максимум прикладывать к одному sample. 0 = все найденные."),
+    max_multimodal_records_per_sample: int = typer.Option(0, help="Сколько multimodal records сериализовать текстом в prompt. 0 = все найденные."),
+    recursive: bool = typer.Option(True, help="Рекурсивно искать YAML и bundle внутри --task1-dir/--task2-dir/--input-dir."),
+    download_papers: bool = typer.Option(False, "--download-papers", help="Скачать статьи по DOI/URL/arXiv/wiki/PMCID/OpenAlex, найденным в Task 1/Task 2 входах."),
+    download_unpaywall_email: str | None = typer.Option(None, "--download-unpaywall-email", help="Email для Unpaywall DOI lookup."),
+    download_root: Path | None = typer.Option(None, "--download-root", help="Куда сохранить кеш скачанных PDF/HTML и download metadata."),
+    download_processed_papers_dir: Path | None = typer.Option(None, "--download-processed-papers-dir", help="Куда складывать processed_papers для скачанных PDF."),
+    ingest_downloaded_papers: bool = typer.Option(True, help="После скачивания PDF сразу прогонять их через ingest/parse-mm и добавлять в processed_papers."),
+    download_multimodal: bool = typer.Option(True, help="Для скачанных PDF использовать multimodal ingest (parse-mm)."),
+    download_run_vlm: bool = typer.Option(True, help="Разрешить VLM этапы для скачанных PDF при multimodal ingest."),
+    prefer_cached_downloads: bool = typer.Option(True, help="Переиспользовать уже скачанные PDF/HTML из download_root, если они есть."),
+    hf_upload: bool = typer.Option(False, "--hf-upload", help="После сборки автоматически загрузить export folder в Hugging Face Hub dataset repo."),
+    hf_repo_id: str | None = typer.Option(None, "--hf-repo-id", help="HF repo id в формате namespace/name, например org/my-dataset."),
+    hf_token: str | None = typer.Option(None, "--hf-token", help="Hugging Face token. Если не передан, будет использован токен из `huggingface-cli login` / окружения."),
+    hf_private: bool | None = typer.Option(None, "--hf-private/--hf-public", help="Создать dataset repo как private/public при необходимости."),
+    hf_path_in_repo: str | None = typer.Option(None, "--hf-path-in-repo", help="Подкаталог внутри HF dataset repo, куда загрузить export."),
+    hf_commit_message: str | None = typer.Option(None, "--hf-commit-message", help="Commit message для загрузки в HF Hub."),
+    hf_commit_description: str | None = typer.Option(None, "--hf-commit-description", help="Commit description для загрузки в HF Hub."),
+    hf_create_repo_if_missing: bool = typer.Option(True, help="Автоматически создать dataset repo, если его ещё нет."),
+    hf_generate_readme: bool = typer.Option(True, help="Сгенерировать базовый README.md dataset card перед upload, если его нет."),
+) -> None:
+    """Экспортирует Task 1/Task 2 экспертные артефакты в scidatapipe-compatible SFT/GRPO JSONL.
+
+    Команда использует схему и нормализацию scidatapipe, умеет пакетно обходить директории
+    с YAML/bundle и по желанию скачивает статьи по идентификаторам из разметки, чтобы сразу
+    пополнить processed_papers мультимодальными страницами.
+    """
+    result = export_scidatapipe_dataset(
+        task1_files=task1 or [],
+        task1_dirs=task1_dir or [],
+        task2_inputs=task2 or [],
+        task2_dirs=task2_dir or [],
+        input_dirs=input_dir or [],
+        out_dir=out_dir,
+        processed_papers_dirs=processed_papers_dir or [],
+        copy_assets=copy_assets,
+        max_images_per_sample=max_images_per_sample,
+        max_multimodal_records_per_sample=max_multimodal_records_per_sample,
+        discover_recursive=recursive,
+        download_referenced_papers=download_papers,
+        download_unpaywall_email=download_unpaywall_email,
+        download_root=download_root,
+        download_processed_papers_dir=download_processed_papers_dir,
+        ingest_downloaded_papers=ingest_downloaded_papers,
+        download_multimodal=download_multimodal,
+        download_run_vlm=download_run_vlm,
+        prefer_cached_downloads=prefer_cached_downloads,
+        hf_upload=hf_upload,
+        hf_repo_id=hf_repo_id,
+        hf_token=hf_token,
+        hf_private=hf_private,
+        hf_path_in_repo=hf_path_in_repo,
+        hf_commit_message=hf_commit_message,
+        hf_commit_description=hf_commit_description,
+        hf_create_repo_if_missing=hf_create_repo_if_missing,
+        hf_generate_readme=hf_generate_readme,
+    )
+    console.print(f"[green]scidatapipe export ready:[/green] {result.output_root}")
+    if result.hf_repo_url:
+        console.print(f"[green]Uploaded to Hugging Face:[/green] {result.hf_repo_url}")
+    console.print(json.dumps(result.stats, ensure_ascii=False, indent=2))
 
 
 @app.command("prepare-task3-hypotheses")

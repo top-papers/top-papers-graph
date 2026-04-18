@@ -22,6 +22,7 @@ dependencies = [
   "networkx>=3.3",
   "numpy>=1.26,<3",
   "pypdf>=4.0",
+  "huggingface_hub>=0.30",
 
   # Optional infra clients (services are optional; pipeline falls back to local artifacts)
   "neo4j>=5.20",
