@@ -99,6 +99,10 @@ notebook = [
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
   "pandas>=2.2.2,<2.4",
+  "gdown>=5.2.0",
+  "openpyxl>=3.1.5",
+  "py7zr>=0.22.0",
+  "Unidecode>=1.3.8",
 ]
 
 colab = [
@@ -110,6 +114,10 @@ colab = [
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
   "pandas>=2.2.2,<2.4",
+  "gdown>=5.2.0",
+  "openpyxl>=3.1.5",
+  "py7zr>=0.22.0",
+  "Unidecode>=1.3.8",
 ]
 
 # One-shot extra for the Task 2 notebook experience.
@@ -129,6 +137,10 @@ task2_notebook = [
   "pyvis>=0.3.2",
   "jupyter_bokeh>=4.0",
   "pandas>=2.2.2,<2.4",
+  "gdown>=5.2.0",
+  "openpyxl>=3.1.5",
+  "py7zr>=0.22.0",
+  "Unidecode>=1.3.8",
 ]
 
 # Temporal parsing helpers

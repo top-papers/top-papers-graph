@@ -142,3 +142,12 @@ Bridge сканирует:
 3. Если нужен versioned artefact-sharing, сразу включить `--hf-upload`, чтобы export folder после сборки ушёл в HF dataset repo.
 
 Во втором и третьем режиме экспорт становится самодостаточным для больших смешанных папок с YAML и bundle-архивами.
+
+
+## Import robustness in notebooks
+
+The repository now includes a small root-level ``scireason`` compatibility shim so that
+notebooks and ad-hoc scripts executed directly from a source checkout can import
+``scireason.scidatapipe_bridge`` even before an editable install finishes. The canonical
+installation path is still ``pip install -e .``.
+
