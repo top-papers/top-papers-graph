@@ -54,3 +54,8 @@ In smoke mode the notebook anonymizes the two local configurations, runs both va
 ```bash
 pytest -q tests/test_task3_dual_model_review.py
 ```
+
+
+## Case-based redesign
+
+See `docs/TASK3_AB_CREATOR_DETAILED_TUTORIAL_RU.md`, `notebooks/task3_ab_testset_authoring_colab.ipynb`, `notebooks/task3_case_based_blind_ab_kaggle_cli_launcher.ipynb`, and `scripts/task3/run_task3_case_based_blind_ab.py` for the curated hard-subset workflow.

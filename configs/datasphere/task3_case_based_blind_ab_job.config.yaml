@@ -1,0 +1,34 @@
+name: task3-case-based-blind-ab
+desc: Run Task 3 case-based blind A/B on curated creator-defined cases
+cmd: >
+  python3 scripts/datasphere/run_task3_case_based_blind_ab_job.py
+    --trajectory ${TRAJECTORY_FILE}
+    --case-manifest ${CASE_MANIFEST_FILE}
+    --processed-dir ${PROCESSED_DIR}
+    --out-dir job_outputs/task3_case_based_blind_ab
+    --model-a-vlm-model-id ${MODEL_A_VLM}
+    --model-b-vlm-model-id ${MODEL_B_VLM}
+    --run-vlm
+    --include-multimodal
+inputs:
+  - scripts/datasphere/run_task3_case_based_blind_ab_job.py
+  - scripts/task3/run_task3_case_based_blind_ab.py
+  - src/scireason/task3_ab_case_manifest.py
+  - src/scireason/task3_dual_model_review.py
+  - src/scireason/task3_hypothesis_bundle.py
+  - pyproject.toml
+  - inputs/trajectory.yaml:
+      var: TRAJECTORY_FILE
+  - inputs/task3_ab_case_manifest.filled.json:
+      var: CASE_MANIFEST_FILE
+  - inputs/processed_papers:
+      var: PROCESSED_DIR
+outputs:
+  - job_outputs
+env:
+  python:
+    type: auto
+    root-paths:
+      - scripts/datasphere/run_task3_case_based_blind_ab_job.py
+      - scripts/task3/run_task3_case_based_blind_ab.py
+      - src
