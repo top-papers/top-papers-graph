@@ -1,0 +1,427 @@
+{
+  "schema_version": "task3_ab_case_manifest_v1",
+  "generated_at": "2026-04-20T09:39:59Z",
+  "experiment_meta": {
+    "topic": "temporal catalyst latency forecasting",
+    "submission_id": "case_manifest__figure_table_heavy_12",
+    "creator_id": "demo_expert_creator",
+    "cutoff_year": "2024",
+    "review_goal": "Stress-test VLM differences on figure/table-heavy Task 3 cases where visual evidence should dominate the support package."
+  },
+  "strata_targets": {
+    "multimodal_hard": 9,
+    "temporal_hard": 2,
+    "easy_control": 1
+  },
+  "error_taxonomy": [
+    "missed_visual_fact",
+    "wrong_evidence_linkage",
+    "needs_time_fix",
+    "hallucinated_visual_inference"
+  ],
+  "cases": [
+    {
+      "case_id": "CASE-001",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "p.1 main figure: catalyst A latency curve stays below baseline across all shown runs",
+      "creator_prompt": "Сфокусируйся на том, извлечён ли сам графический факт о более низкой latency по всей кривой, а не заменён ли он общей текстовой фразой.",
+      "creator_rationale": "Кейс ловит under-extraction из figure, когда модель видит график, но теряет направление эффекта и полноту визуального факта.",
+      "review_focus": [
+        "evidence",
+        "visual_fact",
+        "directionality"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "3"
+      },
+      "notes": "figure-only support should dominate over text backfill"
+    },
+    {
+      "case_id": "CASE-002",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "table",
+      "page_hint": "p.1 results table: catalyst A has the best latency row among compared settings",
+      "creator_prompt": "Проверь, перенесена ли табличная победа catalyst A как конкретный факт и не перепутан ли источник поддержки.",
+      "creator_rationale": "Кейс проверяет table-grounded extraction: tuned VLM должен надёжнее вынимать structured fact из таблицы.",
+      "review_focus": [
+        "evidence",
+        "table_fact",
+        "ranking"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "4"
+      },
+      "notes": "table row ranking is the decisive evidence"
+    },
+    {
+      "case_id": "CASE-003",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "table",
+      "page_hint": "p.1 ablation table: stability improves only when catalyst A is combined with the forecast module",
+      "creator_prompt": "Проверь, не превращён ли conditional table fact в безусловный вывод об улучшении стабильности.",
+      "creator_rationale": "Кейс нужен, чтобы поймать потерю условия из таблицы и ложное обобщение.",
+      "review_focus": [
+        "evidence",
+        "condition",
+        "table_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|improves forecast stability|may_relate_to|links catalyst",
+        "candidate_source_contains": "improves forecast stability",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "links catalyst",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "5"
+      },
+      "notes": "conditional support from ablation table"
+    },
+    {
+      "case_id": "CASE-004",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "p.1 multi-series figure: baseline improves later, but catalyst A remains ahead in the highlighted segment",
+      "creator_prompt": "Проверь, сохранён ли именно локальный visual fact по выделенному сегменту, а не сделан ли глобальный вывод по всей кривой.",
+      "creator_rationale": "Кейс отличает аккуратное чтение сложного графика от грубой caption-пересказности.",
+      "review_focus": [
+        "evidence",
+        "visual_fact",
+        "local_segment"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "6"
+      },
+      "notes": "segment-level figure reading"
+    },
+    {
+      "case_id": "CASE-005",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "p.1 figure caption + table cell together support forecast stability only after the catalyst link is added",
+      "creator_prompt": "Проверь, умеет ли система собрать составной multimodal факт из caption и table cell без потери связки evidence.",
+      "creator_rationale": "Кейс проверяет multimodal composition, а не только одиночный visual snippet.",
+      "review_focus": [
+        "evidence",
+        "cross_evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage",
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|improves forecast stability|may_relate_to|links catalyst",
+        "candidate_source_contains": "improves forecast stability",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "links catalyst",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "7"
+      },
+      "notes": "requires combining caption with one table cell"
+    },
+    {
+      "case_id": "CASE-006",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "table",
+      "page_hint": "p.1 table with two close values: catalyst A is better by a small margin and baseline often confuses the winner",
+      "creator_prompt": "Проверь, не спутаны ли близкие значения в таблице и выбран ли правильный победитель.",
+      "creator_rationale": "Кейс делает ставку на near-tie table reading, где тонкая ошибка VLM сразу меняет вывод.",
+      "review_focus": [
+        "evidence",
+        "table_fact",
+        "numeric_fidelity"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "8"
+      },
+      "notes": "near-tie table values"
+    },
+    {
+      "case_id": "CASE-007",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst trials and follow-up",
+      "paper_id": "paper-1|paper-2",
+      "year": "2023-2024",
+      "evidence_kind": "cross_paper_multimodal",
+      "page_hint": "paper-1 text mentions catalyst; paper-2 figure/table provides the actual low-latency support",
+      "creator_prompt": "Проверь, привязан ли visual support к paper-2, а не подменён ли общим упоминанием из paper-1.",
+      "creator_rationale": "Кейс измеряет способность не перепутать cross-paper evidence ownership.",
+      "review_focus": [
+        "evidence",
+        "cross_paper",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "9"
+      },
+      "notes": "cross-paper attribution matters"
+    },
+    {
+      "case_id": "CASE-008",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "p.1 figure with confidence bars: tuned VLM should mention supported direction, not invent stronger certainty",
+      "creator_prompt": "Проверь, не появилась ли из картинки лишняя уверенность или несуществующее усиление эффекта.",
+      "creator_rationale": "Кейс ловит hallucinated strengthening при чтении figure с неопределённостью.",
+      "review_focus": [
+        "evidence",
+        "visual_fact",
+        "uncertainty"
+      ],
+      "expected_error_modes": [
+        "hallucinated_visual_inference",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|forecasting outcomes|may_relate_to|improves forecast stability",
+        "candidate_source_contains": "forecasting outcomes",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "improves forecast stability",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "10"
+      },
+      "notes": "uncertainty bars must not be overclaimed"
+    },
+    {
+      "case_id": "CASE-009",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "table",
+      "page_hint": "p.1 comparison table: one row supports latency, another row supports stability; их нельзя смешивать в один табличный факт",
+      "creator_prompt": "Проверь, не склеены ли два разных table facts в одну неаккуратную поддержку гипотезы.",
+      "creator_rationale": "Кейс показывает, умеет ли модель разделять разные строки таблицы по разным утверждениям.",
+      "review_focus": [
+        "evidence",
+        "table_fact",
+        "multi_row"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|forecasting outcomes|may_relate_to|improves forecast stability",
+        "candidate_source_contains": "forecasting outcomes",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "improves forecast stability",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "11"
+      },
+      "notes": "two different rows support different claims"
+    },
+    {
+      "case_id": "CASE-010",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "temporal_table",
+      "page_hint": "p.1 longitudinal table: effect appears only in 2024 column, not in earlier columns",
+      "creator_prompt": "Проверь, не растянут ли табличный temporal fact на все годы вместо 2024.",
+      "creator_rationale": "Кейс нужен, чтобы tuned VLM удерживал year-specific support из таблицы.",
+      "review_focus": [
+        "temporal",
+        "evidence",
+        "table_fact"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|improves forecast stability|may_relate_to|links catalyst",
+        "candidate_source_contains": "improves forecast stability",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "links catalyst",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "12"
+      },
+      "notes": "year-specific column must remain explicit"
+    },
+    {
+      "case_id": "CASE-011",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "temporal_figure",
+      "page_hint": "p.1 timeline figure: latency drop emerges after the intervention marker",
+      "creator_prompt": "Проверь, не пропал ли after-intervention temporal anchor и не стал ли факт выглядеть как исходное свойство системы.",
+      "creator_rationale": "Кейс проверяет temporal grounding на figure with intervention marker.",
+      "review_focus": [
+        "temporal",
+        "visual_fact",
+        "event_anchor"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "13"
+      },
+      "notes": "after-intervention marker"
+    },
+    {
+      "case_id": "CASE-012",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "text_only_control",
+      "page_hint": "text chunk: catalyst A reduces latency in 2024 monitoring; visual evidence is optional here",
+      "creator_prompt": "Контрольный кейс: разница между системами должна быть минимальной, потому что главный факт уже явно есть в тексте.",
+      "creator_rationale": "Нужен для sanity check: tuned VLM не должен получать ложный вин только за счёт стиля.",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "14"
+      },
+      "notes": "easy text-first control"
+    }
+  ]
+}
