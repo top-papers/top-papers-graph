@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task3 multimodal hard-subset blind A/B review",
+  "type": "object",
+  "required": [
+    "artifact_version",
+    "review_mode",
+    "reviewer_id",
+    "submission_id",
+    "items"
+  ],
+  "properties": {
+    "artifact_version": {
+      "type": "integer"
+    },
+    "review_mode": {
+      "type": "string"
+    },
+    "reviewer_id": {
+      "type": "string"
+    },
+    "submission_id": {
+      "type": "string"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "pair_id",
+          "preferred_variant",
+          "better_evidence",
+          "better_temporal",
+          "global_verdict"
+        ],
+        "properties": {
+          "pair_id": {
+            "type": "string"
+          },
+          "unit_id": {
+            "type": "string"
+          },
+          "preferred_variant": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B",
+              "tie",
+              "skip"
+            ]
+          },
+          "better_evidence": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B",
+              "tie",
+              "skip"
+            ]
+          },
+          "better_temporal": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B",
+              "tie",
+              "skip"
+            ]
+          },
+          "better_testability": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B",
+              "tie",
+              "skip"
+            ]
+          },
+          "better_novelty": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B",
+              "tie",
+              "skip"
+            ]
+          },
+          "global_verdict": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "needs_revision",
+              "reject",
+              "skip"
+            ]
+          },
+          "error_tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "missed_visual_fact",
+                "wrong_evidence_linkage",
+                "hallucinated_visual_inference",
+                "under_extraction",
+                "wrong_numeric_value",
+                "needs_time_fix",
+                "other"
+              ]
+            }
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "comments": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

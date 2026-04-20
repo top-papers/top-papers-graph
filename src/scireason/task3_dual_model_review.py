@@ -35,6 +35,23 @@ def _write_json(path: Path, payload: Any) -> Path:
     return path
 
 
+
+
+def _template_assets_for_expert_bundle() -> List[Tuple[Path, str]]:
+    repo_root = Path(__file__).resolve().parents[2]
+    template_dir = repo_root / "data" / "experts" / "mm_ab_reviews"
+    if not template_dir.exists():
+        return []
+    out: List[Tuple[Path, str]] = []
+    for path in sorted(template_dir.rglob("*")):
+        if path.is_file():
+            out.append((path, f"templates/{path.relative_to(template_dir).as_posix()}"))
+    tutorial = repo_root / "docs" / "TASK3_AB_HARD_SUBSET_TUTORIAL_RU.md"
+    if tutorial.exists() and tutorial.is_file():
+        out.append((tutorial, "docs/TASK3_AB_HARD_SUBSET_TUTORIAL_RU.md"))
+    return out
+
+
 def _resolve_bundle_artifact(manifest: Dict[str, Any], bundle_dir: Path, *keys: str) -> Path | None:
     artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), dict) else {}
     for key in keys:
@@ -1068,13 +1085,16 @@ def build_task3_dual_model_expert_bundle(
         "- offline_review/task3_dual_local_model_review_offline_ab.html\n"
         "- variant_alpha/* и variant_beta/* : анонимизированные гипотезы\n"
         "- expert_review/task3_dual_local_model_review_manifest.json\n"
+        "- templates/* : шаблоны для эксперта\n"
+        "- docs/TASK3_AB_HARD_SUBSET_TUTORIAL_RU.md : пошаговый туториал\n"
         "\n"
         "Важно: файл с ключом соответствия владельца намеренно исключён, чтобы сохранить слепое ревью.\n"
+        "Рекомендуется оценивать сначала evidence/time correctness, а не только стиль итоговой гипотезы.\n"
     )
 
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("README_EXPERT_REVIEW.txt", readme)
-        for path, arcname in paths:
+        for path, arcname in paths + _template_assets_for_expert_bundle():
             if path.exists() and path.is_file():
                 zf.write(path, arcname=arcname)
     return output

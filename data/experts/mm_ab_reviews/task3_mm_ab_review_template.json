@@ -1,0 +1,21 @@
+{
+  "artifact_version": 1,
+  "review_mode": "task3_multimodal_hard_subset_blind_ab",
+  "reviewer_id": "",
+  "submission_id": "",
+  "items": [
+    {
+      "pair_id": "pair-001",
+      "unit_id": "",
+      "preferred_variant": "skip",
+      "better_evidence": "skip",
+      "better_temporal": "skip",
+      "better_testability": "skip",
+      "better_novelty": "skip",
+      "global_verdict": "skip",
+      "error_tags": [],
+      "confidence": 3,
+      "comments": ""
+    }
+  ]
+}

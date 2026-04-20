@@ -23,3 +23,11 @@
 - blind offline HTML
 - owner-only key
 - expert ZIP
+
+
+## Рекомендация для VLM A/B
+
+Для сравнения baseline VLM vs SFT/DPO VLM используйте не случайный набор статей, а curated **hard subset**.
+Лучше подключать заранее подготовленный `processed_dir` и повышать `top_pairs` минимум до 16.
+Подробный туториал: `docs/TASK3_AB_HARD_SUBSET_TUTORIAL_RU.md`.
+Шаблоны для эксперта: `data/experts/mm_ab_reviews/`.

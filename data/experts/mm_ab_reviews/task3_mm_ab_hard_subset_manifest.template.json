@@ -1,0 +1,51 @@
+{
+  "artifact_version": 1,
+  "review_mode": "task3_multimodal_hard_subset_blind_ab",
+  "topic": "",
+  "submission_id": "",
+  "owner": {
+    "review_lead": "",
+    "contact": ""
+  },
+  "sampling_policy": {
+    "goal": "Expose VLM deltas on multimodal evidence extraction and temporal grounding",
+    "strata": [
+      {
+        "name": "multimodal_hard",
+        "share": 0.6,
+        "definition": "figure/table/formula-driven evidence"
+      },
+      {
+        "name": "temporal_hard",
+        "share": 0.25,
+        "definition": "time-sensitive evidence and scope"
+      },
+      {
+        "name": "easy_control",
+        "share": 0.15,
+        "definition": "text-dominant controls"
+      }
+    ]
+  },
+  "records": [
+    {
+      "unit_id": "paper-001__page-05__fig-2",
+      "paper_id": "paper-001",
+      "paper_title": "",
+      "page": 5,
+      "locator": "Figure 2",
+      "stratum": "multimodal_hard",
+      "reason": [
+        "key fact lives in figure/table",
+        "numeric trend or temporal comparison present"
+      ],
+      "expected_risk": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage",
+        "needs_time_fix"
+      ],
+      "candidate_id": "optional-fixed-candidate-id",
+      "assertion_id": "optional-fixed-assertion-id"
+    }
+  ]
+}
