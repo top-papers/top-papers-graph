@@ -1,0 +1,356 @@
+{
+  "schema_version": "task3_ab_case_manifest_v1",
+  "generated_at": "2026-04-20T00:00:00Z",
+  "experiment_meta": {
+    "topic": "temporal catalyst latency forecasting",
+    "submission_id": "sample_case_manifest__temporal_catalyst_001",
+    "creator_id": "demo_expert_creator",
+    "cutoff_year": "2024",
+    "review_goal": "Surface VLM differences on multimodal-hard and temporal-hard Task 3 cases using a fixed 12-case creator-authored subset."
+  },
+  "strata_targets": {
+    "multimodal_hard": 7,
+    "temporal_hard": 3,
+    "easy_control": 2
+  },
+  "error_taxonomy": [
+    "missed_visual_fact",
+    "wrong_evidence_linkage",
+    "needs_time_fix",
+    "hallucinated_visual_inference"
+  ],
+  "cases": [
+    {
+      "case_id": "CASE-001",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "p.1 figure summary: catalyst A maintains lower latency in 2024",
+      "creator_prompt": "Проверь, извлечён ли визуальный факт о снижении latency именно из figure-like page evidence и не потеряна ли связь с catalyst A.",
+      "creator_rationale": "Кейс должен ловить ситуацию, когда tuned VLM вытаскивает visual fact со страницы, а baseline оставляет только общую текстовую формулировку.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_predicate_contains": "may_relate_to",
+        "candidate_target_contains": "reduces latency",
+        "hypothesis_title_contains": "graph-derived hypothesis",
+        "premise_contains": "graph signals",
+        "mechanism_contains": "candidate mechanism",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "3"
+      },
+      "notes": "Multimodal anchor is the page-level figure summary in paper-2 rather than the plain text chunk."
+    },
+    {
+      "case_id": "CASE-002",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "table",
+      "page_hint": "p.1 table: Year | effect ; 2024 | latency reduction",
+      "creator_prompt": "Проверь, не потеряна ли табличная привязка evidence и не подменено ли table-backed утверждение на общий текст про улучшение latency.",
+      "creator_rationale": "Кейс на under-extraction table facts и слабый evidence linkage.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_target_contains": "reduces latency",
+        "rank_hint": "3"
+      },
+      "notes": "Participant should prefer the variant that explicitly preserves the table-backed 2024 effect."
+    },
+    {
+      "case_id": "CASE-003",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst study",
+      "paper_id": "paper-1",
+      "year": "2023",
+      "evidence_kind": "table",
+      "page_hint": "p.1 page evidence with timeline mention and Year/effect table reused in multimodal extraction",
+      "creator_prompt": "Смотри, не появляется ли ложная визуальная интерпретация для paper-1 и корректно ли извлекается связь между catalyst A и latency reduction.",
+      "creator_rationale": "Кейс ловит hallucinated visual inference и спутывание page evidence между двумя papers.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_target_contains": "reduces latency",
+        "rank_hint": "3"
+      },
+      "notes": "The better variant should avoid borrowing paper-2-only visual phrasing when discussing paper-1 support."
+    },
+    {
+      "case_id": "CASE-004",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "p.1 combined page summary + table should support forecast stability",
+      "creator_prompt": "Проверь, поддерживается ли claim про improves forecast stability multimodal evidence block-ом, а не только ближайшим text chunk.",
+      "creator_rationale": "Кейс на fine-grained evidence linking: tuned VLM должен лучше связать figure/table-backed fact с hypothesis support.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|improves forecast stability|may_relate_to|links catalyst",
+        "candidate_source_contains": "improves forecast stability",
+        "candidate_target_contains": "links catalyst",
+        "rank_hint": "1"
+      },
+      "notes": "Use when checking whether multimodal support strengthens the latent relation between forecast stability and catalyst linkage."
+    },
+    {
+      "case_id": "CASE-005",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "p.1 page/table evidence for forecasting outcomes vs forecast stability",
+      "creator_prompt": "Оцени, не спутаны ли forecasting outcomes и improves forecast stability и есть ли у вывода корректная evidence привязка к странице.",
+      "creator_rationale": "Кейс нужен, чтобы увидеть, когда baseline смешивает близкие, но не тождественные graph nodes.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|forecasting outcomes|may_relate_to|improves forecast stability",
+        "candidate_source_contains": "forecasting outcomes",
+        "candidate_target_contains": "improves forecast stability",
+        "rank_hint": "2"
+      },
+      "notes": "Prefer the variant that keeps outcome node semantics distinct instead of collapsing them into one vague statement."
+    },
+    {
+      "case_id": "CASE-006",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "p.1 figure-style summary should preserve lower-latency directionality",
+      "creator_prompt": "Проверь, сохранено ли направление visual trend: latency lower in 2024, а не просто “latency changed”.",
+      "creator_rationale": "Directional visual facts часто теряются на baseline VLM и потом сглаживаются в downstream generation.",
+      "review_focus": [
+        "visual_fact",
+        "overall"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_target_contains": "reduces latency",
+        "rank_hint": "3"
+      },
+      "notes": "Better output should mention lower latency, not a neutral or ambiguous change."
+    },
+    {
+      "case_id": "CASE-007",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Temporal catalyst study | Temporal catalyst follow-up",
+      "paper_id": "paper-1|paper-2",
+      "year": "2023-2024",
+      "evidence_kind": "cross_paper_multimodal",
+      "page_hint": "cross-paper comparison between paper-1 page evidence and paper-2 figure/table evidence",
+      "creator_prompt": "Проверь, различает ли вариант multimodal evidence разных papers и не склеивает ли их в один источник.",
+      "creator_rationale": "Cross-paper leakage — типичный failure mode, когда evidence становится менее надёжным в blind review.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|improves forecast stability|may_relate_to|links catalyst",
+        "candidate_source_contains": "improves forecast stability",
+        "candidate_target_contains": "links catalyst",
+        "rank_hint": "1"
+      },
+      "notes": "Use as a hard cross-paper multimodal control: support should mention the correct source paper when possible."
+    },
+    {
+      "case_id": "CASE-008",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "temporal_page_evidence",
+      "page_hint": "time scope should remain 2022-2024 in candidate-level reasoning",
+      "creator_prompt": "Проверь, не ломается ли временной диапазон 2022-2024 и не исчезает ли temporal scope при объяснении связи forecast stability ↔ catalyst linkage.",
+      "creator_rationale": "Даже если multimodal факт найден, baseline может потерять temporal grounding в финальном support.",
+      "review_focus": [
+        "temporal",
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|improves forecast stability|may_relate_to|links catalyst",
+        "candidate_source_contains": "improves forecast stability",
+        "candidate_target_contains": "links catalyst",
+        "time_scope_contains": "(mock)",
+        "rank_hint": "1"
+      },
+      "notes": "Judge primarily on whether the answer preserves a temporally grounded rationale, not just generic support."
+    },
+    {
+      "case_id": "CASE-009",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Temporal catalyst study | Temporal catalyst follow-up",
+      "paper_id": "paper-1|paper-2",
+      "year": "2023-2024",
+      "evidence_kind": "cross_year_temporal",
+      "page_hint": "paper-1 is 2023 trials, paper-2 is 2024 monitoring; the pair should not be collapsed into a single undated claim",
+      "creator_prompt": "Смотри, удерживает ли вариант переход 2023 trials → 2024 monitoring и не смешивает ли эти фазы в одну безвременную формулировку.",
+      "creator_rationale": "Кейс на temporal ordering и distinction between trial phase and follow-up monitoring phase.",
+      "review_focus": [
+        "temporal",
+        "overall"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_target_contains": "reduces latency",
+        "rank_hint": "3"
+      },
+      "notes": "The stronger variant should preserve that evidence spans two years and two different study contexts."
+    },
+    {
+      "case_id": "CASE-010",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "temporal_relation",
+      "page_hint": "predicted_or_missing relation should not hallucinate earlier direct evidence before 2024",
+      "creator_prompt": "Проверь, не добавляет ли вариант несуществующее раннее наблюдение и корректно ли обрабатывает predicted/missing-link характер relation.",
+      "creator_rationale": "Temporal hard subset должен ловить ложную конкретизацию времени там, где relation является graph-predicted.",
+      "review_focus": [
+        "temporal",
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|forecasting outcomes|may_relate_to|improves forecast stability",
+        "candidate_source_contains": "forecasting outcomes",
+        "candidate_target_contains": "improves forecast stability",
+        "rank_hint": "2"
+      },
+      "notes": "Prefer the variant that keeps uncertainty and does not fabricate pre-2024 direct support."
+    },
+    {
+      "case_id": "CASE-011",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "Temporal catalyst study",
+      "paper_id": "paper-1",
+      "year": "2023",
+      "evidence_kind": "text_only_control",
+      "page_hint": "text chunk: Catalyst A reduces latency in sensor networks during 2023 trials",
+      "creator_prompt": "Это контрольный text-dominant кейс: проверь общую корректность без особого акцента на multimodal evidence.",
+      "creator_rationale": "На easy control существенная разница между baseline и tuned VLM не обязательна.",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|links catalyst|may_relate_to|reduces latency",
+        "candidate_source_contains": "links catalyst",
+        "candidate_target_contains": "reduces latency",
+        "rank_hint": "3"
+      },
+      "notes": "Use as a sanity check that the tuned VLM does not regress on a mostly text-supported case."
+    },
+    {
+      "case_id": "CASE-012",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "Temporal catalyst follow-up",
+      "paper_id": "paper-2",
+      "year": "2024",
+      "evidence_kind": "text_only_control",
+      "page_hint": "text chunk: Catalyst A reduces latency and improves forecast stability in 2024 monitoring",
+      "creator_prompt": "Это второй контрольный кейс: смотри на общую связность и отсутствие лишних галлюцинаций, а не на тонкие visual differences.",
+      "creator_rationale": "Нужен для баланса набора и проверки, что различия не “рисуются” на каждом примере.",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "tgnn_missing_link|improves forecast stability|may_relate_to|links catalyst",
+        "candidate_source_contains": "improves forecast stability",
+        "candidate_target_contains": "links catalyst",
+        "rank_hint": "1"
+      },
+      "notes": "Another control where both variants may look similar if the pipeline is driven mostly by text chunks."
+    }
+  ]
+}
