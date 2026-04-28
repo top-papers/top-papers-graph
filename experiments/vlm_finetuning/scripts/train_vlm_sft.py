@@ -127,6 +127,15 @@ def main() -> None:
     train_ds = ds['train']
     eval_ds = ds.get('eval')
 
+    def format_sft(example):
+        if "chat" in example and "messages" in example["chat"]:
+            example["messages"] = example["chat"]["messages"]
+        return example
+    
+    train_ds = train_ds.map(format_sft)
+    if eval_ds is not None:
+        eval_ds = eval_ds.map(format_sft)
+
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None:
         eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
@@ -195,10 +204,10 @@ def main() -> None:
     run_config['resolved_mode'] = actual_mode
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
-    (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2), encoding='utf-8')
+    (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 
     if args.dry_run:
-        print(json.dumps(run_config, ensure_ascii=False, indent=2))
+        print(json.dumps(run_config, ensure_ascii=False, indent=2, default=str))
         return
 
     train_result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
