@@ -90,6 +90,7 @@ def upload_export_to_hf(
     stats: dict[str, Any] | None = None,
     allow_patterns: Sequence[str] | None = None,
     ignore_patterns: Sequence[str] | None = None,
+    delete_patterns: Sequence[str] | str | None = None,
 ) -> HfUploadResult:
     try:
         from huggingface_hub import HfApi, create_repo
@@ -118,6 +119,7 @@ def upload_export_to_hf(
         commit_description=commit_description,
         allow_patterns=list(allow_patterns) if allow_patterns else None,
         ignore_patterns=list(ignore_patterns) if ignore_patterns else list(_DEFAULT_IGNORE),
+        delete_patterns=delete_patterns,
         token=token,
     )
     return HfUploadResult(

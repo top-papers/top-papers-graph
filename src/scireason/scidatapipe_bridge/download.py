@@ -12,8 +12,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import yaml
 
-from scireason.ingest.mm_pipeline import ingest_pdf_multimodal
-from scireason.ingest.pipeline import ingest_pdf
+from scireason.ingest.mm_pipeline import ingest_pdf_multimodal_auto
+from scireason.ingest.pipeline import ingest_pdf_auto
 from scireason.net.http import build_user_agent
 
 from .discovery import is_task2_bundle_dir
@@ -243,9 +243,18 @@ def download_and_ingest_refs(
             meta = _build_meta(ref, downloaded)
             try:
                 if multimodal:
-                    ingested_paper_dir = ingest_pdf_multimodal(downloaded.pdf_path, meta, produced_processed_dir, run_vlm=run_vlm)
+                    # Use the auto multimodal ingester instead of the legacy GROBID-only path.
+                    # Colab does not start a local GROBID service by default; the auto path
+                    # falls back to local PyMuPDF/pypdf text extraction and still renders
+                    # page PNGs into processed_papers/<paper>/mm/images/.
+                    ingested_paper_dir = ingest_pdf_multimodal_auto(
+                        downloaded.pdf_path,
+                        meta,
+                        produced_processed_dir,
+                        run_vlm=run_vlm,
+                    )
                 else:
-                    ingested_paper_dir = ingest_pdf(downloaded.pdf_path, meta, produced_processed_dir)
+                    ingested_paper_dir = ingest_pdf_auto(downloaded.pdf_path, meta, produced_processed_dir)
                 existing_ids.add(ref.id)
                 ingested_count += 1
             except Exception as exc:
