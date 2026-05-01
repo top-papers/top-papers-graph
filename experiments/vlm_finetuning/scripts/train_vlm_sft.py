@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from datasets import Image as HFImage
+from datasets import Sequence as HFSequence
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -52,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--trust-remote-code', action='store_true')
     ap.add_argument('--train-mode', choices=['auto', 'text', 'vlm'], default='auto')
     ap.add_argument('--image-column', default='image')
+    ap.add_argument('--images-column', default='images')
     ap.add_argument('--max-length', type=int, default=None)
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--save-adapter-only', action='store_true')
@@ -96,23 +98,119 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
     raise ValueError(f'Unsupported model for this entrypoint: {model_id}')
 
 
-def maybe_prepare_dataset(ds, image_column: str, requested_mode: str):
-    has_image = image_column in ds.column_names
-    if not has_image:
-        return ds, 'text'
+def _as_messages(value):
+    if isinstance(value, dict) and isinstance(value.get('messages'), list):
+        return value['messages']
+    if isinstance(value, list):
+        return value
+    return None
+
+
+def _normalise_message_content(content):
+    image_paths = []
+    if isinstance(content, str):
+        return content, image_paths
+    if not isinstance(content, list):
+        return str(content or ''), image_paths
+
+    blocks = []
+    has_image = False
+    text_parts = []
+    for block in content:
+        if isinstance(block, str):
+            if block.strip():
+                blocks.append({'type': 'text', 'text': block})
+                text_parts.append(block)
+            continue
+        if not isinstance(block, dict):
+            continue
+        block_type = str(block.get('type') or '').strip().lower()
+        if block_type == 'image':
+            has_image = True
+            image_path = block.get('image') or block.get('path') or block.get('url')
+            if image_path not in (None, '', []):
+                image_paths.append(str(image_path))
+            blocks.append({'type': 'image'})
+        elif block_type == 'text' or 'text' in block:
+            text = str(block.get('text') or '')
+            if text:
+                blocks.append({'type': 'text', 'text': text})
+                text_parts.append(text)
+
+    if has_image:
+        return blocks, image_paths
+    return '\n'.join(part for part in text_parts if part).strip(), image_paths
+
+
+def _normalise_messages(messages):
+    normalised = []
+    image_paths = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content, paths = _normalise_message_content(message.get('content', ''))
+        image_paths.extend(paths)
+        normalised.append({'role': message.get('role', 'user'), 'content': content})
+    return normalised, image_paths
+
+
+def _normalise_sft_example(example):
+    messages = _as_messages(example.get('messages')) or _as_messages(example.get('chat'))
+    if messages is None:
+        return example
+    normalised, image_paths = _normalise_messages(messages)
+    example['messages'] = normalised
+    example['images'] = image_paths
+    return example
+
+
+def _has_image_value(value) -> bool:
+    if value in (None, '', []):
+        return False
+    if isinstance(value, list):
+        return any(_has_image_value(item) for item in value)
+    return True
+
+
+def _image_columns(ds, image_column: str, images_column: str) -> list[str]:
+    candidates = [image_column, images_column, 'image', 'images']
+    out = []
+    for column in candidates:
+        if column and column in ds.column_names and column not in out:
+            out.append(column)
+    return out
+
+
+def _column_has_sequence_values(ds, column: str) -> bool:
     sample = ds[: min(len(ds), 128)]
-    non_null = sum(1 for x in sample.get(image_column, []) if x not in (None, '', []))
+    return any(isinstance(value, list) for value in sample.get(column, []))
+
+
+def _cast_image_columns(ds, columns: list[str]):
+    for column in columns:
+        feature = HFSequence(HFImage()) if _column_has_sequence_values(ds, column) else HFImage()
+        ds = ds.cast_column(column, feature)
+    return ds
+
+
+def maybe_prepare_dataset(ds, image_column: str, images_column: str, requested_mode: str):
+    columns = _image_columns(ds, image_column, images_column)
+    sample_size = min(len(ds), 128)
+    sample = ds[:sample_size]
+    image_rows = 0
+    for i in range(sample_size):
+        if any(_has_image_value(sample.get(column, [None] * sample_size)[i]) for column in columns):
+            image_rows += 1
+
     if requested_mode == 'text':
-        return ds.remove_columns([image_column]), 'text'
+        return ds.remove_columns(columns) if columns else ds, 'text'
     if requested_mode == 'vlm':
-        ds = ds.filter(lambda x: x.get(image_column) not in (None, '', []))
-        return ds.cast_column(image_column, HFImage()), 'vlm'
-    if non_null == 0:
-        return ds.remove_columns([image_column]), 'text'
-    if non_null == len(ds):
-        return ds.cast_column(image_column, HFImage()), 'vlm'
-    print(f'[warn] mixed-modality dataset detected ({non_null}/{len(ds)} image rows). Falling back to text mode.')
-    return ds.remove_columns([image_column]), 'text'
+        return _cast_image_columns(ds, columns) if columns else ds, 'vlm'
+    if image_rows > 0:
+        if image_rows < len(ds):
+            print(f'[warn] mixed text/VLM dataset detected ({image_rows}/{len(ds)} image rows). Keeping VLM mode; transformers>=4.57 is required for mixed batches.')
+        return _cast_image_columns(ds, columns) if columns else ds, 'vlm'
+    return ds.remove_columns(columns) if columns else ds, 'text'
 
 
 def main() -> None:
@@ -127,18 +225,13 @@ def main() -> None:
     train_ds = ds['train']
     eval_ds = ds.get('eval')
 
-    def format_sft(example):
-        if "chat" in example and "messages" in example["chat"]:
-            example["messages"] = example["chat"]["messages"]
-        return example
-    
-    train_ds = train_ds.map(format_sft)
+    train_ds = train_ds.map(_normalise_sft_example)
     if eval_ds is not None:
-        eval_ds = eval_ds.map(format_sft)
+        eval_ds = eval_ds.map(_normalise_sft_example)
 
-    train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
+    train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.images_column, args.train_mode)
     if eval_ds is not None:
-        eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
+        eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, args.images_column, actual_mode)
 
     processor = AutoProcessor.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
     tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
