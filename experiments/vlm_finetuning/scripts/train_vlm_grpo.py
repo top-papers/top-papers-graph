@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-from datasets import Image as HFImage
-from datasets import Sequence as HFSequence
+from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -341,123 +340,135 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, attn_imp
     else:
         raise ValueError(f'Unsupported model: {model_id}')
 
-def _as_messages(value):
-    if isinstance(value, dict) and isinstance(value.get('messages'), list):
-        return value['messages']
-    if isinstance(value, list):
-        return value
-    return None
+def _is_url(value: str) -> bool:
+    return value.startswith('http://') or value.startswith('https://')
 
 
-def _normalise_message_content(content):
-    image_paths = []
-    if isinstance(content, str):
-        return content, image_paths
-    if not isinstance(content, list):
-        return str(content or ''), image_paths
-
-    blocks = []
-    has_image = False
-    text_parts = []
-    for block in content:
-        if isinstance(block, str):
-            if block.strip():
-                blocks.append({'type': 'text', 'text': block})
-                text_parts.append(block)
-            continue
-        if not isinstance(block, dict):
-            continue
-        block_type = str(block.get('type') or '').strip().lower()
-        if block_type == 'image':
-            has_image = True
-            image_path = block.get('image') or block.get('path') or block.get('url')
-            if image_path not in (None, '', []):
-                image_paths.append(str(image_path))
-            blocks.append({'type': 'image'})
-        elif block_type == 'text' or 'text' in block:
-            text = str(block.get('text') or '')
-            if text:
-                blocks.append({'type': 'text', 'text': text})
-                text_parts.append(text)
-
-    if has_image:
-        return blocks, image_paths
-    return '\n'.join(part for part in text_parts if part).strip(), image_paths
-
-
-def _normalise_messages(messages):
-    normalised = []
-    image_paths = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        content, paths = _normalise_message_content(message.get('content', ''))
-        image_paths.extend(paths)
-        normalised.append({'role': message.get('role', 'user'), 'content': content})
-    return normalised, image_paths
-
-
-def format_grpo_keys(example):
-    prompt = _as_messages(example.get('prompt'))
-    if prompt is None:
-        prompt = _as_messages(example.get('prompt_chat'))
-    if prompt is None:
-        prompt = _as_messages(example.get('prompt_messages'))
-    if prompt is None:
-        return example
-    normalised, image_paths = _normalise_messages(prompt)
-    example['prompt'] = normalised
-    example['images'] = image_paths
-    return example
-
-
-def _has_image_value(value) -> bool:
+def _resolve_image_ref(value, base_dir: Path):
     if value in (None, '', []):
-        return False
-    if isinstance(value, list):
-        return any(_has_image_value(item) for item in value)
-    return True
+        return None
+    if isinstance(value, dict):
+        value = value.get('path') or value.get('image') or value.get('url') or value.get('bytes')
+    if not isinstance(value, str):
+        return value
+    value = value.strip()
+    if not value:
+        return None
+    if _is_url(value):
+        return value
+    path = Path(value)
+    if not path.is_absolute():
+        path = (base_dir / path).resolve()
+    return str(path.as_posix())
 
 
-def _image_columns(ds, image_column: str, images_column: str) -> list[str]:
-    candidates = [image_column, images_column, 'image', 'images']
+def _canonicalize_messages(messages, base_dir: Path):
+    canonical = []
+    images = []
+    if not isinstance(messages, list):
+        return canonical, images
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get('role') or 'user')
+        content = msg.get('content')
+        if isinstance(content, str):
+            canonical.append({'role': role, 'content': [{'type': 'text', 'text': content}]})
+            continue
+        blocks = []
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, str):
+                    if block.strip():
+                        blocks.append({'type': 'text', 'text': block})
+                    continue
+                if not isinstance(block, dict):
+                    continue
+                block_type = str(block.get('type') or 'text').lower()
+                if block_type == 'image':
+                    image_ref = _resolve_image_ref(block.get('image') or block.get('path') or block.get('url'), base_dir)
+                    if image_ref and image_ref not in images:
+                        images.append(image_ref)
+                    blocks.append({'type': 'image'})
+                elif block_type == 'text':
+                    text = block.get('text')
+                    if text is not None and str(text):
+                        blocks.append({'type': 'text', 'text': str(text)})
+        canonical.append({'role': role, 'content': blocks})
+    return canonical, images
+
+
+def _normalize_image_list(value, base_dir: Path):
+    if value in (None, '', []):
+        return []
+    values = value if isinstance(value, list) else [value]
     out = []
-    for column in candidates:
-        if column and column in ds.column_names and column not in out:
-            out.append(column)
+    for item in values:
+        resolved = _resolve_image_ref(item, base_dir)
+        if resolved and resolved not in out:
+            out.append(resolved)
     return out
 
 
-def _column_has_sequence_values(ds, column: str) -> bool:
-    sample = ds[: min(len(ds), 128)]
-    return any(isinstance(value, list) for value in sample.get(column, []))
+def make_grpo_formatter(base_dir: Path):
+    def format_grpo(example):
+        source_messages = example.get('prompt')
+        if not source_messages and isinstance(example.get('prompt_chat'), dict):
+            source_messages = example['prompt_chat'].get('messages')
+        if not source_messages and example.get('prompt_messages'):
+            source_messages = example.get('prompt_messages')
+        prompt, embedded_images = _canonicalize_messages(source_messages, base_dir)
+        if prompt:
+            example['prompt'] = prompt
+        images = []
+        images.extend(_normalize_image_list(example.get('images'), base_dir))
+        images.extend(_normalize_image_list(example.get('image'), base_dir))
+        for image_ref in embedded_images:
+            if image_ref not in images:
+                images.append(image_ref)
+        # Keep a stable list column: VLM rows contain resolved image paths,
+        # text-only rows contain [] and can coexist in recent TRL/Transformers.
+        example['images'] = images
+        return example
+    return format_grpo
 
 
-def _cast_image_columns(ds, columns: list[str]):
-    for column in columns:
-        feature = HFSequence(HFImage()) if _column_has_sequence_values(ds, column) else HFImage()
-        ds = ds.cast_column(column, feature)
-    return ds
+def _value_has_image(value) -> bool:
+    if value in (None, ''):
+        return False
+    if isinstance(value, list):
+        return any(item not in (None, '', []) for item in value)
+    return True
 
 
-def maybe_prepare_dataset(ds, image_column: str, images_column: str, requested_mode: str):
-    columns = _image_columns(ds, image_column, images_column)
-    sample_size = min(len(ds), 128)
-    sample = ds[:sample_size]
-    image_rows = 0
-    for i in range(sample_size):
-        if any(_has_image_value(sample.get(column, [None] * sample_size)[i]) for column in columns):
-            image_rows += 1
+def _cast_images_column(ds, image_column: str):
+    if image_column == 'images':
+        features = ds.features.copy()
+        features['images'] = Sequence(HFImage())
+        return ds.cast(features)
+    return ds.cast_column(image_column, HFImage())
 
-    if requested_mode == 'text':
-        return ds.remove_columns(columns) if columns else ds, 'text'
-    if requested_mode == 'vlm':
-        return _cast_image_columns(ds, columns) if columns else ds, 'vlm'
-    if image_rows > 0:
-        if image_rows < len(ds):
-            print(f'[warn] mixed text/VLM dataset detected ({image_rows}/{len(ds)} image rows). Keeping VLM mode; transformers>=4.57 is required for mixed batches.')
-        return _cast_image_columns(ds, columns) if columns else ds, 'vlm'
-    return ds.remove_columns(columns) if columns else ds, 'text'
+
+def maybe_prepare_dataset(ds, image_column: str, requested_mode: str):
+    candidate_columns = []
+    if image_column:
+        candidate_columns.append(image_column)
+    candidate_columns.extend(['images', 'image'])
+    detected_column = next((col for col in candidate_columns if col in ds.column_names), None)
+    if detected_column is None:
+        return ds, 'text'
+
+    sample = ds[: min(len(ds), 256)]
+    non_null = sum(1 for x in sample.get(detected_column, []) if _value_has_image(x))
+    image_columns_to_remove = [col for col in ['images', 'image'] if col in ds.column_names]
+
+    if requested_mode == 'text' or non_null == 0:
+        return ds.remove_columns(image_columns_to_remove), 'text'
+
+    # TRL expects VLM datasets to have a top-level `image` or `images` column.
+    # Mixed text-only + image rows are valid on recent transformers/TRL; keep
+    # empty lists for text-only rows instead of silently falling back to text.
+    return _cast_images_column(ds, detected_column), 'vlm'
 
 
 # 4. CLI
@@ -492,8 +503,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--gradient-checkpointing', action='store_true')
     ap.add_argument('--attn-implementation', default='sdpa')
     ap.add_argument('--train-mode', choices=['auto', 'text', 'vlm'], default='auto')
-    ap.add_argument('--image-column', default='image')
-    ap.add_argument('--images-column', default='images')
+    ap.add_argument('--image-column', default='images')
     ap.add_argument('--reward-weights', type=float, nargs=5, default=[1.0, 1.0, 1.0, 0.75, 1.0], help="Weights for: schema, temporal, graph, evidence, verdict")
     ap.add_argument('--dry-run', action='store_true')
     return ap.parse_args()
@@ -513,13 +523,15 @@ def main() -> None:
     train_ds = ds['train']
     eval_ds = ds.get('eval')
 
-    train_ds = train_ds.map(format_grpo_keys)
+    format_grpo = make_grpo_formatter(args.train_file.parent)
+    train_ds = train_ds.map(format_grpo)
     if eval_ds is not None:
-        eval_ds = eval_ds.map(format_grpo_keys)
+        eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
+        eval_ds = eval_ds.map(make_grpo_formatter(eval_base_dir))
 
-    train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.images_column, args.train_mode)
-    if eval_ds is not None:
-        eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, args.images_column, actual_mode)
+    train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
+    if eval_ds is not None: 
+        eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
 
     processor = AutoProcessor.from_pretrained(args.model_id)
     tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id)

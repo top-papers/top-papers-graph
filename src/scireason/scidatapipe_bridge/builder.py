@@ -179,6 +179,10 @@ def export_dataset(
             "normalized_task2_bundles": sum(1 for p in norm_task2_dir.iterdir() if p.is_dir()),
             "sft_rows": len(sft_rows),
             "grpo_rows": len(grpo_rows),
+            "sft_rows_with_images": sum(1 for row in sft_rows if row.get("images")),
+            "grpo_rows_with_images": sum(1 for row in grpo_rows if row.get("images")),
+            "sft_image_refs": sum(len(row.get("images") or []) for row in sft_rows),
+            "grpo_image_refs": sum(len(row.get("images") or []) for row in grpo_rows),
             "processed_papers_roots": [str(p) for p in processed_roots],
             "task1_inputs": [str(Path(p)) for p in task1_paths],
             "task2_inputs": [str(Path(p)) for p in task2_paths],
@@ -255,6 +259,94 @@ def _pick_bundle_root(root: Path) -> Path:
     return dirs[0] if dirs else root
 
 
+
+def _portable_image_ref(image_path: str, export_root: Path) -> str:
+    """Return an image reference that survives uploading/downloading the export folder."""
+    raw = str(image_path or "").strip()
+    if not raw:
+        return ""
+    if re.match(r"https?://", raw):
+        return raw
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        try:
+            return candidate.resolve().relative_to(export_root.resolve()).as_posix()
+        except Exception:
+            return candidate.as_posix()
+    return candidate.as_posix()
+
+
+def _canonical_content_block(block: dict[str, Any], *, images: list[str], export_root: Path) -> dict[str, Any] | None:
+    kind = str(block.get("type") or "text").strip().lower()
+    if kind == "image":
+        image_ref = _portable_image_ref(str(block.get("image") or ""), export_root)
+        if image_ref and image_ref not in images:
+            images.append(image_ref)
+        # TRL expects image placeholders in message content; the actual paths live
+        # in the top-level `images` column.
+        return {"type": "image"}
+    if kind == "text":
+        value = str(block.get("text") or "")
+        if not value:
+            return None
+        return {"type": "text", "text": value}
+    return None
+
+
+def _canonical_messages(messages: Sequence[dict[str, Any]], *, export_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    canonical: list[dict[str, Any]] = []
+    images: list[str] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "user")
+        content = msg.get("content")
+        if isinstance(content, list):
+            blocks = []
+            for block in content:
+                if isinstance(block, dict):
+                    converted = _canonical_content_block(block, images=images, export_root=export_root)
+                    if converted is not None:
+                        blocks.append(converted)
+                elif isinstance(block, str) and block.strip():
+                    blocks.append({"type": "text", "text": block})
+            canonical.append({"role": role, "content": blocks})
+        elif isinstance(content, str):
+            canonical.append({"role": role, "content": [{"type": "text", "text": content}]})
+    return canonical, images
+
+
+def _add_trl_sft_fields(row: dict[str, Any], *, export_root: Path) -> dict[str, Any]:
+    """Add TRL-compatible `messages` and `images` while keeping legacy `chat`."""
+    chat = row.get("chat") if isinstance(row.get("chat"), dict) else {}
+    legacy_messages = chat.get("messages") if isinstance(chat.get("messages"), list) else []
+    messages, images = _canonical_messages(legacy_messages, export_root=export_root)
+    if messages:
+        row["messages"] = messages
+    # Keep `images` on every row: TRL/HF datasets support mixed VLM + text rows
+    # when image rows contain paths/PIL objects and text-only rows contain [] .
+    row["images"] = images
+    if images:
+        extra = row.setdefault("metadata", {}).setdefault("extra", {})
+        extra["image_paths"] = images
+        extra["image_count"] = len(images)
+    return row
+
+
+def _add_trl_grpo_fields(row: dict[str, Any], *, export_root: Path) -> dict[str, Any]:
+    """Add TRL-compatible `prompt` and `images` while keeping legacy `prompt_chat`."""
+    prompt_chat = row.get("prompt_chat") if isinstance(row.get("prompt_chat"), dict) else {}
+    legacy_messages = prompt_chat.get("messages") if isinstance(prompt_chat.get("messages"), list) else []
+    prompt, images = _canonical_messages(legacy_messages, export_root=export_root)
+    if prompt:
+        row["prompt"] = prompt
+    row["images"] = images
+    if images:
+        extra = row.setdefault("metadata", {}).setdefault("extra", {})
+        extra["image_paths"] = images
+        extra["image_count"] = len(images)
+    return row
+
 def _build_sft(
     *,
     norm_task1_dir: Path,
@@ -281,7 +373,7 @@ def _build_sft(
             max_images_per_sample=max_images_per_sample,
             max_multimodal_records_per_sample=max_multimodal_records_per_sample,
         )
-        dump = [sample.model_dump(exclude_none=True) for sample in samples]
+        dump = [_add_trl_sft_fields(sample.model_dump(exclude_none=True), export_root=assets_root.parent) for sample in samples]
         write_jsonl(sub_dir / "sft.jsonl", dump)
         rows.extend(dump)
         stats["trajectory_reasoning"] += len(samples)
@@ -300,7 +392,7 @@ def _build_sft(
             max_images_per_sample=max_images_per_sample,
             max_multimodal_records_per_sample=max_multimodal_records_per_sample,
         )
-        dump = [sample.model_dump(exclude_none=True) for sample in samples]
+        dump = [_add_trl_sft_fields(sample.model_dump(exclude_none=True), export_root=assets_root.parent) for sample in samples]
         write_jsonl(sub_dir / "sft.jsonl", dump)
         rows.extend(dump)
         stats["assertion_reconstruction"] += len(samples)
@@ -332,7 +424,7 @@ def _build_grpo(
             max_images_per_sample=max_images_per_sample,
             max_multimodal_records_per_sample=max_multimodal_records_per_sample,
         )
-        dump = [sample.model_dump(exclude_none=True) for sample in samples]
+        dump = [_add_trl_grpo_fields(sample.model_dump(exclude_none=True), export_root=assets_root.parent) for sample in samples]
         write_jsonl(sub_dir / "grpo.jsonl", dump)
         rows.extend(dump)
         stats["assertion_review_rl"] += len(samples)
