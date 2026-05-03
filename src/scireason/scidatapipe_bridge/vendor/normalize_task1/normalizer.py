@@ -18,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -487,6 +488,42 @@ def _normalise_doc(raw: dict[str, Any], wiki_cache: dict[str, str]) -> dict[str,
     }
 
 
+
+def _source_fingerprint(input_path: Path) -> str:
+    """Stable short fingerprint for collision-safe output ids."""
+    h = hashlib.sha1()
+    try:
+        h.update(input_path.read_bytes())
+    except Exception:
+        h.update(str(input_path.resolve()).encode("utf-8", errors="ignore"))
+    h.update(str(input_path.resolve()).encode("utf-8", errors="ignore"))
+    return h.hexdigest()[:10]
+
+
+def _source_marker_path(submission_dir: Path) -> Path:
+    return submission_dir / ".source_path"
+
+
+def _same_source(marker: Path, input_path: Path) -> bool:
+    try:
+        return marker.read_text(encoding="utf-8").strip() == str(input_path.resolve())
+    except Exception:
+        return False
+
+
+def _disambiguate_submission_id(submission_id: str, input_path: Path, output_dir: Path) -> str:
+    base = submission_id or input_path.stem or "unknown_submission"
+    suffix = _source_fingerprint(input_path)
+    candidate = f"{base}__input_{suffix}"
+    i = 2
+    while (output_dir / candidate).exists():
+        marker = _source_marker_path(output_dir / candidate)
+        if _same_source(marker, input_path):
+            return candidate
+        candidate = f"{base}__input_{suffix}_{i}"
+        i += 1
+    return candidate
+
 def _peek_submission_id(raw: dict[str, Any], input_path: Path) -> str:
     """Return submission_id without running the full normalizer.
 
@@ -512,28 +549,48 @@ def normalize_file(
 ) -> tuple[Path, bool]:
     """Normalize one YAML. Returns ``(out_path, skipped)``.
 
-    When ``force`` is False and the destination YAML already exists, we
-    skip re-normalization so the pipeline can be re-run cheaply after new
-    raw files arrive.
+    The original implementation keyed the output directory only by the
+    ``submission_id`` inside the YAML. In real Google Forms exports multiple
+    uploaded files can share the same internal ``submission_id`` (or miss it
+    entirely), so later files silently overwrote or skipped earlier ones.
+    We keep the canonical id when it is unique, but on collision create a
+    deterministic ``__input_<hash>`` suffix and store the original id in
+    ``original_submission_id``.
     """
-    raw = yaml.safe_load(input_path.read_text()) or {}
+    raw = yaml.safe_load(input_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{input_path}: top-level YAML must be a mapping")
 
-    submission_id_hint = _peek_submission_id(raw, input_path)
-    existing = output_dir / submission_id_hint / f"{submission_id_hint}.yaml"
-    if not force and existing.exists():
-        return existing, True
-
     doc = _normalise_doc(raw, wiki_cache)
+    original_submission_id = doc["submission_id"]
+
+    submission_dir = output_dir / original_submission_id
+    out_path = submission_dir / f"{original_submission_id}.yaml"
+    marker = _source_marker_path(submission_dir)
+
+    if out_path.exists() and not force:
+        if _same_source(marker, input_path):
+            return out_path, True
+        unique_id = _disambiguate_submission_id(original_submission_id, input_path, output_dir)
+        logger.warning(
+            "submission_id collision for '%s' from %s; writing as '%s'",
+            original_submission_id,
+            input_path,
+            unique_id,
+        )
+        doc["original_submission_id"] = original_submission_id
+        doc["submission_id"] = unique_id
+        submission_dir = output_dir / unique_id
+        out_path = submission_dir / f"{unique_id}.yaml"
+        marker = _source_marker_path(submission_dir)
+
     errors = validate(doc, TASK1_SCHEMA_V4)
     for err in errors:
         logger.warning("%s schema issue: %s", input_path.name, err)
 
-    submission_dir = output_dir / doc["submission_id"]
     submission_dir.mkdir(parents=True, exist_ok=True)
-    out_path = submission_dir / f"{doc['submission_id']}.yaml"
-    out_path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False))
+    out_path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    marker.write_text(str(input_path.resolve()), encoding="utf-8")
     return out_path, False
 
 

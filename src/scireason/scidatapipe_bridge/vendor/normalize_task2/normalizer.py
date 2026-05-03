@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import logging
 import re
@@ -92,6 +93,54 @@ EXPERT_FIELDS = (
     "time_source_note",
 )
 
+
+
+def _source_fingerprint(path: Path) -> str:
+    """Stable short fingerprint for collision-safe bundle ids."""
+    h = hashlib.sha1()
+    if path.is_file():
+        try:
+            h.update(path.read_bytes())
+        except Exception:
+            pass
+    elif path.is_dir():
+        for child in sorted(p for p in path.rglob("*") if p.is_file()):
+            try:
+                rel = child.relative_to(path).as_posix()
+            except Exception:
+                rel = child.name
+            h.update(rel.encode("utf-8", errors="ignore"))
+            try:
+                h.update(child.read_bytes())
+            except Exception:
+                h.update(str(child.resolve()).encode("utf-8", errors="ignore"))
+    h.update(str(path.resolve()).encode("utf-8", errors="ignore"))
+    return h.hexdigest()[:10]
+
+
+def _source_marker_path(bundle_out_dir: Path) -> Path:
+    return bundle_out_dir / ".source_path"
+
+
+def _same_source(marker: Path, bundle_dir: Path) -> bool:
+    try:
+        return marker.read_text(encoding="utf-8").strip() == str(bundle_dir.resolve())
+    except Exception:
+        return False
+
+
+def _disambiguate_submission_id(submission_id: str, bundle_dir: Path, output_dir: Path) -> str:
+    base = submission_id or bundle_dir.name or "unknown_bundle"
+    suffix = _source_fingerprint(bundle_dir)
+    candidate = f"{base}__input_{suffix}"
+    i = 2
+    while (output_dir / candidate).exists():
+        marker = _source_marker_path(output_dir / candidate)
+        if _same_source(marker, bundle_dir):
+            return candidate
+        candidate = f"{base}__input_{suffix}_{i}"
+        i += 1
+    return candidate
 
 def _clean(value: Any) -> str:
     if value is None:
@@ -595,11 +644,22 @@ def normalize_bundle(
         return None
 
     submission_id = _submission_id(edge_reviews, bundle_dir)
+    original_submission_id = submission_id
 
-    existing_gold = output_dir / submission_id / "gold.json"
-    existing_auto = output_dir / submission_id / "auto.json"
+    existing_dir = output_dir / submission_id
+    existing_gold = existing_dir / "gold.json"
+    existing_auto = existing_dir / "auto.json"
+    existing_marker = _source_marker_path(existing_dir)
     if not force and existing_gold.exists() and existing_auto.exists():
-        return existing_gold, existing_auto, True
+        if _same_source(existing_marker, bundle_dir):
+            return existing_gold, existing_auto, True
+        submission_id = _disambiguate_submission_id(submission_id, bundle_dir, output_dir)
+        logger.warning(
+            "submission_id collision for bundle '%s' from %s; writing as '%s'",
+            original_submission_id,
+            bundle_dir,
+            submission_id,
+        )
 
     assertions = [
         _normalise_assertion(raw)
@@ -639,6 +699,7 @@ def normalize_bundle(
 
     base = {
         "submission_id": submission_id,
+        "original_submission_id": original_submission_id if original_submission_id != submission_id else "",
         "trajectory_submission_id": _clean(edge_reviews.get("trajectory_submission_id")),
         "domain": _clean(edge_reviews.get("domain")),
         "topic": _clean(edge_reviews.get("topic")),
@@ -652,6 +713,7 @@ def normalize_bundle(
     auto_path = out_dir / "auto.json"
     write_json(gold_path, {**base, "assertions": gold})
     write_json(auto_path, {**base, "assertions": auto})
+    _source_marker_path(out_dir).write_text(str(bundle_dir.resolve()), encoding="utf-8")
 
     for path in (gold_path, auto_path):
         for err in validate(read_json(path), TASK2_ASSERTION_SCHEMA):

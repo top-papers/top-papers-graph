@@ -410,6 +410,48 @@ def _normalize_image_list(value, base_dir: Path):
     return out
 
 
+def _flatten_single_text_messages(messages):
+    """Compatibility helper for older unit tests and notebook snippets."""
+    flattened = []
+    for msg in messages:
+        content = msg.get('content')
+        if (
+            isinstance(content, list)
+            and len(content) == 1
+            and isinstance(content[0], dict)
+            and content[0].get('type') == 'text'
+        ):
+            flattened.append({'role': msg.get('role'), 'content': content[0].get('text', '')})
+        else:
+            flattened.append(msg)
+    return flattened
+
+
+def format_grpo_keys(example, base_dir: Path | None = None):
+    """Backward-compatible normalizer used by regression tests.
+
+    The training path uses ``make_grpo_formatter`` below and keeps all prompt
+    contents in TRL multimodal block format.
+    """
+    base_dir = base_dir or Path('.')
+    source_messages = example.get('prompt')
+    if not source_messages and isinstance(example.get('prompt_chat'), dict):
+        source_messages = example['prompt_chat'].get('messages')
+    if not source_messages and example.get('prompt_messages'):
+        source_messages = example.get('prompt_messages')
+    prompt, embedded_images = _canonicalize_messages(source_messages, base_dir)
+    if prompt:
+        example['prompt'] = _flatten_single_text_messages(prompt)
+    images = []
+    images.extend(_normalize_image_list(example.get('images'), base_dir))
+    images.extend(_normalize_image_list(example.get('image'), base_dir))
+    for image_ref in embedded_images:
+        if image_ref not in images:
+            images.append(image_ref)
+    example['images'] = images
+    return example
+
+
 def make_grpo_formatter(base_dir: Path):
     def format_grpo(example):
         source_messages = example.get('prompt')

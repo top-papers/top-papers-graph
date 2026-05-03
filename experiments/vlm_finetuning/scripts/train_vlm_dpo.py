@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from datasets import Image as HFImage
+from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--attn-implementation', default='sdpa')
     ap.add_argument('--trust-remote-code', action='store_true')
     ap.add_argument('--train-mode', choices=['auto', 'text', 'vlm'], default='auto')
-    ap.add_argument('--image-column', default='image')
+    ap.add_argument('--image-column', default='images')
     ap.add_argument('--max-length', type=int, default=None)
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--dry-run', action='store_true')
@@ -93,23 +93,85 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
     raise ValueError(f'Unsupported model for this entrypoint: {model_id}')
 
 
+def _is_url(value: str) -> bool:
+    return value.startswith('http://') or value.startswith('https://')
+
+
+def _resolve_image_ref(value, base_dir: Path):
+    if value in (None, '', []):
+        return None
+    if isinstance(value, dict):
+        value = value.get('path') or value.get('image') or value.get('url') or value.get('bytes')
+    if not isinstance(value, str):
+        return value
+    value = value.strip()
+    if not value:
+        return None
+    if _is_url(value):
+        return value
+    path = Path(value)
+    if not path.is_absolute():
+        path = (base_dir / path).resolve()
+    return str(path.as_posix())
+
+
+def _normalize_image_list(value, base_dir: Path):
+    if value in (None, '', []):
+        return []
+    values = value if isinstance(value, list) else [value]
+    out = []
+    for item in values:
+        resolved = _resolve_image_ref(item, base_dir)
+        if resolved and resolved not in out:
+            out.append(resolved)
+    return out
+
+
+def make_dpo_formatter(base_dir: Path):
+    def format_dpo(example):
+        images = []
+        images.extend(_normalize_image_list(example.get('images'), base_dir))
+        images.extend(_normalize_image_list(example.get('image'), base_dir))
+        example['images'] = images
+        return example
+    return format_dpo
+
+
+def _value_has_image(value) -> bool:
+    if value in (None, ''):
+        return False
+    if isinstance(value, list):
+        return any(item not in (None, '', []) for item in value)
+    return True
+
+
+def _cast_images_column(ds, image_column: str):
+    if image_column == 'images':
+        features = ds.features.copy()
+        features['images'] = Sequence(HFImage())
+        return ds.cast(features)
+    return ds.cast_column(image_column, HFImage())
+
+
 def maybe_prepare_dataset(ds, image_column: str, requested_mode: str):
-    has_image = image_column in ds.column_names
-    if not has_image:
+    candidate_columns = []
+    if image_column:
+        candidate_columns.append(image_column)
+    candidate_columns.extend(['images', 'image'])
+    detected_column = next((col for col in candidate_columns if col in ds.column_names), None)
+    if detected_column is None:
         return ds, 'text'
-    sample = ds[: min(len(ds), 128)]
-    non_null = sum(1 for x in sample.get(image_column, []) if x not in (None, '', []))
-    if requested_mode == 'text':
-        return ds.remove_columns([image_column]), 'text'
-    if requested_mode == 'vlm':
-        ds = ds.filter(lambda x: x.get(image_column) not in (None, '', []))
-        return ds.cast_column(image_column, HFImage()), 'vlm'
-    if non_null == 0:
-        return ds.remove_columns([image_column]), 'text'
-    if non_null == len(ds):
-        return ds.cast_column(image_column, HFImage()), 'vlm'
-    print(f'[warn] mixed-modality dataset detected ({non_null}/{len(ds)} image rows). Falling back to text mode.')
-    return ds.remove_columns([image_column]), 'text'
+
+    sample = ds[: min(len(ds), 256)]
+    non_null = sum(1 for x in sample.get(detected_column, []) if _value_has_image(x))
+    image_columns_to_remove = [col for col in ['images', 'image'] if col in ds.column_names]
+
+    if requested_mode == 'text' or non_null == 0:
+        return ds.remove_columns(image_columns_to_remove), 'text'
+
+    # Keep mixed text-only + image rows instead of filtering them out. This
+    # matches the SFT/GRPO entrypoints and prevents silent loss of examples.
+    return _cast_images_column(ds, detected_column), 'vlm'
 
 
 def main() -> None:
@@ -123,6 +185,11 @@ def main() -> None:
     ds = load_dataset('json', data_files=data_files)
     train_ds = ds['train']
     eval_ds = ds.get('eval')
+
+    train_ds = train_ds.map(make_dpo_formatter(args.train_file.parent))
+    if eval_ds is not None:
+        eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
+        eval_ds = eval_ds.map(make_dpo_formatter(eval_base_dir))
 
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None:

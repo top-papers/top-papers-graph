@@ -106,11 +106,12 @@ def export_dataset(
             normalize_task1_file(Path(path), norm_task1_dir, wiki_cache={})
 
         for path in task2_paths:
-            bundle_path, temp_obj = _materialize_task2_input(Path(path))
+            bundle_paths, temp_obj = _materialize_task2_input(Path(path))
             if temp_obj is not None:
                 temp_dirs.append(temp_obj)
-            extracted_roots.append(bundle_path)
-            normalize_task2_bundle(bundle_path, norm_task2_dir)
+            for bundle_path in bundle_paths:
+                extracted_roots.append(bundle_path)
+                normalize_task2_bundle(bundle_path, norm_task2_dir)
 
         processed_roots = [Path(p).resolve() for p in processed_papers_dirs]
         scan_roots = list(extracted_roots)
@@ -236,27 +237,55 @@ def export_dataset(
             tmp.cleanup()
 
 
-def _materialize_task2_input(path: Path) -> tuple[Path, Optional[tempfile.TemporaryDirectory[str]]]:
+def _materialize_task2_input(path: Path) -> tuple[list[Path], Optional[tempfile.TemporaryDirectory[str]]]:
+    """Return every Task 2 bundle root represented by a path.
+
+    Some form uploads are ZIPs that contain several bundle directories. The
+    previous implementation picked only the first detected bundle root, which
+    made the remaining valid input files disappear from normalized_task2 and
+    downstream SFT/GRPO datasets.
+    """
     if path.is_dir():
-        return path, None
+        return _find_bundle_roots(path), None
     if path.suffix.lower() != ".zip":
         raise ValueError(f"Unsupported Task 2 input: {path}")
     tmp = tempfile.TemporaryDirectory(prefix="task2_bundle_")
     root = Path(tmp.name)
     with zipfile.ZipFile(path) as zf:
         zf.extractall(root)
-    bundle = _pick_bundle_root(root)
-    return bundle, tmp
+    return _find_bundle_roots(root), tmp
 
 
-def _pick_bundle_root(root: Path) -> Path:
+def _is_task2_bundle_root(path: Path) -> bool:
+    return any((path / name).exists() for name in ("edge_reviews.json", "review_templates", "task2_notebook_manifest.json"))
+
+
+def _find_bundle_roots(root: Path) -> list[Path]:
+    if _is_task2_bundle_root(root):
+        return [root]
+
+    bundle_dirs: list[Path] = []
+    seen: set[str] = set()
+    for candidate in sorted(p for p in root.rglob("*") if p.is_dir() and p.name != "__MACOSX"):
+        if not _is_task2_bundle_root(candidate):
+            continue
+        key = str(candidate.resolve())
+        if key in seen:
+            continue
+        # If a parent is already a bundle root, do not add nested implementation
+        # folders as separate bundles.
+        if any(str(candidate.resolve()).startswith(str(parent.resolve()) + "/") for parent in bundle_dirs):
+            continue
+        seen.add(key)
+        bundle_dirs.append(candidate)
+
+    if bundle_dirs:
+        return bundle_dirs
+
     children = [p for p in root.iterdir() if p.name != "__MACOSX"]
     if len(children) == 1 and children[0].is_dir():
-        return children[0]
-    if any((root / name).exists() for name in ("edge_reviews.json", "review_templates", "task2_notebook_manifest.json")):
-        return root
-    dirs = [p for p in root.rglob("*") if p.is_dir() and any((p / name).exists() for name in ("edge_reviews.json", "review_templates", "task2_notebook_manifest.json"))]
-    return dirs[0] if dirs else root
+        return [children[0]]
+    return [root]
 
 
 

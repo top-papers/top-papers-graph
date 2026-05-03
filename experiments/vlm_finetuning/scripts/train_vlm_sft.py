@@ -166,6 +166,46 @@ def _normalize_image_list(value, base_dir: Path):
     return out
 
 
+def _flatten_single_text_messages(messages):
+    """Compatibility helper for older unit tests and notebook snippets."""
+    flattened = []
+    for msg in messages:
+        content = msg.get('content')
+        if (
+            isinstance(content, list)
+            and len(content) == 1
+            and isinstance(content[0], dict)
+            and content[0].get('type') == 'text'
+        ):
+            flattened.append({'role': msg.get('role'), 'content': content[0].get('text', '')})
+        else:
+            flattened.append(msg)
+    return flattened
+
+
+def _normalise_sft_example(example, base_dir: Path | None = None):
+    """Backward-compatible normalizer used by regression tests.
+
+    The training path uses ``make_sft_formatter`` below and keeps all message
+    contents in TRL multimodal block format.
+    """
+    base_dir = base_dir or Path('.')
+    source_messages = example.get('messages')
+    if not source_messages and isinstance(example.get('chat'), dict):
+        source_messages = example['chat'].get('messages')
+    messages, embedded_images = _canonicalize_messages(source_messages, base_dir)
+    if messages:
+        example['messages'] = _flatten_single_text_messages(messages)
+    images = []
+    images.extend(_normalize_image_list(example.get('images'), base_dir))
+    images.extend(_normalize_image_list(example.get('image'), base_dir))
+    for image_ref in embedded_images:
+        if image_ref not in images:
+            images.append(image_ref)
+    example['images'] = images
+    return example
+
+
 def make_sft_formatter(base_dir: Path):
     def format_sft(example):
         source_messages = example.get('messages')
