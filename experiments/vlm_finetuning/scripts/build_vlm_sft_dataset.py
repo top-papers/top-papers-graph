@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import random
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,77 @@ def ensure_list(value: Any) -> List[Any]:
 def choose_split(key: str, val_ratio: float = 0.15) -> str:
     h = int(hashlib.md5(key.encode('utf-8')).hexdigest(), 16) % 10_000
     return 'eval' if h < int(10_000 * val_ratio) else 'train'
+
+
+def source_fingerprint(path: Path) -> str:
+    """Return a stable short fingerprint for an input file.
+
+    Google Forms/offline-form exports can contain many YAML files with the same
+    internal ``submission_id`` (for example the default ``trajectory_submission``).
+    If record ids are based only on that internal id, later dataset consumers may
+    collapse different files into the same examples. We therefore mix file bytes
+    and the resolved path into every generated source instance id.
+    """
+    h = hashlib.sha1()
+    try:
+        h.update(path.read_bytes())
+    except Exception:
+        pass
+    h.update(str(path.resolve()).encode('utf-8', errors='ignore'))
+    return h.hexdigest()[:10]
+
+
+
+def sanitize_submission_suffix(value: Any) -> str:
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    raw = re.sub(r'[^\w]+', '_', raw, flags=re.UNICODE)
+    raw = re.sub(r'_+', '_', raw).strip('_')
+    return raw
+
+
+def author_suffix_from_path(submission_id: str, path: Path) -> str:
+    base = str(submission_id or '').strip()
+    stem = path.stem
+    candidates: List[str] = []
+    if base:
+        for sep in ('_', ' - ', '-'):
+            prefix = f'{base}{sep}'
+            if stem.startswith(prefix):
+                candidates.append(stem[len(prefix):])
+        token = f'_{base}_'
+        if token in stem:
+            candidates.append(stem.rsplit(token, 1)[-1])
+    if ' - ' in stem:
+        candidates.append(stem.rsplit(' - ', 1)[-1])
+    for candidate in candidates:
+        suffix = sanitize_submission_suffix(candidate)
+        if suffix and suffix != base:
+            return suffix
+    return ''
+
+def source_file_label(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except Exception:
+        return str(path)
+
+
+def source_instance_id(raw_id: str, path: Path) -> str:
+    base = str(raw_id or path.stem or 'unknown_input').strip()
+    suffix = author_suffix_from_path(base, path)
+    if suffix and not base.endswith(f'_{suffix}'):
+        base = f'{base}_{suffix}'
+    return f"{base}__input_{source_fingerprint(path)}"
+
+
+def assert_unique_record_ids(rows: List[Tuple[str, Dict[str, Any]]]) -> None:
+    counts = Counter(str(row.get('id') or '') for _, row in rows)
+    dupes = {rid: count for rid, count in counts.items() if rid and count > 1}
+    if dupes:
+        preview = ', '.join(f'{rid} x{count}' for rid, count in list(dupes.items())[:10])
+        raise RuntimeError(f'Duplicate training record ids detected: {preview}')
 
 
 def source_block(sources: List[Dict[str, Any]]) -> str:
@@ -110,9 +182,13 @@ def trajectory_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
     doc = read_yaml(path)
     topic = str(doc.get('topic') or '').strip()
     domain = str(doc.get('domain') or 'science').strip()
-    submission_id = str(doc.get('submission_id') or path.stem)
+    original_submission_id = str(doc.get('submission_id') or path.stem)
+    submission_id = source_instance_id(original_submission_id, path)
+    input_fingerprint = source_fingerprint(path)
     expert = doc.get('expert') or {}
-    expert_key = str(expert.get('latin_slug') or expert.get('full_name') or submission_id)
+    raw_expert_key = str(expert.get('latin_slug') or expert.get('full_name') or original_submission_id)
+    expert_key = raw_expert_key or submission_id
+    split_key = f'{expert_key}::{submission_id}'
     papers = ensure_list(doc.get('papers'))
     paper_lines = [f"- {p.get('id','?')} ({p.get('year','?')}): {p.get('title','')}" for p in papers if isinstance(p, dict)]
     paper_block = '\n'.join(paper_lines) if paper_lines else '-'
@@ -131,7 +207,7 @@ def trajectory_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
         user = (
             f"Topic: {topic}\n"
             f"Domain: {domain}\n"
-            f"Submission: {submission_id}\n\n"
+            f"Submission: {submission_id}\nOriginal submission: {original_submission_id}\n\n"
             f"Papers:\n{paper_block}\n\n"
             f"Claim to analyze:\n{claim}\n\n"
             f"Sources:\n{source_block(sources)}\n\n"
@@ -178,7 +254,7 @@ def trajectory_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
             'domain': domain,
             'topic': topic,
             'expert_key': expert_key,
-            'source_file': str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path),
+            'source_file': source_file_label(path),
             'messages': build_messages(
                 'You are a careful scientific extraction assistant. Be concise, evidence-grounded and schema-faithful.',
                 user,
@@ -191,19 +267,26 @@ def trajectory_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
             'edge_annotations': edge_annotations_for_step(doc, int(step.get('step_id', idx))),
             'metadata': {
                 'submission_id': submission_id,
+                'original_submission_id': original_submission_id,
+                'input_fingerprint': input_fingerprint,
+                'input_file': source_file_label(path),
                 'step_id': step.get('step_id', idx),
                 'has_image_source': bool(image_path),
             },
         }
         if image_path:
             rec['image'] = image_path
-        yield expert_key, rec
+        yield split_key, rec
 
 
 def graph_repair_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
     doc = read_json(path)
     domain = str(doc.get('domain') or 'science')
-    expert_key = str(doc.get('expert_key') or path.stem)
+    raw_expert_key = str(doc.get('expert_key') or path.stem)
+    input_fingerprint = source_fingerprint(path)
+    source_id = source_instance_id(path.stem, path)
+    expert_key = raw_expert_key
+    split_key = f'{expert_key}::{source_id}'
     assertions = ensure_list(doc.get('assertions'))
     for idx, a in enumerate(assertions, start=1):
         if not isinstance(a, dict):
@@ -239,24 +322,32 @@ def graph_repair_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
             ensure_ascii=False,
             indent=2,
         )
-        yield expert_key, {
-            'id': f'graph_repair:{path.stem}:{idx}',
+        yield split_key, {
+            'id': f'graph_repair:{source_id}:{idx}',
             'task_family': 'graph_repair',
             'domain': domain,
             'expert_key': expert_key,
-            'source_file': str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path),
+            'source_file': source_file_label(path),
             'messages': build_messages(
                 'You fix scientific graph assertions using expert feedback. Output only valid JSON.',
                 user,
                 assistant,
             ),
-            'metadata': {'review_index': idx},
+            'metadata': {
+                'review_index': idx,
+                'input_fingerprint': input_fingerprint,
+                'input_file': source_file_label(path),
+            },
         }
 
 
 def temporal_fix_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
     doc = read_json(path)
-    expert_key = str(doc.get('expert_key') or path.stem)
+    raw_expert_key = str(doc.get('expert_key') or path.stem)
+    input_fingerprint = source_fingerprint(path)
+    source_id = source_instance_id(path.stem, path)
+    expert_key = raw_expert_key
+    split_key = f'{expert_key}::{source_id}'
     for idx, c in enumerate(ensure_list(doc.get('corrections')), start=1):
         if not isinstance(c, dict):
             continue
@@ -270,24 +361,32 @@ def temporal_fix_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
             f"Review rationale: {c.get('rationale','')}\n\n"
             "Return the corrected temporal object as JSON only."
         )
-        yield expert_key, {
-            'id': f'temporal_fix:{path.stem}:{idx}',
+        yield split_key, {
+            'id': f'temporal_fix:{source_id}:{idx}',
             'task_family': 'temporal_fix',
             'domain': str(doc.get('domain') or 'science'),
             'expert_key': expert_key,
-            'source_file': str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path),
+            'source_file': source_file_label(path),
             'messages': build_messages(
                 'You correct temporal scopes for scientific assertions. Output only valid JSON.',
                 user,
                 json.dumps(corrected, ensure_ascii=False, indent=2),
             ),
-            'metadata': {'assertion_id': c.get('assertion_id')},
+            'metadata': {
+                'assertion_id': c.get('assertion_id'),
+                'input_fingerprint': input_fingerprint,
+                'input_file': source_file_label(path),
+            },
         }
 
 
 def mm_review_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
     doc = read_json(path)
-    expert_key = str(doc.get('expert_key') or path.stem)
+    raw_expert_key = str(doc.get('expert_key') or path.stem)
+    input_fingerprint = source_fingerprint(path)
+    source_id = source_instance_id(path.stem, path)
+    expert_key = raw_expert_key
+    split_key = f'{expert_key}::{source_id}'
     for idx, item in enumerate(ensure_list(doc.get('items')), start=1):
         if not isinstance(item, dict):
             continue
@@ -296,11 +395,11 @@ def mm_review_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
         if not corrected:
             continue
         rec = {
-            'id': f'mm_review:{path.stem}:{idx}',
+            'id': f'mm_review:{source_id}:{idx}',
             'task_family': 'mm_caption_fix',
             'domain': str(doc.get('domain') or 'science'),
             'expert_key': expert_key,
-            'source_file': str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path),
+            'source_file': source_file_label(path),
             'messages': build_messages(
                 'You revise multimodal descriptions of scientific figures using expert feedback.',
                 (
@@ -312,7 +411,11 @@ def mm_review_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
                 ),
                 str(corrected),
             ),
-            'metadata': {'page': item.get('page')},
+            'metadata': {
+                'page': item.get('page'),
+                'input_fingerprint': input_fingerprint,
+                'input_file': source_file_label(path),
+            },
         }
         image_path = item.get('image') or item.get('image_path')
         if image_path:
@@ -321,7 +424,7 @@ def mm_review_records(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
                 p = (path.parent / p).resolve()
             if p.exists():
                 rec['image'] = str(p)
-        yield expert_key, rec
+        yield split_key, rec
 
 
 def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> int:
@@ -392,6 +495,10 @@ def main() -> None:
         stats.mm_records += len(batch)
         all_rows.extend(batch)
 
+    assert_unique_record_ids(all_rows)
+
+    input_files_with_records = sorted({str(row.get('metadata', {}).get('input_file') or row.get('source_file') or '') for _, row in all_rows if row})
+
     train_rows: List[Dict[str, Any]] = []
     eval_rows: List[Dict[str, Any]] = []
     for expert_key, row in all_rows:
@@ -427,6 +534,9 @@ def main() -> None:
         'eval_records': len(eval_rows),
         'smoke_records': len(smoke_rows),
         'task_family_counts': dict(Counter(row.get('task_family') for row in all_only)),
+        'input_files_with_records': input_files_with_records,
+        'input_file_count_with_records': len(input_files_with_records),
+        'unique_record_ids': len({row.get('id') for row in all_only}),
     }
     output_summary.parent.mkdir(parents=True, exist_ok=True)
     output_summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')

@@ -95,26 +95,30 @@ EXPERT_FIELDS = (
 
 
 
-def _source_fingerprint(path: Path) -> str:
+def _source_fingerprint(source_identity: Path | str) -> str:
     """Stable short fingerprint for collision-safe bundle ids."""
     h = hashlib.sha1()
-    if path.is_file():
-        try:
-            h.update(path.read_bytes())
-        except Exception:
-            pass
-    elif path.is_dir():
-        for child in sorted(p for p in path.rglob("*") if p.is_file()):
+    if isinstance(source_identity, Path):
+        path = source_identity
+        if path.is_file():
             try:
-                rel = child.relative_to(path).as_posix()
+                h.update(path.read_bytes())
             except Exception:
-                rel = child.name
-            h.update(rel.encode("utf-8", errors="ignore"))
-            try:
-                h.update(child.read_bytes())
-            except Exception:
-                h.update(str(child.resolve()).encode("utf-8", errors="ignore"))
-    h.update(str(path.resolve()).encode("utf-8", errors="ignore"))
+                pass
+        elif path.is_dir():
+            for child in sorted(p for p in path.rglob("*") if p.is_file()):
+                try:
+                    rel = child.relative_to(path).as_posix()
+                except Exception:
+                    rel = child.name
+                h.update(rel.encode("utf-8", errors="ignore"))
+                try:
+                    h.update(child.read_bytes())
+                except Exception:
+                    h.update(str(child.resolve()).encode("utf-8", errors="ignore"))
+        h.update(str(path.resolve()).encode("utf-8", errors="ignore"))
+    else:
+        h.update(source_identity.encode("utf-8", errors="ignore"))
     return h.hexdigest()[:10]
 
 
@@ -122,21 +126,21 @@ def _source_marker_path(bundle_out_dir: Path) -> Path:
     return bundle_out_dir / ".source_path"
 
 
-def _same_source(marker: Path, bundle_dir: Path) -> bool:
+def _same_source(marker: Path, source_identity: str) -> bool:
     try:
-        return marker.read_text(encoding="utf-8").strip() == str(bundle_dir.resolve())
+        return marker.read_text(encoding="utf-8").strip() == source_identity
     except Exception:
         return False
 
 
-def _disambiguate_submission_id(submission_id: str, bundle_dir: Path, output_dir: Path) -> str:
-    base = submission_id or bundle_dir.name or "unknown_bundle"
-    suffix = _source_fingerprint(bundle_dir)
+def _disambiguate_submission_id(submission_id: str, source_identity: str, output_dir: Path) -> str:
+    base = submission_id or "unknown_bundle"
+    suffix = _source_fingerprint(source_identity)
     candidate = f"{base}__input_{suffix}"
     i = 2
     while (output_dir / candidate).exists():
         marker = _source_marker_path(output_dir / candidate)
-        if _same_source(marker, bundle_dir):
+        if _same_source(marker, source_identity):
             return candidate
         candidate = f"{base}__input_{suffix}_{i}"
         i += 1
@@ -428,6 +432,55 @@ def _submission_id(edge_reviews: dict[str, Any], bundle_dir: Path) -> str:
     return bundle_dir.name
 
 
+
+
+def _sanitize_submission_suffix(value: Any) -> str:
+    raw = _clean(value)
+    if not raw:
+        return ""
+    raw = re.sub(r"[^\w]+", "_", raw, flags=re.UNICODE)
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    return raw
+
+
+def _author_suffix_from_source_path(submission_id: str, source_path: Path) -> str:
+    """Best-effort author suffix from the original upload path.
+
+    ZIP bundles often contain only ``trajectory_submission_id`` inside
+    ``edge_reviews.json``; the author's name is available only in the uploaded
+    archive name, for example ``expert_validation_bundle - Илья Фёдоров.zip``.
+    """
+    base = _clean(submission_id)
+    stem = source_path.stem
+    candidates: list[str] = []
+    if base:
+        for sep in ("_", " - ", "-"):
+            prefix = f"{base}{sep}"
+            if stem.startswith(prefix):
+                candidates.append(stem[len(prefix):])
+        token = f"_{base}_"
+        if token in stem:
+            candidates.append(stem.rsplit(token, 1)[-1])
+    for prefix in ("expert_validation_bundle", "validation_bundle", "task2_bundle"):
+        if stem.startswith(prefix):
+            candidates.append(stem[len(prefix):].lstrip(" _-"))
+    if " - " in stem:
+        candidates.append(stem.rsplit(" - ", 1)[-1])
+    for candidate in candidates:
+        suffix = _sanitize_submission_suffix(candidate)
+        if suffix and suffix != base:
+            return suffix
+    return ""
+
+
+def _submission_id_with_author_from_source(submission_id: str, source_path: Path) -> str:
+    base = _clean(submission_id) or source_path.stem or "unknown_bundle"
+    suffix = _author_suffix_from_source_path(base, source_path)
+    if suffix and not base.endswith(f"_{suffix}"):
+        return f"{base}_{suffix}"
+    return base
+
+
 def _find_review_file(bundle_dir: Path) -> Path | None:
     """Find the most authoritative review file in a bundle.
 
@@ -617,6 +670,8 @@ def normalize_bundle(
     bundle_dir: Path,
     output_dir: Path,
     *,
+    source_path: Path | None = None,
+    source_identity: str | None = None,
     force: bool = False,
 ) -> tuple[Path, Path, bool] | None:
     """Normalize one bundle. Returns ``(gold_path, auto_path, skipped)``.
@@ -643,17 +698,20 @@ def normalize_bundle(
         )
         return None
 
+    original_source_path = source_path or bundle_dir
+    source_identity_value = source_identity or str(original_source_path.resolve())
     submission_id = _submission_id(edge_reviews, bundle_dir)
     original_submission_id = submission_id
+    submission_id = _submission_id_with_author_from_source(submission_id, original_source_path)
 
     existing_dir = output_dir / submission_id
     existing_gold = existing_dir / "gold.json"
     existing_auto = existing_dir / "auto.json"
     existing_marker = _source_marker_path(existing_dir)
     if not force and existing_gold.exists() and existing_auto.exists():
-        if _same_source(existing_marker, bundle_dir):
+        if _same_source(existing_marker, source_identity_value):
             return existing_gold, existing_auto, True
-        submission_id = _disambiguate_submission_id(submission_id, bundle_dir, output_dir)
+        submission_id = _disambiguate_submission_id(submission_id, source_identity_value, output_dir)
         logger.warning(
             "submission_id collision for bundle '%s' from %s; writing as '%s'",
             original_submission_id,
@@ -713,7 +771,7 @@ def normalize_bundle(
     auto_path = out_dir / "auto.json"
     write_json(gold_path, {**base, "assertions": gold})
     write_json(auto_path, {**base, "assertions": auto})
-    _source_marker_path(out_dir).write_text(str(bundle_dir.resolve()), encoding="utf-8")
+    _source_marker_path(out_dir).write_text(source_identity_value, encoding="utf-8")
 
     for path in (gold_path, auto_path):
         for err in validate(read_json(path), TASK2_ASSERTION_SCHEMA):
@@ -761,7 +819,13 @@ def main(argv: list[str] | None = None) -> int:
 
     created = skipped = 0
     for bundle in _iter_bundles(args.input_dir):
-        result = normalize_bundle(bundle, args.output_dir, force=args.force)
+        result = normalize_bundle(
+            bundle,
+            args.output_dir,
+            source_path=bundle,
+            source_identity=str(bundle.resolve()),
+            force=args.force,
+        )
         if result is None:
             continue
         _, _, was_skipped = result

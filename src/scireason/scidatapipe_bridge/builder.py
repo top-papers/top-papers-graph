@@ -106,12 +106,17 @@ def export_dataset(
             normalize_task1_file(Path(path), norm_task1_dir, wiki_cache={})
 
         for path in task2_paths:
-            bundle_paths, temp_obj = _materialize_task2_input(Path(path))
+            bundle_refs, temp_obj = _materialize_task2_input(Path(path))
             if temp_obj is not None:
                 temp_dirs.append(temp_obj)
-            for bundle_path in bundle_paths:
+            for bundle_path, source_path, source_identity in bundle_refs:
                 extracted_roots.append(bundle_path)
-                normalize_task2_bundle(bundle_path, norm_task2_dir)
+                normalize_task2_bundle(
+                    bundle_path,
+                    norm_task2_dir,
+                    source_path=source_path,
+                    source_identity=source_identity,
+                )
 
         processed_roots = [Path(p).resolve() for p in processed_papers_dirs]
         scan_roots = list(extracted_roots)
@@ -166,6 +171,7 @@ def export_dataset(
             max_images_per_sample=max_images_per_sample,
             max_multimodal_records_per_sample=max_multimodal_records_per_sample,
         )
+        task1_retention_stats = _task1_source_retention_stats(norm_task1_dir, sft_rows)
 
         sft_path = out_dir / "sft.jsonl"
         grpo_path = out_dir / "grpo.jsonl"
@@ -176,6 +182,7 @@ def export_dataset(
             **sft_stats,
             **grpo_stats,
             **download_stats,
+            **task1_retention_stats,
             "normalized_task1_submissions": sum(1 for p in norm_task1_dir.iterdir() if p.is_dir()),
             "normalized_task2_bundles": sum(1 for p in norm_task2_dir.iterdir() if p.is_dir()),
             "sft_rows": len(sft_rows),
@@ -237,7 +244,7 @@ def export_dataset(
             tmp.cleanup()
 
 
-def _materialize_task2_input(path: Path) -> tuple[list[Path], Optional[tempfile.TemporaryDirectory[str]]]:
+def _materialize_task2_input(path: Path) -> tuple[list[tuple[Path, Path, str]], Optional[tempfile.TemporaryDirectory[str]]]:
     """Return every Task 2 bundle root represented by a path.
 
     Some form uploads are ZIPs that contain several bundle directories. The
@@ -246,14 +253,21 @@ def _materialize_task2_input(path: Path) -> tuple[list[Path], Optional[tempfile.
     downstream SFT/GRPO datasets.
     """
     if path.is_dir():
-        return _find_bundle_roots(path), None
+        return [(bundle, bundle, str(bundle.resolve())) for bundle in _find_bundle_roots(path)], None
     if path.suffix.lower() != ".zip":
         raise ValueError(f"Unsupported Task 2 input: {path}")
     tmp = tempfile.TemporaryDirectory(prefix="task2_bundle_")
     root = Path(tmp.name)
     with zipfile.ZipFile(path) as zf:
         zf.extractall(root)
-    return _find_bundle_roots(root), tmp
+    refs: list[tuple[Path, Path, str]] = []
+    for bundle in _find_bundle_roots(root):
+        try:
+            rel = bundle.relative_to(root).as_posix()
+        except ValueError:
+            rel = bundle.name
+        refs.append((bundle, path, f"{path.resolve()}!{rel}"))
+    return refs, tmp
 
 
 def _is_task2_bundle_root(path: Path) -> bool:
@@ -375,6 +389,40 @@ def _add_trl_grpo_fields(row: dict[str, Any], *, export_root: Path) -> dict[str,
         extra["image_paths"] = images
         extra["image_count"] = len(images)
     return row
+
+def _read_source_marker(sub_dir: Path) -> str:
+    marker = sub_dir / ".source_path"
+    try:
+        return marker.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _task1_source_retention_stats(norm_task1_dir: Path, sft_rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    rows_by_submission: dict[str, int] = {}
+    for row in sft_rows:
+        if row.get("task_family") != "trajectory_reasoning":
+            continue
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        submission_id = str(metadata.get("submission_id") or "")
+        if submission_id:
+            rows_by_submission[submission_id] = rows_by_submission.get(submission_id, 0) + 1
+
+    normalized_sources: list[str] = []
+    sources_without_rows: list[str] = []
+    for sub_dir in sorted(p for p in norm_task1_dir.iterdir() if p.is_dir()):
+        source = _read_source_marker(sub_dir) or str(sub_dir)
+        normalized_sources.append(source)
+        if rows_by_submission.get(sub_dir.name, 0) <= 0:
+            sources_without_rows.append(source)
+
+    return {
+        "normalized_task1_source_files": normalized_sources,
+        "normalized_task1_source_file_count": len(normalized_sources),
+        "task1_sources_with_sft_rows": len(normalized_sources) - len(sources_without_rows),
+        "task1_sources_without_sft_rows": sources_without_rows,
+    }
+
 
 def _build_sft(
     *,

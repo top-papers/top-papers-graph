@@ -100,3 +100,47 @@ def test_export_processes_all_task2_bundles_inside_one_zip(tmp_path: Path) -> No
     rows = [json.loads(line) for line in result.sft_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len([row for row in rows if row["task_family"] == "assertion_reconstruction"]) == 2
     assert len({row["metadata"]["submission_id"] for row in rows}) == 2
+
+
+def test_export_adds_author_suffix_from_task1_filename(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    _write_task1_yaml(
+        input_dir / "reasoning_failures_in_large_language_models_Илья_Фёдоров.yaml",
+        submission_id="reasoning_failures_in_large_language_models",
+        claim="claim by Ilya",
+    )
+
+    result = export_dataset(input_dirs=[input_dir], out_dir=tmp_path / "export")
+
+    expected_id = "reasoning_failures_in_large_language_models_Илья_Фёдоров"
+    assert (result.normalized_task1_dir / expected_id / f"{expected_id}.yaml").exists()
+    rows = [json.loads(line) for line in result.sft_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    trajectory_rows = [row for row in rows if row["task_family"] == "trajectory_reasoning"]
+    assert {row["metadata"]["submission_id"] for row in trajectory_rows} == {expected_id}
+    assert {row["metadata"].get("original_submission_id") for row in trajectory_rows} == {"reasoning_failures_in_large_language_models"}
+
+
+def test_export_adds_author_suffix_from_task2_zip_filename(tmp_path: Path) -> None:
+    zip_source = tmp_path / "zip_source"
+    _write_task2_bundle(
+        zip_source / "reasoning_failures_in_large_language_models",
+        submission_id="reasoning_failures_in_large_language_models",
+        assertion_id="a",
+    )
+
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    archive = input_dir / "expert_validation_bundle - Илья Фёдоров.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for path in sorted(zip_source.rglob("*")):
+            if path.is_file():
+                zf.write(path, path.relative_to(zip_source))
+
+    result = export_dataset(input_dirs=[input_dir], out_dir=tmp_path / "export")
+
+    expected_id = "reasoning_failures_in_large_language_models_Илья_Фёдоров"
+    assert (result.normalized_task2_dir / expected_id / "gold.json").exists()
+    rows = [json.loads(line) for line in result.sft_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assertion_rows = [row for row in rows if row["task_family"] == "assertion_reconstruction"]
+    assert {row["metadata"]["submission_id"] for row in assertion_rows} == {expected_id}

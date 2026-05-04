@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import random
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -28,6 +29,73 @@ def choose_split(key: str, val_ratio: float) -> str:
     return 'eval' if h < int(10_000 * val_ratio) else 'train'
 
 
+def source_fingerprint(path: Path) -> str:
+    """Return a stable short fingerprint for collision-safe pair ids."""
+    h = hashlib.sha1()
+    try:
+        h.update(path.read_bytes())
+    except Exception:
+        pass
+    h.update(str(path.resolve()).encode('utf-8', errors='ignore'))
+    return h.hexdigest()[:10]
+
+
+
+def sanitize_submission_suffix(value: Any) -> str:
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    raw = re.sub(r'[^\w]+', '_', raw, flags=re.UNICODE)
+    raw = re.sub(r'_+', '_', raw).strip('_')
+    return raw
+
+
+def author_suffix_from_path(submission_id: str, path: Path) -> str:
+    base = str(submission_id or '').strip()
+    stem = path.parent.name if path.name in {'gold.json', 'auto.json'} else path.stem
+    candidates: List[str] = []
+    if base:
+        for sep in ('_', ' - ', '-'):
+            prefix = f'{base}{sep}'
+            if stem.startswith(prefix):
+                candidates.append(stem[len(prefix):])
+        token = f'_{base}_'
+        if token in stem:
+            candidates.append(stem.rsplit(token, 1)[-1])
+    if ' - ' in stem:
+        candidates.append(stem.rsplit(' - ', 1)[-1])
+    for candidate in candidates:
+        suffix = sanitize_submission_suffix(candidate)
+        if suffix and suffix != base:
+            return suffix
+    return ''
+
+def source_file_label(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except Exception:
+        return str(path)
+
+
+def source_instance_id(raw_id: str, path: Path) -> str:
+    base = str(raw_id or path.stem or 'unknown_input').strip()
+    suffix = author_suffix_from_path(base, path)
+    if suffix and not base.endswith(f'_{suffix}'):
+        base = f'{base}_{suffix}'
+    return f"{base}__input_{source_fingerprint(path)}"
+
+
+def assert_unique_pair_ids(rows: List[Tuple[str, Dict[str, Any]]]) -> None:
+    counts: dict[str, int] = {}
+    for _, row in rows:
+        rid = str(row.get('id') or '')
+        counts[rid] = counts.get(rid, 0) + 1
+    dupes = {rid: count for rid, count in counts.items() if rid and count > 1}
+    if dupes:
+        preview = ', '.join(f'{rid} x{count}' for rid, count in list(dupes.items())[:10])
+        raise RuntimeError(f'Duplicate preference record ids detected: {preview}')
+
+
 def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -41,7 +109,11 @@ def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> int:
 def graph_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
     doc = read_json(path)
     domain = str(doc.get('domain') or 'science')
-    expert_key = str(doc.get('expert_key') or path.stem)
+    raw_expert_key = str(doc.get('expert_key') or path.stem)
+    input_fingerprint = source_fingerprint(path)
+    source_id = source_instance_id(path.stem, path)
+    expert_key = raw_expert_key
+    split_key = f'{expert_key}::{source_id}'
     for idx, a in enumerate(ensure_list(doc.get('assertions')), start=1):
         if not isinstance(a, dict):
             continue
@@ -49,8 +121,8 @@ def graph_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
         if not has_any:
             continue
         ev = a.get('evidence') or {}
-        yield expert_key, {
-            'id': f'graph_pref:{path.stem}:{idx}',
+        yield split_key, {
+            'id': f'graph_pref:{source_id}:{idx}',
             'task_family': 'graph_repair_preference',
             'domain': domain,
             'expert_key': expert_key,
@@ -78,13 +150,17 @@ def graph_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
                 'end_date': a.get('end_date', 'unknown'),
                 'evidence': ev,
             }, ensure_ascii=False, indent=2),
-            'metadata': {'source_file': str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path)},
+            'metadata': {'source_file': source_file_label(path), 'input_fingerprint': input_fingerprint},
         }
 
 
 def temporal_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
     doc = read_json(path)
-    expert_key = str(doc.get('expert_key') or path.stem)
+    raw_expert_key = str(doc.get('expert_key') or path.stem)
+    input_fingerprint = source_fingerprint(path)
+    source_id = source_instance_id(path.stem, path)
+    expert_key = raw_expert_key
+    split_key = f'{expert_key}::{source_id}'
     for idx, c in enumerate(ensure_list(doc.get('corrections')), start=1):
         if not isinstance(c, dict):
             continue
@@ -92,8 +168,8 @@ def temporal_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
         original = c.get('original_time') or c.get('predicted_time')
         if not corrected or not original:
             continue
-        yield expert_key, {
-            'id': f'temporal_pref:{path.stem}:{idx}',
+        yield split_key, {
+            'id': f'temporal_pref:{source_id}:{idx}',
             'task_family': 'temporal_preference',
             'domain': str(doc.get('domain') or 'science'),
             'expert_key': expert_key,
@@ -106,13 +182,17 @@ def temporal_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
             ),
             'chosen': json.dumps(corrected, ensure_ascii=False, indent=2),
             'rejected': json.dumps(original, ensure_ascii=False, indent=2),
-            'metadata': {'source_file': str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path)},
+            'metadata': {'source_file': source_file_label(path), 'input_fingerprint': input_fingerprint},
         }
 
 
 def mm_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
     doc = read_json(path)
-    expert_key = str(doc.get('expert_key') or path.stem)
+    raw_expert_key = str(doc.get('expert_key') or path.stem)
+    input_fingerprint = source_fingerprint(path)
+    source_id = source_instance_id(path.stem, path)
+    expert_key = raw_expert_key
+    split_key = f'{expert_key}::{source_id}'
     for idx, item in enumerate(ensure_list(doc.get('items')), start=1):
         if not isinstance(item, dict):
             continue
@@ -121,7 +201,7 @@ def mm_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
         if not original or not corrected or str(original).strip() == str(corrected).strip():
             continue
         rec = {
-            'id': f'mm_pref:{path.stem}:{idx}',
+            'id': f'mm_pref:{source_id}:{idx}',
             'task_family': 'mm_caption_preference',
             'domain': str(doc.get('domain') or 'science'),
             'expert_key': expert_key,
@@ -134,7 +214,7 @@ def mm_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
             ),
             'chosen': str(corrected),
             'rejected': str(original),
-            'metadata': {'source_file': str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path)},
+            'metadata': {'source_file': source_file_label(path), 'input_fingerprint': input_fingerprint},
         }
         image_path = item.get('image') or item.get('image_path')
         if image_path:
@@ -143,7 +223,7 @@ def mm_pairs(path: Path) -> Iterable[Tuple[str, Dict[str, Any]]]:
                 p = (path.parent / p).resolve()
             if p.exists():
                 rec['image'] = str(p)
-        yield expert_key, rec
+        yield split_key, rec
 
 
 def iter_paths(paths: List[Path], patterns: Tuple[str, ...]) -> Iterable[Path]:
@@ -188,6 +268,9 @@ def main() -> None:
     for p in iter_paths(mm_dirs, ('**/*.json',)):
         rows.extend(mm_pairs(p))
 
+    assert_unique_pair_ids(rows)
+    input_files_with_records = sorted({str(row.get('metadata', {}).get('source_file') or '') for _, row in rows if row})
+
     train_rows: List[Dict[str, Any]] = []
     eval_rows: List[Dict[str, Any]] = []
     for expert_key, row in rows:
@@ -208,7 +291,14 @@ def main() -> None:
     write_jsonl(output_eval, eval_rows)
     write_jsonl(output_all, [r for _, r in rows])
     output_summary.parent.mkdir(parents=True, exist_ok=True)
-    output_summary.write_text(json.dumps({'total_pairs': len(rows), 'train_pairs': len(train_rows), 'eval_pairs': len(eval_rows)}, ensure_ascii=False, indent=2), encoding='utf-8')
+    output_summary.write_text(json.dumps({
+        'total_pairs': len(rows),
+        'train_pairs': len(train_rows),
+        'eval_pairs': len(eval_rows),
+        'input_files_with_records': input_files_with_records,
+        'input_file_count_with_records': len(input_files_with_records),
+        'unique_record_ids': len({row.get('id') for _, row in rows}),
+    }, ensure_ascii=False, indent=2), encoding='utf-8')
     print(output_summary.read_text(encoding='utf-8'))
 
 

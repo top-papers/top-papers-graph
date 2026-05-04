@@ -524,6 +524,53 @@ def _disambiguate_submission_id(submission_id: str, input_path: Path, output_dir
         i += 1
     return candidate
 
+
+
+def _sanitize_submission_suffix(value: Any) -> str:
+    raw = _clean(value)
+    if not raw:
+        return ""
+    raw = re.sub(r"[^\w]+", "_", raw, flags=re.UNICODE)
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    return raw
+
+
+def _author_suffix_from_path(submission_id: str, input_path: Path) -> str:
+    """Best-effort author suffix from form-upload filenames.
+
+    Google Forms/Drive exports can keep the human name only in the uploaded
+    filename, for example ``reasoning_failures_..._Илья_Фёдоров.yaml``.
+    Preserve that suffix in the normalized ``submission_id`` so different
+    authors working on the same topic remain distinguishable downstream.
+    """
+    base = _clean(submission_id)
+    stem = input_path.stem
+    candidates: list[str] = []
+    if base:
+        for sep in ("_", " - ", "-"):
+            prefix = f"{base}{sep}"
+            if stem.startswith(prefix):
+                candidates.append(stem[len(prefix):])
+        token = f"_{base}_"
+        if token in stem:
+            candidates.append(stem.rsplit(token, 1)[-1])
+    if " - " in stem:
+        candidates.append(stem.rsplit(" - ", 1)[-1])
+    for candidate in candidates:
+        suffix = _sanitize_submission_suffix(candidate)
+        if suffix and suffix != base:
+            return suffix
+    return ""
+
+
+def _submission_id_with_author_from_path(submission_id: str, input_path: Path) -> str:
+    base = _clean(submission_id) or input_path.stem or "unknown_submission"
+    suffix = _author_suffix_from_path(base, input_path)
+    if suffix and not base.endswith(f"_{suffix}"):
+        return f"{base}_{suffix}"
+    return base
+
+
 def _peek_submission_id(raw: dict[str, Any], input_path: Path) -> str:
     """Return submission_id without running the full normalizer.
 
@@ -563,15 +610,19 @@ def normalize_file(
 
     doc = _normalise_doc(raw, wiki_cache)
     original_submission_id = doc["submission_id"]
+    submission_id = _submission_id_with_author_from_path(original_submission_id, input_path)
+    if submission_id != original_submission_id:
+        doc["original_submission_id"] = original_submission_id
+        doc["submission_id"] = submission_id
 
-    submission_dir = output_dir / original_submission_id
-    out_path = submission_dir / f"{original_submission_id}.yaml"
+    submission_dir = output_dir / submission_id
+    out_path = submission_dir / f"{submission_id}.yaml"
     marker = _source_marker_path(submission_dir)
 
     if out_path.exists() and not force:
         if _same_source(marker, input_path):
             return out_path, True
-        unique_id = _disambiguate_submission_id(original_submission_id, input_path, output_dir)
+        unique_id = _disambiguate_submission_id(submission_id, input_path, output_dir)
         logger.warning(
             "submission_id collision for '%s' from %s; writing as '%s'",
             original_submission_id,
