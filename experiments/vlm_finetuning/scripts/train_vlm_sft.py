@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from datasets import Image as HFImage, Sequence
+from datasets import Image as HFImage
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -23,8 +23,8 @@ from trl import SFTConfig, SFTTrainer
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument('--model-id', required=True)
-    ap.add_argument('--train-file', type=Path, required=True)
-    ap.add_argument('--eval-file', type=Path, default=None)
+    ap.add_argument('--train-file', type=str, required=True)
+    ap.add_argument('--eval-file', type=str, default=None)
     ap.add_argument('--output-dir', type=Path, required=True)
     ap.add_argument('--report-to', default='none')
     ap.add_argument('--learning-rate', type=float, default=2e-4)
@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--attn-implementation', default='sdpa')
     ap.add_argument('--trust-remote-code', action='store_true')
     ap.add_argument('--train-mode', choices=['auto', 'text', 'vlm'], default='auto')
-    ap.add_argument('--image-column', default='images')
+    ap.add_argument('--image-column', default='image')
     ap.add_argument('--max-length', type=int, default=None)
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--save-adapter-only', action='store_true')
@@ -96,173 +96,23 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
     raise ValueError(f'Unsupported model for this entrypoint: {model_id}')
 
 
-def _is_url(value: str) -> bool:
-    return value.startswith('http://') or value.startswith('https://')
-
-
-def _resolve_image_ref(value, base_dir: Path):
-    if value in (None, '', []):
-        return None
-    if isinstance(value, dict):
-        value = value.get('path') or value.get('image') or value.get('url') or value.get('bytes')
-    if not isinstance(value, str):
-        return value
-    value = value.strip()
-    if not value:
-        return None
-    if _is_url(value):
-        return value
-    path = Path(value)
-    if not path.is_absolute():
-        path = (base_dir / path).resolve()
-    return str(path.as_posix())
-
-
-def _canonicalize_messages(messages, base_dir: Path):
-    canonical = []
-    images = []
-    if not isinstance(messages, list):
-        return canonical, images
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        role = msg.get('role') or 'user'
-        content = msg.get('content')
-        if isinstance(content, str):
-            canonical.append({'role': role, 'content': [{'type': 'text', 'text': content}]})
-            continue
-        blocks = []
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, str):
-                    if block.strip():
-                        blocks.append({'type': 'text', 'text': block})
-                    continue
-                if not isinstance(block, dict):
-                    continue
-                block_type = str(block.get('type') or 'text').lower()
-                if block_type == 'image':
-                    image_ref = _resolve_image_ref(block.get('image') or block.get('path') or block.get('url'), base_dir)
-                    if image_ref and image_ref not in images:
-                        images.append(image_ref)
-                    blocks.append({'type': 'image'})
-                elif block_type == 'text':
-                    text = block.get('text')
-                    if text is not None and str(text):
-                        blocks.append({'type': 'text', 'text': str(text)})
-        canonical.append({'role': role, 'content': blocks})
-    return canonical, images
-
-
-def _normalize_image_list(value, base_dir: Path):
-    if value in (None, '', []):
-        return []
-    values = value if isinstance(value, list) else [value]
-    out = []
-    for item in values:
-        resolved = _resolve_image_ref(item, base_dir)
-        if resolved and resolved not in out:
-            out.append(resolved)
-    return out
-
-
-def _flatten_single_text_messages(messages):
-    """Compatibility helper for older unit tests and notebook snippets."""
-    flattened = []
-    for msg in messages:
-        content = msg.get('content')
-        if (
-            isinstance(content, list)
-            and len(content) == 1
-            and isinstance(content[0], dict)
-            and content[0].get('type') == 'text'
-        ):
-            flattened.append({'role': msg.get('role'), 'content': content[0].get('text', '')})
-        else:
-            flattened.append(msg)
-    return flattened
-
-
-def _normalise_sft_example(example, base_dir: Path | None = None):
-    """Backward-compatible normalizer used by regression tests.
-
-    The training path uses ``make_sft_formatter`` below and keeps all message
-    contents in TRL multimodal block format.
-    """
-    base_dir = base_dir or Path('.')
-    source_messages = example.get('messages')
-    if not source_messages and isinstance(example.get('chat'), dict):
-        source_messages = example['chat'].get('messages')
-    messages, embedded_images = _canonicalize_messages(source_messages, base_dir)
-    if messages:
-        example['messages'] = _flatten_single_text_messages(messages)
-    images = []
-    images.extend(_normalize_image_list(example.get('images'), base_dir))
-    images.extend(_normalize_image_list(example.get('image'), base_dir))
-    for image_ref in embedded_images:
-        if image_ref not in images:
-            images.append(image_ref)
-    example['images'] = images
-    return example
-
-
-def make_sft_formatter(base_dir: Path):
-    def format_sft(example):
-        source_messages = example.get('messages')
-        if not source_messages and isinstance(example.get('chat'), dict):
-            source_messages = example['chat'].get('messages')
-        messages, embedded_images = _canonicalize_messages(source_messages, base_dir)
-        if messages:
-            example['messages'] = messages
-        images = []
-        images.extend(_normalize_image_list(example.get('images'), base_dir))
-        images.extend(_normalize_image_list(example.get('image'), base_dir))
-        for image_ref in embedded_images:
-            if image_ref not in images:
-                images.append(image_ref)
-        # Keep a stable list column: VLM rows contain resolved image paths,
-        # text-only rows contain [] and can coexist in recent TRL/Transformers.
-        example['images'] = images
-        return example
-    return format_sft
-
-
-def _value_has_image(value) -> bool:
-    if value in (None, ''):
-        return False
-    if isinstance(value, list):
-        return any(item not in (None, '', []) for item in value)
-    return True
-
-
-def _cast_images_column(ds, image_column: str):
-    if image_column == 'images':
-        features = ds.features.copy()
-        features['images'] = Sequence(HFImage())
-        return ds.cast(features)
-    return ds.cast_column(image_column, HFImage())
-
-
 def maybe_prepare_dataset(ds, image_column: str, requested_mode: str):
-    candidate_columns = []
-    if image_column:
-        candidate_columns.append(image_column)
-    candidate_columns.extend(['images', 'image'])
-    detected_column = next((col for col in candidate_columns if col in ds.column_names), None)
-    if detected_column is None:
+    has_image = image_column in ds.column_names
+    if not has_image:
         return ds, 'text'
-
-    sample = ds[: min(len(ds), 256)]
-    non_null = sum(1 for x in sample.get(detected_column, []) if _value_has_image(x))
-    image_columns_to_remove = [col for col in ['images', 'image'] if col in ds.column_names]
-
-    if requested_mode == 'text' or non_null == 0:
-        return ds.remove_columns(image_columns_to_remove), 'text'
-
-    # TRL expects VLM datasets to have a top-level `image` or `images` column.
-    # Mixed text-only + image rows are valid on recent transformers/TRL; keep
-    # empty lists for text-only rows instead of silently falling back to text.
-    return _cast_images_column(ds, detected_column), 'vlm'
+    sample = ds[: min(len(ds), 128)]
+    non_null = sum(1 for x in sample.get(image_column, []) if x not in (None, '', []))
+    if requested_mode == 'text':
+        return ds.remove_columns([image_column]), 'text'
+    if requested_mode == 'vlm':
+        ds = ds.filter(lambda x: x.get(image_column) not in (None, '', []))
+        return ds.cast_column(image_column, HFImage()), 'vlm'
+    if non_null == 0:
+        return ds.remove_columns([image_column]), 'text'
+    if non_null == len(ds):
+        return ds.cast_column(image_column, HFImage()), 'vlm'
+    print(f'[warn] mixed-modality dataset detected ({non_null}/{len(ds)} image rows). Falling back to text mode.')
+    return ds.remove_columns([image_column]), 'text'
 
 
 def main() -> None:
@@ -270,18 +120,45 @@ def main() -> None:
     set_seed(args.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    data_files = {'train': str(args.train_file)}
-    if args.eval_file:
-        data_files['eval'] = str(args.eval_file)
-    ds = load_dataset('json', data_files=data_files)
-    train_ds = ds['train']
-    eval_ds = ds.get('eval')
+    train_file_str = args.train_file
+    if train_file_str.endswith('.json') or train_file_str.endswith('.jsonl'):
+        data_files = {'train': train_file_str}
+        if args.eval_file:
+            data_files['eval'] = args.eval_file
+        ds = load_dataset('json', data_files=data_files)
+        train_ds = ds['train']
+        eval_ds = ds.get('eval')
+    else:
+        ds = load_dataset(train_file_str)
+        train_ds = ds.get('train')
+        if train_ds is None and 'validation' in ds:
+            train_ds = ds['validation']
+        eval_ds = ds.get('eval')
 
-    format_sft = make_sft_formatter(args.train_file.parent)
+    def format_sft(example):
+        if "label" in example:
+            example["messages"] = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image"},
+                        {"type": "text", "text": "What is the correct label for this image?"}
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": str(example["label"])}
+                    ]
+                }
+            ]
+        elif "chat" in example and "messages" in example["chat"]:
+            example["messages"] = example["chat"]["messages"]
+        return example
+    
     train_ds = train_ds.map(format_sft)
     if eval_ds is not None:
-        eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
-        eval_ds = eval_ds.map(make_sft_formatter(eval_base_dir))
+        eval_ds = eval_ds.map(format_sft)
 
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None:
