@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoProcessor,
     AutoTokenizer,
@@ -150,6 +150,41 @@ def parse_prediction_object(completion: Any) -> Optional[Any]:
     return parse_json_candidate(completion_to_text(completion))
 
 
+def parse_label_candidate(completion: Any) -> str:
+    text = completion_to_text(completion).strip()
+    obj = parse_json_candidate(text)
+    if isinstance(obj, dict):
+        for key in ("label", "class_label", "answer", "prediction"):
+            if obj.get(key) not in (None, ""):
+                return str(obj[key]).strip()
+    if isinstance(obj, str):
+        return obj.strip()
+    return text.splitlines()[0].strip() if text else ""
+
+
+def reward_label_exact_match(prompts, completions, reference_label=None, label_text=None, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
+    task_family = task_family or [""] * len(completions)
+    reference_label = reference_label or label_text or [None] * len(completions)
+    sample_id = sample_id or [""] * len(completions)
+    domain = domain or [""] * len(completions)
+
+    rewards = []
+    for completion, target, tf in zip(completions, reference_label, task_family):
+        if tf != "image_label_rl" or not target:
+            rewards.append(0.0)
+            continue
+        pred = norm_text(parse_label_candidate(completion))
+        target_norm = norm_text(target)
+        if pred == target_norm:
+            rewards.append(1.0)
+        elif target_norm and target_norm in pred:
+            rewards.append(0.5)
+        else:
+            rewards.append(-1.0)
+    REWARD_LOGGER.append("label_exact_match", trainer_state, sample_id, domain, task_family, rewards)
+    return rewards
+
+
 # 2. Reward functions for RL
 
 def reward_schema_validity(prompts, completions, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
@@ -159,6 +194,9 @@ def reward_schema_validity(prompts, completions, sample_id=None, domain=None, ta
 
     rewards = []
     for completion, tf in zip(completions, task_family):
+        if tf == "image_label_rl":
+            rewards.append(0.0)
+            continue
         obj = parse_prediction_object(completion)
         reward = -1.0
         if isinstance(obj, dict):
@@ -252,6 +290,9 @@ def reward_evidence_presence(prompts, completions, evidence_text=None, sample_id
 
     rewards = []
     for completion, ev_text, tf in zip(completions, evidence_text, task_family):
+        if tf == "image_label_rl":
+            rewards.append(0.0)
+            continue
         pred_obj = parse_prediction_object(completion)
         if not isinstance(pred_obj, dict):
             rewards.append(-0.5)
@@ -540,6 +581,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--lora-target-modules', nargs='+', default=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
     ap.add_argument('--use-lora', action='store_true')
     ap.add_argument('--qlora', action='store_true')
+    ap.add_argument('--sft-adapter-path', type=Path, default=None)
     ap.add_argument('--bf16', action='store_true')
     ap.add_argument('--fp16', action='store_true')
     ap.add_argument('--gradient-checkpointing', action='store_true')
@@ -587,7 +629,9 @@ def main() -> None:
     if args.qlora: 
         model = prepare_model_for_kbit_training(model)
         
-    if args.use_lora or args.qlora:
+    if args.sft_adapter_path:
+        model = PeftModel.from_pretrained(model, str(args.sft_adapter_path), is_trainable=True)
+    elif args.use_lora or args.qlora:
         model = get_peft_model(
             model,
             LoraConfig(
@@ -644,6 +688,7 @@ def main() -> None:
     trainer = GRPOTrainer(
         model=model,
         reward_funcs=[
+            reward_label_exact_match,
             reward_schema_validity, 
             reward_temporal_consistency, 
             reward_graph_consistency, 

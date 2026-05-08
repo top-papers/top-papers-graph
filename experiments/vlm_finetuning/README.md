@@ -57,3 +57,22 @@ bash experiments/vlm_finetuning/datasphere/launch_examples.sh build-datasets
 bash experiments/vlm_finetuning/datasphere/launch_examples.sh sft-smoke
 bash experiments/vlm_finetuning/datasphere/launch_examples.sh list
 ```
+
+## Full HF top-papers DataSphere SFT+GRPO pipeline
+
+A complete DataSphere Jobs pipeline was added for `top-papers/top-papers-graph-experts-data`:
+
+- job config: `datasphere/job_configs/hf_top_papers_sft_grpo_full_g2_2.yaml`
+- runtime wrapper: `datasphere/bin/run_hf_top_papers_sft_grpo_full.sh`
+- managed local CLI launcher: `datasphere/run_full_pipeline.py`
+- HF dataset builder: `scripts/build_hf_graph_experts_dataset.py`
+- detailed Russian guide: `datasphere/HF_TOP_PAPERS_FULL_PIPELINE_RU.md`
+
+Run:
+
+```bash
+export DATASPHERE_PROJECT_ID=<project_id>
+bash experiments/vlm_finetuning/datasphere/launch_examples.sh hf-full-managed
+```
+
+The job uses DataSphere `g2.2` (2 × A100 80 GB) and 1 TB SSD working storage, trains an SFT LoRA adapter and then a GRPO/RL adapter, downloads declared outputs locally, and sets the job data TTL to 1 day.

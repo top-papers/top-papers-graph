@@ -136,24 +136,31 @@ def main() -> None:
         eval_ds = ds.get('eval')
 
     def format_sft(example):
+        # Prefer an explicit chat template from a prepared JSONL row.
+        # The Hugging Face imagefolder dataset only has image/label columns,
+        # so for that direct-use case we synthesize the VLM messages here.
+        if "messages" in example and example["messages"]:
+            return example
+        if "chat" in example and isinstance(example["chat"], dict) and "messages" in example["chat"]:
+            example["messages"] = example["chat"]["messages"]
+            return example
         if "label" in example:
+            label_value = example.get("label_text", example["label"])
             example["messages"] = [
                 {
                     "role": "user",
                     "content": [
                         {"type": "image"},
-                        {"type": "text", "text": "What is the correct label for this image?"}
-                    ]
+                        {"type": "text", "text": "What is the correct label for this image? Return only the class label."},
+                    ],
                 },
                 {
                     "role": "assistant",
                     "content": [
-                        {"type": "text", "text": str(example["label"])}
-                    ]
-                }
+                        {"type": "text", "text": str(label_value)}
+                    ],
+                },
             ]
-        elif "chat" in example and "messages" in example["chat"]:
-            example["messages"] = example["chat"]["messages"]
         return example
     
     train_ds = train_ds.map(format_sft)

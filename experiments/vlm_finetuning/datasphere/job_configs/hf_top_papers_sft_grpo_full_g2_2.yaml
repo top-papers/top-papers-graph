@@ -1,0 +1,59 @@
+name: hf-top-papers-sft-grpo-g2-2
+
+desc: Full SFT plus GRPO VLM fine-tuning on top-papers/top-papers-graph-experts-data, g2.2 A100 x2, 1 TB SSD
+
+cmd: >
+  bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_grpo_full.sh
+
+env:
+  python:
+    type: manual
+    version: 3.10.13
+    requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
+    local-paths:
+      - experiments/vlm_finetuning/
+      - data/
+      - examples/
+  vars:
+    - HF_DATASET_ID: top-papers/top-papers-graph-experts-data
+    - HF_DATASET_SPLIT: validation
+    - BASE_MODEL: Qwen/Qwen2.5-VL-7B-Instruct
+    - OUT_PREFIX: hf_top_papers_qwen25vl_7b
+    - BUDGET_RUB: 100000
+    - G2_2_RUB_PER_HOUR: 1085.76
+    - MAX_SFT_STEPS: 180
+    - MAX_GRPO_STEPS: 80
+    - DATA_TIMEOUT_HOURS: 4
+    - SFT_TIMEOUT_HOURS: 30
+    - GRPO_TIMEOUT_HOURS: 45
+    - TOKENIZERS_PARALLELISM: "false"
+    - PYTHONUNBUFFERED: "1"
+
+inputs:
+  - experiments/vlm_finetuning/
+  - data/
+  - examples/
+
+outputs:
+  - data/derived/hf_top_papers_graph_experts/summary.json
+  - data/derived/hf_top_papers_graph_experts/sft_train.jsonl
+  - data/derived/hf_top_papers_graph_experts/sft_eval.jsonl
+  - data/derived/hf_top_papers_graph_experts/grpo_train.jsonl
+  - data/derived/hf_top_papers_graph_experts/grpo_eval.jsonl
+  - outputs/hf_top_papers_qwen25vl_7b_sft_lora.tar.gz
+  - outputs/hf_top_papers_qwen25vl_7b_grpo_lora.tar.gz
+  - reports/hf_top_papers_qwen25vl_7b_datasphere_reports.tar.gz
+  - reports/hf_top_papers_qwen25vl_7b_datasphere/budget_plan.json
+  - reports/hf_top_papers_qwen25vl_7b_datasphere/final_summary.json
+  - reports/hf_top_papers_qwen25vl_7b_datasphere/artifact_manifest.txt
+
+cloud-instance-types:
+  - g2.2
+
+working-storage:
+  type: SSD
+  size: 1024GB
+
+graceful-shutdown:
+  signal: SIGTERM
+  timeout: 3600s
