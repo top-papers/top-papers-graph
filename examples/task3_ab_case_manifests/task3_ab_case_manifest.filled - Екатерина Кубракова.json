@@ -1,0 +1,404 @@
+{
+  "schema_version": "task3_ab_case_manifest_v1",
+  "generated_at": "2026-04-27T14:02:30Z",
+  "experiment_meta": {
+    "topic": "Использование агентов на больших языковых моделях (LLM) для моделирования влияния поведенческих предубеждений (bias) на динамику фондового рынка.",
+    "submission_id": "екатерина-александровна-кубракова__8ec4fdad1a",
+    "creator_id": "Екатерина Александровна Кубракова",
+    "cutoff_year": "2026",
+    "review_goal": "Surface VLM differences on multimodal-hard and temporal-hard Task 3 cases."
+  },
+  "strata_targets": {
+    "multimodal_hard": 7,
+    "temporal_hard": 3,
+    "easy_control": 2
+  },
+  "error_taxonomy": [
+    "missed_visual_fact",
+    "wrong_evidence_linkage",
+    "needs_time_fix",
+    "hallucinated_visual_inference"
+  ],
+  "cases": [
+    {
+      "case_id": "CASE-001",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "\"AI Agents Simulate Behavioral Biases in Financial Markets\"",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "Fig.4",
+      "creator_prompt": "Сравните, насколько правильно каждый VLM извлекает из Figure 4 ключевые параметры LLM-агентов (уровни bias, типы personality) и связывает их с описанными в тексте рыночными исходами (пузыри, крахи).",
+      "creator_rationale": "Baseline VLM часто пропускает корреляцию между bias и динамикой цены, в то время как tuned VLM должен точно извлекать все числовые значения из графика и captions, правильно интерпретируя поведенческие эффекты.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "bubble_start",
+        "premise_contains": "LLM agents with personality",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-002",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "\"AI Agents Simulate Behavioral Biases in Financial Markets\"",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "Fig.5",
+      "creator_prompt": "Сравните, как каждый VLM определяет временные рамки критических изменений на рынке (points of inflection), правильно ли привязывает фазы роста/падения к конкретным таймстэмпам.",
+      "creator_rationale": "Baseline VLM часто игнорирует временные метки на графике или неправильно связывает событие market_crash с предшествующими показателями bias; tuned VLM должен точно распознавать временные последовательности и их влияние на динамику",
+      "review_focus": [
+        "temporal",
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "LLM agents with personality",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-003",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "easy_control",
+      "paper_title": "\"AI Agents Simulate Behavioral Biases in Financial Markets",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "page",
+      "page_hint": "p.8",
+      "creator_prompt": "Сравните, правильно ли каждый VLM определяет определение 'herd mentality' и его проявление в росте VWAP.",
+      "creator_rationale": "Этот кейс прост: информация о 'herd mentality' явно дана на странице 8, и корреляция с VWAP доступна в Table 2. Ошибки здесь маловероятны, но помогают проверить базовое понимание текста.",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "herd mentality",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-004",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Markets\"",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "table",
+      "page_hint": "Table 1",
+      "creator_prompt": "Сравните, сколько типов personality настроено в агентах и какие именно bias (overconfidence, loss_aversion, dissonance) им назначены.",
+      "creator_rationale": "Baseline VLM может пропустить часть bias из-за сложной структуры таблицы, а tuned VLM должен точно извлечь все соответствия.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "loss_aversion",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-005",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Markets",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "figure",
+      "page_hint": "Fig.6",
+      "creator_prompt": "Сравните, как каждый VLM связывает усиление 'herding' и 'overconfidence' с началом пузыря.",
+      "creator_rationale": "Этот кейс проверяет способность VLM к causal-temporal reasoning; ошибки наиболее вероятны именно в неверном понимании последовательности bias → рыночный пузырь",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "herding",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-006",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Market",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "Fig.3",
+      "creator_prompt": "Сравните, насколько точно каждый VLM извлекает из Figure 3 значения VWAP и trade volume на разных фазах пузыря и связывает их с bias-параметрами агентов",
+      "creator_rationale": "Baseline VLM теряет часть числовых меток и неверно связывает VWAP с типом bias (например, приписывает рост VWAP 'loss aversion', хотя из графика и caption следует 'overconfidence'). Tuned VLM должен точно распознать обе корреляции.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "VWAP",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-007",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Markets",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "table",
+      "page_hint": "Table 2",
+      "creator_prompt": "Сравните, как каждый VLM интерпретирует данные Table 2: какой bias (overconfidence, loss aversion, dissonance) сильнее всего коррелирует с аномальным ростом VWAP.",
+      "creator_rationale": "Baseline VLM часто пропускает столбец с доверительными интервалами и ошибается в ранжировании bias. Tuned VLM должен точно извлечь все числовые данные и правильно определить ведущий bias.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "highest correlation",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-008",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Markets",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "figure",
+      "page_hint": "Fig.2",
+      "creator_prompt": "Сравните, сколько типов personality настроено в агентах (из Figure 2) и какие bias к ним привязаны",
+      "creator_rationale": "Baseline VLM может пропустить часть bias из-за сложной визуализации схемы личности агента. Tuned VLM должен точно извлечь все 5 типов и их bias.",
+      "review_focus": [
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "bias_mapping",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-009",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Market",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "figure",
+      "page_hint": "Fig.6",
+      "creator_prompt": "Сравните, как каждый VLM определяет момент перехода 'herding' → 'overconfidence' по временной шкале и связывает его с рыночным пузырём",
+      "creator_rationale": "Baseline VLM часто путает порядок событий (например, ставит пузырь до усиления overconfidence). Tuned VLM должен выстроить правильную causal-temporal последовательность",
+      "review_focus": [
+        "temporal",
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "pre-bubble",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-010",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Markets",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "table",
+      "page_hint": "Table 3",
+      "creator_prompt": "Сравните, как каждый VLM определяет временную задержку между ростом bias и проявлением рыночного эффекта (пузырь/крах) из Table 3.",
+      "creator_rationale": "Здесь важно именно temporal latency: baseline VLM часто игнорирует столбец с временными интервалами. Tuned VLM должен точно извлечь все временные метки и построить sequence correctly.",
+      "review_focus": [
+        "temporal"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "lag",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-011",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Markets",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "page",
+      "page_hint": "p.5",
+      "creator_prompt": "Сравните, правильно ли каждый VLM определяет три основных bias, перечисленных в явном виде на странице 5.",
+      "creator_rationale": "Этот кейс — простой контроль: bias явно перечислены",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "overconfidence",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-012",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "AI Agents Simulate Behavioral Biases in Financial Markets",
+      "paper_id": "10.1007/s42001-026-00465-4",
+      "year": "2026",
+      "evidence_kind": "page",
+      "page_hint": "p.10",
+      "creator_prompt": "Сравните, правильно ли каждый VLM определяет, какой тип личности агента (conservative / aggressive) привёл к loss aversion",
+      "creator_rationale": "Информация дана прямо в тексте. Проверяет базовое извлечение явного факта.",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "conservative",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    }
+  ]
+}

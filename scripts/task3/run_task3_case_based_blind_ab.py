@@ -153,7 +153,7 @@ def main() -> int:
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
         os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
-    from scireason.task3_hypothesis_bundle import prepare_task3_hypothesis_bundle
+    from scireason.task3_hypothesis_generation import prepare_task3_hypothesis_bundle
     from scireason.task3_ab_case_manifest import build_task3_case_based_blind_review_package, build_task3_case_based_expert_bundle
 
     out_dir = args.out_dir.resolve()

@@ -1,0 +1,409 @@
+{
+  "schema_version": "task3_ab_case_manifest_v1",
+  "generated_at": "2026-05-08T11:23:40Z",
+  "experiment_meta": {
+    "topic": "Adaptive gradient optimization methods for training LLM",
+    "submission_id": "vasin_artem_aleksandrovich__0cf7f9ceca",
+    "creator_id": "Артем Васин Александрович",
+    "cutoff_year": "2026",
+    "review_goal": "Surface VLM differences on multimodal-hard and temporal-hard Task 3 cases."
+  },
+  "strata_targets": {
+    "multimodal_hard": 7,
+    "temporal_hard": 3,
+    "easy_control": 2
+  },
+  "error_taxonomy": [
+    "missed_visual_fact",
+    "wrong_evidence_linkage",
+    "needs_time_fix",
+    "hallucinated_visual_inference"
+  ],
+  "cases": [
+    {
+      "case_id": "CASE-001",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "MARS: Unleashing the Power of Variance Reduction for Training Large Models",
+      "paper_id": "arxiv:2411.10438",
+      "year": "2024",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "fig. 2, Tab. 1,",
+      "creator_prompt": "Выявить, в какой из задач GPT-2 (Рис. 2) MARS дает наибольший относительный выигрыш в perplexity по сравнению с AdamW, и не перепутать его с табличными результатами ImageNet (Таб. 1).",
+      "creator_rationale": "Ключевой факт преимущества MARS разнесен по нескольким рисункам с кривыми обучения и таблицам с числовыми значениями. Базовая модель может упустить визуальный тренд или неверно привязать выигрыш к конкретной задаче.",
+      "review_focus": [
+        "evidence",
+        "visual_fact",
+        "overall"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "MARS vs AdamW advantage",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-002",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "The AdEMAMix Optimizer: Better, Faster, Older",
+      "paper_id": "arxiv:2409.03137",
+      "year": "2024",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "fig. 2, 3, 6, Tab. 2",
+      "creator_prompt": "Найти на Рис. 6 сравнение AdEMAMix и AdamW по скорости забывания (forgetting) и определить, на каком количестве токенов преимущество становится явным.",
+      "creator_rationale": "График демонстрирует динамический процесс (забывание со временем). Ключевой факт — это форма кривых и точка их расхождения, что требует анализа тренда, а не изолированного значения.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "AdEMAMix forgetting curve",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-003",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "AdaRankGrad: Adaptive Gradient-Rank and Moments for Memory-Efficient LLMs Training and Fine-Tuning",
+      "paper_id": "arxiv:2410.17881",
+      "year": "2024",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "fig. 3, Tab. 2",
+      "creator_prompt": "Сравнить значения точности и потребления памяти GPU для GPT-2 из Таблицы 2 при full fine-tuning, LoRA и AdaRankGrad.",
+      "creator_rationale": "Таблица содержит конкурирующие числовые метрики. Базовая модель может пропустить числовой факт или неверно интерпретировать trade-off между точностью и памятью.",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "GPU memory vs accuracy trade-off",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-004",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "A Self-Attentive Meta-Optimizer with Group-Adaptive Learning Rates and Weight Decay",
+      "paper_id": "arxiv:2605.04055",
+      "year": "2026",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "fig. 2, 3, Tab. 3, 4",
+      "creator_prompt": "Определить по Рис. 3, на какой задаче (языковое моделирование, машинный перевод, классификация) MetaAdamW показывает максимальное и минимальное ускорение сходимости относительно AdamW.",
+      "creator_rationale": "На рисунке совмещены кривые сходимости для разных задач. Требуется сравнить визуальные тренды и сделать вывод о вариативности преимущества.",
+      "review_focus": [
+        "evidence",
+        "visual_fact",
+        "overall"
+      ],
+      "expected_error_modes": [
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "MetaAdamW convergence speed",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-005",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Adaptive Gradient Methods at the Edge of Stability",
+      "paper_id": "arxiv:2404.01864",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "fig. 1, 3, 6, 7",
+      "creator_prompt": "Проанализировать Рис. 7 (SGD vs. Adam на CIFAR-10) и описать, как меняется ландшафт потерь (loss landscape) в процессе обучения у Adam.",
+      "creator_rationale": "Рисунок визуализирует эволюцию ландшафта — сложный визуальный паттерн. Ключевой факт — это изменение характеристик шума и формы поверхности, а не одно конкретное значение.",
+      "review_focus": [
+        "visual_fact",
+        "temporal"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "CIFAR-10 loss landscape",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-006",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Revisiting the Initial Steps in Adaptive Gradient Descent Optimization",
+      "paper_id": "arxiv:2412.00374",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "fig. 1, 2, 3",
+      "creator_prompt": "По Рис. 2 и 3 определить, как разная инициализация второго момента (data-driven vs random) в Adam влияет на стабильность потерь на ранних итерациях обучения Transformer.",
+      "creator_rationale": "Графики loss на ранней стадии обучения (первые 1000 шагов) содержат ключевую информацию о стабильности, которая может быть упущена при беглом взгляде.",
+      "review_focus": [
+        "evidence",
+        "visual_fact",
+        "temporal"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "first 1000 iterations loss",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-007",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Adaptive Gradient Methods at the Edge of Stability",
+      "paper_id": "arxiv:2404.01714",
+      "year": "2025",
+      "evidence_kind": "figure",
+      "page_hint": "Fig. 1, 2, 3, 4, 5, 6, 7, 8",
+      "creator_prompt": "Определить по совокупности рисунков 1–8, какие архитектуры и датасеты дают CG-like-Adam наибольшее преимущество перед Adam в точности и скорости сходимости",
+      "creator_rationale": "Статья содержит 13 рисунков — кривые обучения, сравнение точности и визуализацию градиентов. Ключевые факты разбросаны по разным задачам (CIFAR-10/100) и требуют сопоставления визуальной информации из нескольких экспериментов.",
+      "review_focus": [
+        "evidence",
+        "visual_fact",
+        "temporal"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "CIFAR-10/100 experiments",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-008",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Interpreting Adaptive Gradient Methods by Parameter Scaling for Learning-Rate-Free Optimization",
+      "paper_id": "",
+      "year": "",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "Table 1, 2, Fig. 1",
+      "creator_prompt": "По рис. 1 объяснить, как меняется масштаб параметров (parameter scaling) в процессе обучения нейронной сети и как это связано с адаптивностью градиентного метода.",
+      "creator_rationale": "График демонстрирует фазовый переход в масштабировании параметров. Ключевой факт — изменение характера тренда, которое требует временного анализа.",
+      "review_focus": [
+        "temporal"
+      ],
+      "expected_error_modes": [
+        "hallucinated_visual_inference"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "adaptive scaling behavior",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-009",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Towards Simple and Provable Parameter-Free Adaptive Gradient Methods",
+      "paper_id": "arxiv:2412.19444",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "Fig. 1, 2",
+      "creator_prompt": "По рис. 1, 2 сравнить траектории нормы градиента у предложенных AdaGrad++ и Adam++ с их оригинальными версиями на задаче логистической регрессии и ResNet-18.",
+      "creator_rationale": "Ключевой факт — сравнение кривых сходимости. Без внимания к легенде и масштабу осей можно сделать неверный вывод о том, какой метод лучше сходится.",
+      "review_focus": [
+        "temporal",
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "AdaGrad++ vs Adam++ comparison",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-010",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Can We Remove the Square-Root in Adaptive Gradient Methods? A Second-Order Perspective",
+      "paper_id": "arxiv:2402.03496",
+      "year": "2024",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "Tab. 1, Fig.1, 2",
+      "creator_prompt": "В таблице 1 сравнить результаты AdamW и метода без квадратного корня (NoSqrt) на задаче LRA и объяснить, какая задача является исключением из общего правила.",
+      "creator_rationale": "Таблица содержит компактные, легко поддающиеся количественной оценке данные. Кейс является контрольным, так как задача сводится к простому извлечению и сравнению чисел из таблицы.",
+      "review_focus": [
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "LRA task results",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-011",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "Optimization Methods in Deep Learning: A Comprehensive Overview",
+      "paper_id": "arxiv:2305.16432",
+      "year": "2023",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "Tab. 1,2, Fig. 2, 5",
+      "creator_prompt": "Найти в таблицах 1 и 2 все упомянутые методы оптимизации и сгруппировать их по категориям (адаптивные и неадаптивные).",
+      "creator_rationale": "Задача на простое извлечение и категоризацию информации из таблицы в обзорной статье. Не требует анализа трендов или визуальной интерпретации.",
+      "review_focus": [
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "taxonomy of optimizers",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-012",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "A Survey of Advanced Gradient Methods in Machine Learning",
+      "paper_id": "arxiv:2412.04032",
+      "year": "2024",
+      "evidence_kind": "figure",
+      "page_hint": "Fig. 1",
+      "creator_prompt": "По схематичному рис. 1 перечислить ключевые этапы эволюции градиентных методов, затронутые в обзоре.",
+      "creator_rationale": "Ключевая информация представлена в виде блок-схемы. Задача — извлечь последовательность фактов из визуального паттерна, что является базовым навыком.",
+      "review_focus": [
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "evolution block diagram",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    }
+  ]
+}

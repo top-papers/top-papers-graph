@@ -20,3 +20,9 @@ Task 3 notebook adds:
 - local Hugging Face / Transformers VLM routing and g4f routing
 - offline A/B expert review HTML generation
 - expert artifact ZIP packaging for hypothesis review
+
+## Task 3 HF benchmark uploader
+
+Added `notebooks/top_papers_graph_task3_hf_benchmark_colab.ipynb` for converting Task 3 case manifests from Google Sheets into a VLM generation benchmark dataset and uploading it to `top-papers/top-papers-graph-benchmark`.
+
+See `README_TASK3_HF_BENCHMARK_DATASET_RU.md` for details.

@@ -1,0 +1,408 @@
+{
+  "schema_version": "task3_ab_case_manifest_v1",
+  "generated_at": "2026-04-28T10:48:03Z",
+  "experiment_meta": {
+    "topic": "Spectral effects in different electrodynamic systems",
+    "submission_id": "дмитрии-константинович-высоких__64495d27da",
+    "creator_id": "Дмитрий Константинович Высоких",
+    "cutoff_year": "2026",
+    "review_goal": "Surface VLM differences on multimodal-hard and temporal-hard Task 3 cases."
+  },
+  "strata_targets": {
+    "multimodal_hard": 7,
+    "temporal_hard": 3,
+    "easy_control": 2
+  },
+  "error_taxonomy": [
+    "missed_visual_fact",
+    "wrong_evidence_linkage",
+    "needs_time_fix",
+    "hallucinated_visual_inference"
+  ],
+  "cases": [
+    {
+      "case_id": "CASE-001",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Nonlinear exceptional-point lasing with ab initio Maxwell– Bloch theory",
+      "paper_id": "doi: 10.1063/5.0105963",
+      "year": "2022",
+      "evidence_kind": "figure",
+      "page_hint": "p.2, Fig.1",
+      "creator_prompt": "Сравните, какой вариант лучше извлекает отношение накачек D1 к D2, для которого наблюдаются особые точки",
+      "creator_rationale": "Baseline обычно пропускает численные данные, содержащиеся только на рисунке, а tuned VLM должен определить конкретное соотношение накачек D1 и D2, соответствующее особым точкам",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-002",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Observation of trapped light within the radiation continu-um",
+      "paper_id": "doi: 10.1038/nature12289",
+      "year": "2013",
+      "evidence_kind": "figure",
+      "page_hint": "p.3, Fig.3",
+      "creator_prompt": "Сравните, какой вариант лучше извлекает из рисунка 3 и подписи к нему значения угла и длины волны, соответствующие связанному состоянию в континууме (ССК)",
+      "creator_rationale": "Baseline обычно не извлекает численные данные, содержащиеся только на рисунке, а не в тексте или подписи. В данном случае значение длины волны, соответствующее ССК, присутствует только на рисунке, и tuned VLM должен его определять",
+      "review_focus": [
+        "visual_fact",
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-003",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Reversing the pump depend-ence of a laser at an excep-tional point",
+      "paper_id": "doi: 10.1038/ncomms5034",
+      "year": "2014",
+      "evidence_kind": "figure",
+      "page_hint": "p.4, Fig.2c",
+      "creator_prompt": "Сравните, какой вариант лучше извлекает из рисунка 2c и подписи к нему диапазон значений поля, в котором зависимость интенсивности генерации от поля накачки инвертирована ",
+      "creator_rationale": "Рисунок 2c очень нагружен, присутствует трёхмерный график и двумерная вставка, что затрудняет извлечение информации",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-004",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Ultrasensitive optical absorp-tion in graphene based on bound states in the continu-um",
+      "paper_id": "doi: 10.1038/srep08266",
+      "year": "2015",
+      "evidence_kind": "figure",
+      "page_hint": "p.2, Fig.1",
+      "creator_prompt": "Сравните, какой вариант лучше извлекает из рисунка 1 значения длины волны и волнового вектора (kx), при которых наблюдаются связанные состояния в континууме",
+      "creator_rationale": "Рисунок 1 состоит из шести частей и имеет обширную подпись. Для корректного определения требуется способность tuned VLM сопоставлять подпись с рисунком и извлекать соответствующие данные",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-005",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "multimodal_hard",
+      "paper_title": "Optical hydrogen sensing with high‑Q guided‑mode resonance of ­Al2O3/WO3/Pd nanostructure",
+      "paper_id": "doi: 10.1038/s41598-023-28204-z",
+      "year": "2023",
+      "evidence_kind": "figure",
+      "page_hint": "p.3, Fig.1",
+      "creator_prompt": "Сравните, какой вариант лучше извлекает из рисунка 1 геометрические параметры структуры и материалы, из которых она состоит",
+      "creator_rationale": "Вертикальные и горизонтальные масштабы отмечены на разных частях рисунка, материалы показаны между двумя частями. Такой громоздкий рисунок может быть труден для обработки моделью",
+      "review_focus": [
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-006",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Optical hydrogen sensing with high‑Q guided‑mode resonance of Al2O3/WO3/Pd nanostructure",
+      "paper_id": "doi: 10.1038/s41598-023-28204-z",
+      "year": "2023",
+      "evidence_kind": "figure",
+      "page_hint": "p.5, Fig.4",
+      "creator_prompt": "Сравните, какой вариант лучше извлекает моменты времени (в минутах), в которые подаётся водород в различной концентрации (0, 100, 1000 ppm, ...)",
+      "creator_rationale": "Моменты времени не указаны в подписи, они фигурируют только на изображении, что затрудняет их извлечение",
+      "review_focus": [
+        "temporal",
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-007",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "Nonlinear exceptional-point lasing with ab initio Maxwell– Bloch theory",
+      "paper_id": "doi: 10.1063/5.0105963",
+      "year": "2022",
+      "evidence_kind": "figure",
+      "page_hint": "p.2, Fig.1",
+      "creator_prompt": "Сравните, какой вариант лучше извлекает из рисунка 1 отношение накачек D1/D2, при котором наблюдается фазовый переход между PT-симметричным и PT-несимметричным состояниями",
+      "creator_rationale": "На рисунке присутствуют данные о фазовом изменении, которые модель должна уметь извлекать",
+      "review_focus": [
+        "temporal",
+        "evidence",
+        "visual_fact"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "missed_visual_fact"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-008",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "easy_control",
+      "paper_title": "Bloch surface eigenstates within the radiation continuum",
+      "paper_id": "doi: 10.1038/lsa.2013.40",
+      "year": "2013",
+      "evidence_kind": "mixed",
+      "page_hint": "p.2, Fig.1",
+      "creator_prompt": "Сравнить, какой вариант точнее описывает структуру, в которой авторы предлагают наблюдать связанное состояние в континууме",
+      "creator_rationale": "В тексте описано два варианта структуры, лишь один из которых позволяет наблюдать связанное состояние в континууме (в котором поверхностные цилиндры имеют увеличенный радиус). Модель должна уметь чётко описывать именно этот вариант структуры",
+      "review_focus": [
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "-",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-009",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "",
+      "paper_id": "",
+      "year": "",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "",
+      "creator_prompt": "",
+      "creator_rationale": "",
+      "review_focus": [
+        "temporal",
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-010",
+      "enabled": true,
+      "primary_endpoint": true,
+      "stratum": "temporal_hard",
+      "paper_title": "",
+      "paper_id": "",
+      "year": "",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "",
+      "creator_prompt": "",
+      "creator_rationale": "",
+      "review_focus": [
+        "temporal",
+        "evidence"
+      ],
+      "expected_error_modes": [
+        "needs_time_fix",
+        "wrong_evidence_linkage"
+      ],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-011",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "",
+      "paper_id": "",
+      "year": "",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "",
+      "creator_prompt": "",
+      "creator_rationale": "",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    },
+    {
+      "case_id": "CASE-012",
+      "enabled": true,
+      "primary_endpoint": false,
+      "stratum": "easy_control",
+      "paper_title": "",
+      "paper_id": "",
+      "year": "",
+      "evidence_kind": "figure_or_table",
+      "page_hint": "",
+      "creator_prompt": "",
+      "creator_rationale": "",
+      "review_focus": [
+        "overall"
+      ],
+      "expected_error_modes": [],
+      "match": {
+        "candidate_signature": "",
+        "candidate_source_contains": "",
+        "candidate_predicate_contains": "",
+        "candidate_target_contains": "",
+        "hypothesis_title_contains": "",
+        "premise_contains": "",
+        "mechanism_contains": "",
+        "time_scope_contains": "",
+        "rank_hint": ""
+      },
+      "notes": ""
+    }
+  ]
+}
