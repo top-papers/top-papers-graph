@@ -10,9 +10,6 @@ env:
     type: manual
     version: 3.10.13
     requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
-    root-path:
-      - experiments/vlm_finetuning/scripts/build_vlm_sft_dataset.py
-      - experiments/vlm_finetuning/scripts/train_vlm_sft.py
     local-paths:
       - experiments/vlm_finetuning/
       - data/
@@ -32,7 +29,8 @@ cloud-instance-types:
   - g2.1
 
 working-storage:
-  size: 250GB
+  type: SSD
+  size: 250Gb
 
 graceful-shutdown:
   signal: SIGTERM

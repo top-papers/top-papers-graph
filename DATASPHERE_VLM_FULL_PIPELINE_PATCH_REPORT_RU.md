@@ -21,6 +21,9 @@
 - `experiments/vlm_finetuning/datasphere/HF_TOP_PAPERS_FULL_PIPELINE_RU.md`  
   Подробная инструкция по запуску и параметрам.
 
+- `experiments/vlm_finetuning/datasphere/TUTORIAL_FULL_EXPERIMENT_RU.md`  
+  Пошаговый tutorial для полного цикла эксперимента: подготовка CLI, preflight, запуск, мониторинг, скачивание outputs и troubleshooting.
+
 ### Измененные файлы
 
 - `experiments/vlm_finetuning/scripts/train_vlm_sft.py`  
@@ -43,7 +46,7 @@
 - модель: `Qwen/Qwen2.5-VL-7B-Instruct`;
 - обучение: LoRA SFT → GRPO/RL поверх SFT adapter;
 - DataSphere config: `g2.2`;
-- диск: `working-storage.type=SSD`, `working-storage.size=1024GB`;
+- диск: `working-storage.type=SSD`, `working-storage.size=1024Gb`;
 - бюджетный guard: phase timeouts + short max steps + TTL 1 день после завершения;
 - outputs скачиваются локально через `datasphere project job download-files --id <job_id>`.
 
@@ -61,3 +64,14 @@
 - dry-run локального launcher.
 
 Полный запуск обучения не выполнялся, потому что в текущем контейнере нет доступа к DataSphere/GPU и не установлены runtime-зависимости `datasets/torch/trl`.
+
+## Дополнительные исправления совместимости
+
+- `datasphere/bin/common.sh` исправлен так, чтобы переходить в корень репозитория, а не в каталог `experiments/`.
+- DataSphere YAML configs больше не смешивают `root-path` и `local-paths`.
+- `working-storage` во всех configs приведен к явному `type: SSD` и размерам `...Gb`.
+- `run_full_pipeline.py` стримит длинные логи и хранит только ограниченный tail в памяти.
+- SFT/GRPO normalizers устойчиво обрабатывают `image`, `images`, `messages`, `chat.messages` и multimodal blocks.
+
+См. также `DATASPHERE_VLM_JOBS_FIX_REPORT_RU.md`.
+

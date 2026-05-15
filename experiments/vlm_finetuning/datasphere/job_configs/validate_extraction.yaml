@@ -10,8 +10,6 @@ env:
     type: manual
     version: 3.10.13
     requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
-    root-path:
-      - experiments/vlm_finetuning/scripts/validate_extraction_run.py
     local-paths:
       - experiments/vlm_finetuning/
       - data/
@@ -30,7 +28,8 @@ cloud-instance-types:
   - c1.8
 
 working-storage:
-  size: 100GB
+  type: SSD
+  size: 100Gb
 
 graceful-shutdown:
   signal: SIGTERM

@@ -79,7 +79,7 @@ package_artifacts() {
   [ -d "$GRPO_DIR" ] && tar -czf "outputs/${OUT_PREFIX}_grpo_lora.tar.gz" "$GRPO_DIR"
   tar -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" 2>/dev/null
 }
-trap package_artifacts EXIT
+trap 'status=$?; package_artifacts; exit $status' EXIT
 
 run_timeout "$DATA_TIMEOUT_HOURS" python experiments/vlm_finetuning/scripts/build_hf_graph_experts_dataset.py \
   --dataset-id "$DATASET_ID" \

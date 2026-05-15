@@ -6,10 +6,9 @@ import json
 import os
 import re
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List
+from typing import List, MutableMapping
 
 DEFAULT_CONFIG = Path("experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_grpo_full_g2_2.yaml")
 JOB_ID_PATTERNS = [
@@ -18,19 +17,54 @@ JOB_ID_PATTERNS = [
 ]
 
 
-def run(cmd: List[str], log_file: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: List[str],
+    log_file: Path | None = None,
+    check: bool = True,
+    job_id_sink: MutableMapping[str, str | None] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a CLI command while streaming output and keeping only a bounded tail.
+
+    DataSphere job logs can be very long. Capturing the whole stdout in memory
+    makes long training jobs fragile, so this helper streams stdout to the
+    terminal and log file as it arrives, while retaining a tail that is enough
+    for diagnostics and job id parsing.
+    """
     print("+ " + " ".join(cmd), flush=True)
-    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    log_handle = None
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        with log_file.open("a", encoding="utf-8") as f:
-            f.write("\n$ " + " ".join(cmd) + "\n")
-            f.write(proc.stdout or "")
-    if proc.stdout:
-        print(proc.stdout, end="", flush=True)
-    if check and proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, cmd, output=proc.stdout)
-    return proc
+        log_handle = log_file.open("a", encoding="utf-8")
+        log_handle.write("\n$ " + " ".join(cmd) + "\n")
+        log_handle.flush()
+
+    tail: List[str] = []
+    max_tail_lines = 2000
+    proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1)
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            if log_handle:
+                log_handle.write(line)
+                log_handle.flush()
+            tail.append(line)
+            if len(tail) > max_tail_lines:
+                del tail[: len(tail) - max_tail_lines]
+            if job_id_sink is not None and not job_id_sink.get("job_id"):
+                parsed = parse_job_id(line)
+                if parsed:
+                    job_id_sink["job_id"] = parsed
+        returncode = proc.wait()
+    finally:
+        if log_handle:
+            log_handle.close()
+    stdout_tail = "".join(tail)
+    if job_id_sink is not None and not job_id_sink.get("job_id"):
+        job_id_sink["job_id"] = parse_job_id(stdout_tail)
+    if check and returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd, output=stdout_tail)
+    return subprocess.CompletedProcess(cmd, returncode, stdout_tail)
 
 
 def parse_job_id(text: str) -> str | None:
@@ -97,20 +131,22 @@ def main() -> None:
 
     ensure_datasphere_cli()
     job_id = None
+    job_id_sink = {"job_id": None}
     try:
-        proc = run(execute_cmd, log_file=log_file, check=True)
-        job_id = parse_job_id(proc.stdout or "")
+        proc = run(execute_cmd, log_file=log_file, check=True, job_id_sink=job_id_sink)
+        job_id = job_id_sink.get("job_id") or parse_job_id(proc.stdout or "")
         manifest["job_id"] = job_id
         manifest["status"] = "execute_finished"
         write_manifest(manifest_file, manifest)
     except KeyboardInterrupt:
         manifest["status"] = "interrupted"
         write_manifest(manifest_file, manifest)
+        job_id = job_id or job_id_sink.get("job_id")
         if job_id:
             run(["datasphere", "project", "job", "cancel", "--id", job_id], log_file=log_file, check=False)
         raise
     except subprocess.CalledProcessError as exc:
-        job_id = parse_job_id(exc.output or "")
+        job_id = job_id_sink.get("job_id") or parse_job_id(exc.output or "")
         manifest["job_id"] = job_id
         manifest["status"] = "execute_failed"
         write_manifest(manifest_file, manifest)

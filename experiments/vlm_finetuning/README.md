@@ -67,6 +67,7 @@ A complete DataSphere Jobs pipeline was added for `top-papers/top-papers-graph-e
 - managed local CLI launcher: `datasphere/run_full_pipeline.py`
 - HF dataset builder: `scripts/build_hf_graph_experts_dataset.py`
 - detailed Russian guide: `datasphere/HF_TOP_PAPERS_FULL_PIPELINE_RU.md`
+- end-to-end tutorial: `datasphere/TUTORIAL_FULL_EXPERIMENT_RU.md`
 
 Run:
 
@@ -76,3 +77,7 @@ bash experiments/vlm_finetuning/datasphere/launch_examples.sh hf-full-managed
 ```
 
 The job uses DataSphere `g2.2` (2 × A100 80 GB) and 1 TB SSD working storage, trains an SFT LoRA adapter and then a GRPO/RL adapter, downloads declared outputs locally, and sets the job data TTL to 1 day.
+
+## DataSphere Jobs fixes
+
+This archive also includes compatibility fixes for DataSphere Jobs configs and launchers: correct repository root resolution in shell wrappers, `local-paths` without conflicting `root-path`, explicit SSD working storage sizes, robust VLM image/message normalization, and a streaming managed launcher for long job logs. See `../../DATASPHERE_VLM_JOBS_FIX_REPORT_RU.md` for the patch report.

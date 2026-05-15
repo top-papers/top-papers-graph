@@ -52,7 +52,7 @@ cloud-instance-types:
 
 working-storage:
   type: SSD
-  size: 1024GB
+  size: 1024Gb
 
 graceful-shutdown:
   signal: SIGTERM

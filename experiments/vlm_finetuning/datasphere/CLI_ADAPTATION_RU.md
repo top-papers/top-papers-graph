@@ -18,6 +18,7 @@
 - `bin/*.sh` — shell entrypoints, которые вызываются внутри jobs.
 - `requirements.txt` — training/runtime стек под TRL + PEFT + Qwen-VL.
 - `launch_examples.sh` — удобная оболочка над CLI-командами.
+- `TUTORIAL_FULL_EXPERIMENT_RU.md` — полный пошаговый tutorial для HF SFT+GRPO эксперимента.
 
 ## Базовая последовательность
 
@@ -50,3 +51,10 @@ bash experiments/vlm_finetuning/datasphere/launch_examples.sh validate
 2. `student-distill-4b` ожидает заранее подготовленный silver corpus `data/derived/training/vlm_distill_train.jsonl`.
 3. DPO job лучше запускать после появления реальных expert preference pairs; пустой preference dataset не даёт meaningful run.
 4. Для длинных запусков полезно скачивать outputs и продлевать TTL данных через CLI.
+
+## Совместимость с DataSphere Jobs config
+
+В job configs намеренно используется `env.python.local-paths` без `root-path`: эти поля нельзя задавать одновременно. Runtime entrypoints из `bin/*.sh` стартуют через `bin/common.sh`, который переходит в корень репозитория, поэтому относительные пути к `experiments/`, `data/`, `examples/`, `outputs/` и `reports/` разрешаются предсказуемо.
+
+`working-storage` во всех configs задан явно как SSD с размером в формате `...Gb`; для полного HF pipeline используется `1024Gb`.
+

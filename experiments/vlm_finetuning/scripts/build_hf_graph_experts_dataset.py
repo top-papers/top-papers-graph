@@ -150,12 +150,15 @@ def main() -> None:
     for row_idx in indices:
         row = ds[row_idx]
         label_id, label_text = normalize_label(row.get("label"), label_names)
-        rel_image = Path("data/derived/hf_top_papers_graph_experts") / "images" / f"sample_{row_idx:06d}.jpg"
-        abs_image = Path.cwd() / rel_image
+        abs_image = image_dir / f"sample_{row_idx:06d}.jpg"
         save_image(row["image"], abs_image)
+        try:
+            rel_image = abs_image.relative_to(Path.cwd()).as_posix()
+        except ValueError:
+            rel_image = abs_image.as_posix()
         sample_id = f"hf_top_papers_graph_experts:{args.split}:{row_idx:06d}"
-        sft_row = make_sft_record(sample_id, rel_image.as_posix(), label_text, label_id, args.prompt)
-        grpo_row = make_grpo_record(sample_id, rel_image.as_posix(), label_text, label_id, args.prompt)
+        sft_row = make_sft_record(sample_id, rel_image, label_text, label_id, args.prompt)
+        grpo_row = make_grpo_record(sample_id, rel_image, label_text, label_id, args.prompt)
         counts[label_text] += 1
         if row_idx in eval_ids:
             sft_eval.append(sft_row)

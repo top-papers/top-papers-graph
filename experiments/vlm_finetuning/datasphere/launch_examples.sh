@@ -11,7 +11,16 @@ shift || true
 PROJECT_ID="${DATASPHERE_PROJECT_ID:-}"
 need_project() {
   if [ -z "$PROJECT_ID" ]; then
-    echo "Set DATASPHERE_PROJECT_ID before running this command"
+    echo "Set DATASPHERE_PROJECT_ID before running this command" >&2
+    exit 2
+  fi
+}
+
+need_args() {
+  local expected="$1"
+  shift
+  if [ "$#" -lt "$expected" ]; then
+    echo "Action '$ACTION' expects at least $expected argument(s)" >&2
     exit 2
   fi
 }
@@ -58,18 +67,23 @@ case "$ACTION" in
     datasphere project job list -p "$PROJECT_ID"
     ;;
   get)
+    need_args 1 "$@"
     datasphere project job get --id "$1"
     ;;
   attach)
+    need_args 1 "$@"
     datasphere project job attach --id "$1"
     ;;
   cancel)
+    need_args 1 "$@"
     datasphere project job cancel --id "$1"
     ;;
   ttl)
+    need_args 2 "$@"
     datasphere project job set-data-ttl --id "$1" --days "$2"
     ;;
   download)
+    need_args 1 "$@"
     datasphere project job download-files --id "$1"
     ;;
   *)

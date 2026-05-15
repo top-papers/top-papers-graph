@@ -11,7 +11,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
-from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+try:
+    from peft import PeftModel
+except ImportError:  # lets lightweight regression tests stub peft without a full install
+    PeftModel = None
 from transformers import (
     AutoProcessor,
     AutoTokenizer,
@@ -399,7 +403,13 @@ def _resolve_image_ref(value, base_dir: Path):
         return value
     path = Path(value)
     if not path.is_absolute():
-        path = (base_dir / path).resolve()
+        # Prefer paths that are already valid from the current job working
+        # directory (the repository root in our DataSphere wrappers). If not
+        # present there, resolve relative to the JSONL/config file directory.
+        if path.exists():
+            path = path.resolve()
+        else:
+            path = (base_dir / path).resolve()
     return str(path.as_posix())
 
 
@@ -630,6 +640,8 @@ def main() -> None:
         model = prepare_model_for_kbit_training(model)
         
     if args.sft_adapter_path:
+        if PeftModel is None:
+            raise RuntimeError('peft.PeftModel is required for --sft-adapter-path; install a full peft package.')
         model = PeftModel.from_pretrained(model, str(args.sft_adapter_path), is_trainable=True)
     elif args.use_lora or args.qlora:
         model = get_peft_model(

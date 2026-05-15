@@ -19,6 +19,13 @@
 - 7B обычно дает заметно лучший запас качества, чем 3B, но остается дешевле и стабильнее 30B+ сценариев;
 - SFT + короткий GRPO лучше соответствует бюджету 100 000 ₽, чем full fine-tuning.
 
+
+## Полный пошаговый tutorial
+
+Для запуска от начала до конца используйте отдельный пошаговый документ:
+
+- `TUTORIAL_FULL_EXPERIMENT_RU.md` — подготовка DataSphere CLI, preflight-проверки, запуск, мониторинг, скачивание outputs и troubleshooting.
+
 ## Основной запуск
 
 ```bash
@@ -50,7 +57,7 @@ cloud-instance-types:
 
 working-storage:
   type: SSD
-  size: 1TB
+  size: 1024Gb
 ```
 
 `g2.2` — это конфигурация DataSphere с 56 vCPU, 2 GPU A100, 238 GB RAM и 160 GB VRAM суммарно.
@@ -99,3 +106,11 @@ DataSphere Jobs выделяет вычислительную ВМ на врем
 - дешевле/быстрее: `MAX_SFT_STEPS=80`, `MAX_GRPO_STEPS=30`, `BASE_MODEL=Qwen/Qwen2.5-VL-3B-Instruct`;
 - качественнее: `MAX_SFT_STEPS=300`, `MAX_GRPO_STEPS=120`, но следите за budget/timeouts;
 - если нужен только SFT, временно закомментируйте GRPO-блок в `bin/run_hf_top_papers_sft_grpo_full.sh`.
+
+## Важные совместимость-фиксы
+
+- Job configs используют `local-paths` без одновременного `root-path`, потому что эти параметры несовместимы в DataSphere config.
+- Все runtime wrappers стартуют из корня репозитория через `bin/common.sh`, поэтому команды вида `python experiments/vlm_finetuning/...` работают одинаково локально и внутри job.
+- `working-storage` задан как `type: SSD` и `size: 1024Gb`, что соответствует синтаксису DataSphere config.
+- Managed launcher стримит длинные логи job в `reports/datasphere_cli_runs/`, не удерживая весь stdout в памяти.
+
