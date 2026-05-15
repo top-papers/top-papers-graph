@@ -213,12 +213,12 @@ data/derived/hf_top_papers_graph_experts/sft_train.jsonl
 data/derived/hf_top_papers_graph_experts/sft_eval.jsonl
 data/derived/hf_top_papers_graph_experts/grpo_train.jsonl
 data/derived/hf_top_papers_graph_experts/grpo_eval.jsonl
-outputs/hf_top_papers_qwen25vl_7b_sft_lora.tar.gz
-outputs/hf_top_papers_qwen25vl_7b_grpo_lora.tar.gz
-reports/hf_top_papers_qwen25vl_7b_datasphere_reports.tar.gz
-reports/hf_top_papers_qwen25vl_7b_datasphere/budget_plan.json
-reports/hf_top_papers_qwen25vl_7b_datasphere/final_summary.json
-reports/hf_top_papers_qwen25vl_7b_datasphere/artifact_manifest.txt
+outputs/hf_top_papers_qwen3vl_8b_sft_lora.tar.gz
+outputs/hf_top_papers_qwen3vl_8b_grpo_lora.tar.gz
+reports/hf_top_papers_qwen3vl_8b_datasphere_reports.tar.gz
+reports/hf_top_papers_qwen3vl_8b_datasphere/budget_plan.json
+reports/hf_top_papers_qwen3vl_8b_datasphere/final_summary.json
+reports/hf_top_papers_qwen3vl_8b_datasphere/artifact_manifest.txt
 ```
 
 Managed launcher также пишет локальные файлы в:
@@ -234,8 +234,8 @@ reports/datasphere_cli_runs/
 Основные параметры находятся в `job_configs/hf_top_papers_sft_grpo_full_g2_2.yaml`, секция `env.vars`:
 
 ```yaml
-BASE_MODEL: Qwen/Qwen2.5-VL-7B-Instruct
-OUT_PREFIX: hf_top_papers_qwen25vl_7b
+BASE_MODEL: Qwen/Qwen3-VL-8B-Instruct
+OUT_PREFIX: hf_top_papers_qwen3vl_8b
 BUDGET_RUB: 100000
 G2_2_RUB_PER_HOUR: 1085.76
 MAX_SFT_STEPS: 180
@@ -248,8 +248,8 @@ GRPO_TIMEOUT_HOURS: 45
 Более быстрый smoke-вариант:
 
 ```yaml
-BASE_MODEL: Qwen/Qwen2.5-VL-3B-Instruct
-OUT_PREFIX: hf_top_papers_qwen25vl_3b_smoke
+BASE_MODEL: Qwen/Qwen3-VL-8B-Instruct
+OUT_PREFIX: hf_top_papers_qwen3vl_8b_smoke
 MAX_SFT_STEPS: 40
 MAX_GRPO_STEPS: 10
 SFT_TIMEOUT_HOURS: 8
@@ -318,7 +318,7 @@ working-storage:
   size: 1024Gb
 ```
 
-Для экспериментов с меньшей моделью можно уменьшить storage, но для 7B + кешей HF + чекпойнтов лучше оставить запас.
+Для экспериментов с меньшей моделью можно уменьшить storage, но для Qwen3-VL-8B + кешей HF + чекпойнтов лучше оставить запас.
 
 ### CUDA OOM на SFT или GRPO
 
@@ -340,7 +340,7 @@ GRPO_NUM_GENERATIONS=2
 GRPO_MAX_COMPLETION_LENGTH=32
 ```
 
-Если OOM сохраняется, используйте `Qwen/Qwen2.5-VL-3B-Instruct` или переходите на более крупную GPU-конфигурацию, если она разрешена в вашем community.
+Если OOM сохраняется, сначала уменьшите GRPO-параметры (`GRPO_NUM_GENERATIONS=1`, `GRPO_MAX_COMPLETION_LENGTH=32`), затем временно переключитесь на меньший Qwen3-VL вариант или переходите на более крупную GPU-конфигурацию, если она разрешена в вашем community.
 
 ### `peft.PeftModel is required for --sft-adapter-path`
 
@@ -370,10 +370,10 @@ bash experiments/vlm_finetuning/datasphere/launch_examples.sh download <job_id>
 ## 12. Проверка артефактов после скачивания
 
 ```bash
-ls -lh outputs/*hf_top_papers*qwen25vl*tar.gz
-ls -lh reports/*hf_top_papers*qwen25vl*tar.gz
+ls -lh outputs/*hf_top_papers*qwen3vl*tar.gz
+ls -lh reports/*hf_top_papers*qwen3vl*tar.gz
 python -m json.tool data/derived/hf_top_papers_graph_experts/summary.json | head -80
-python -m json.tool reports/hf_top_papers_qwen25vl_7b_datasphere/final_summary.json | head -120
+python -m json.tool reports/hf_top_papers_qwen3vl_8b_datasphere/final_summary.json | head -120
 ```
 
 Проверка первых JSONL строк:
@@ -402,5 +402,7 @@ PY
 - HF dataset card: https://huggingface.co/datasets/top-papers/top-papers-graph-experts-data
 - TRL SFT Trainer docs: https://huggingface.co/docs/trl/sft_trainer
 - TRL GRPO Trainer docs: https://huggingface.co/docs/trl/grpo_trainer
+- Qwen3-VL-8B-Instruct HF model card: https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct
+- Transformers Qwen3-VL docs: https://huggingface.co/docs/transformers/model_doc/qwen3_vl
 
 Notion guide URL from the task was checked, but returned an unavailable page from this environment. Therefore the executable changes were aligned with official Yandex Cloud documentation and the current repository structure.

@@ -1,0 +1,45 @@
+name: sft_grpo_full_qwen3vl_8b_lora
+stage: sft_then_grpo
+model_id: Qwen/Qwen3-VL-8B-Instruct
+training_method: lora
+train_type: peft
+precision: bf16
+attn_implementation: sdpa
+pipeline:
+  dataset_id: top-papers/top-papers-graph-experts-data
+  dataset_split: validation
+  build_script: experiments/vlm_finetuning/scripts/build_hf_graph_experts_dataset.py
+  sft_entrypoint: experiments/vlm_finetuning/scripts/train_vlm_sft.py
+  grpo_entrypoint: experiments/vlm_finetuning/scripts/train_vlm_grpo.py
+  output_prefix: hf_top_papers_qwen3vl_8b
+sft:
+  max_steps: 180
+  num_train_epochs: 3
+  learning_rate: 1.0e-4
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  save_adapter_only: true
+grpo:
+  max_steps: 80
+  num_train_epochs: 1
+  learning_rate: 2.0e-5
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_generations: 2
+  max_completion_length: 64
+  sft_adapter_path: outputs/hf_top_papers_qwen3vl_8b_sft_lora
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: all-linear
+resources:
+  datasphere_config: g2.2
+  gpu_count: 2
+  expected_gpu_hours_min: 8
+  expected_gpu_hours_max: 20
+  expected_storage_gb: 1024
+notes:
+  - Main full HF top-papers run adapted from Qwen2.5-VL-7B to Qwen3-VL-8B-Instruct.
+  - Keep max_length unset for VLM stages to avoid truncating image tokens.
+  - Use gradient checkpointing and batch size 1 as default memory guardrails.

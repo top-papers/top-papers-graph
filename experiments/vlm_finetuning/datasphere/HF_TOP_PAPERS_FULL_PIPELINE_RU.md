@@ -5,19 +5,19 @@
 1. скачивает датасет `top-papers/top-papers-graph-experts-data` из Hugging Face;
 2. разворачивает изображения в локальные файлы внутри рабочей директории job;
 3. собирает SFT JSONL и GRPO JSONL;
-4. запускает SFT LoRA для `Qwen/Qwen2.5-VL-7B-Instruct`;
+4. запускает SFT LoRA для `Qwen/Qwen3-VL-8B-Instruct`;
 5. запускает GRPO/RL поверх SFT-адаптера с reward за точное совпадение класса;
 6. упаковывает адаптеры, логи, summary и manifest;
 7. при запуске через managed CLI скачивает результаты локально и ставит TTL данных job в 1 день.
 
-## Почему выбран `Qwen/Qwen2.5-VL-7B-Instruct`
+## Почему выбран `Qwen/Qwen3-VL-8B-Instruct`
 
-Для текущего датасета это более практичный выбор, чем большой teacher-run:
+Целевой запуск переведен с `Qwen/Qwen2.5-VL-7B-Instruct` на Qwen3-VL-8B как основной dense Instruct-кандидат:
 
 - датасет небольшой: 389 строк, 32 класса, около 5.76 GB файлов;
-- `g2.2` дает 2 A100 по 80 GB, 56 vCPU и 238 GB RAM, этого достаточно для LoRA/GRPO на 7B;
-- 7B обычно дает заметно лучший запас качества, чем 3B, но остается дешевле и стабильнее 30B+ сценариев;
-- SFT + короткий GRPO лучше соответствует бюджету 100 000 ₽, чем full fine-tuning.
+- `g2.2` дает 2 A100 по 80 GB, 56 vCPU и 238 GB RAM, этого достаточно для LoRA SFT и короткого GRPO на 8B при batch size 1 и gradient checkpointing;
+- Qwen3-VL сохраняет удобный Transformers API (`Qwen3VLForConditionalGeneration` + `AutoProcessor`) и совместим с существующим multimodal JSONL форматом `messages` + `image`/`images`;
+- 8B обычно практичнее 30B+ teacher-run для первого полного цикла: ниже риск OOM, дешевле итерации и проще уложиться в бюджет 100 000 ₽.
 
 
 ## Полный пошаговый tutorial
@@ -86,10 +86,10 @@ DataSphere job outputs:
 - `data/derived/hf_top_papers_graph_experts/sft_eval.jsonl`
 - `data/derived/hf_top_papers_graph_experts/grpo_train.jsonl`
 - `data/derived/hf_top_papers_graph_experts/grpo_eval.jsonl`
-- `outputs/hf_top_papers_qwen25vl_7b_sft_lora.tar.gz`
-- `outputs/hf_top_papers_qwen25vl_7b_grpo_lora.tar.gz`
-- `reports/hf_top_papers_qwen25vl_7b_datasphere_reports.tar.gz`
-- `reports/hf_top_papers_qwen25vl_7b_datasphere/final_summary.json`
+- `outputs/hf_top_papers_qwen3vl_8b_sft_lora.tar.gz`
+- `outputs/hf_top_papers_qwen3vl_8b_grpo_lora.tar.gz`
+- `reports/hf_top_papers_qwen3vl_8b_datasphere_reports.tar.gz`
+- `reports/hf_top_papers_qwen3vl_8b_datasphere/final_summary.json`
 
 ## Закрытие ресурсов
 
@@ -103,7 +103,7 @@ DataSphere Jobs выделяет вычислительную ВМ на врем
 
 Можно менять env-переменные в job config:
 
-- дешевле/быстрее: `MAX_SFT_STEPS=80`, `MAX_GRPO_STEPS=30`, `BASE_MODEL=Qwen/Qwen2.5-VL-3B-Instruct`;
+- дешевле/быстрее: `MAX_SFT_STEPS=80`, `MAX_GRPO_STEPS=30`, `BASE_MODEL=Qwen/Qwen3-VL-8B-Instruct`;
 - качественнее: `MAX_SFT_STEPS=300`, `MAX_GRPO_STEPS=120`, но следите за budget/timeouts;
 - если нужен только SFT, временно закомментируйте GRPO-блок в `bin/run_hf_top_papers_sft_grpo_full.sh`.
 

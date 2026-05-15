@@ -8,7 +8,7 @@ papers for temporal knowledge graph (TKG) construction and downstream hypothesis
 
 - `DESIGN_RU.md` — full training-system design in Russian.
 - `EXPERIMENT_PLAN_RU.md` — validation plan, ablations, and go/no-go criteria.
-- `configs/` — starter configs for SFT, DPO, and optional GRPO.
+- `configs/` — starter configs for SFT, DPO, optional GRPO, and the full `Qwen/Qwen3-VL-8B-Instruct` SFT→GRPO DataSphere run.
 - `schemas/` — JSON schemas for multimodal SFT and preference data.
 - `scripts/build_vlm_sft_dataset.py` — compile expert trajectories/MM reviews into VLM SFT JSONL.
 - `scripts/build_vlm_preference_dataset.py` — compile expert reviews/corrections into VLM preference JSONL.
@@ -76,7 +76,7 @@ export DATASPHERE_PROJECT_ID=<project_id>
 bash experiments/vlm_finetuning/datasphere/launch_examples.sh hf-full-managed
 ```
 
-The job uses DataSphere `g2.2` (2 × A100 80 GB) and 1 TB SSD working storage, trains an SFT LoRA adapter and then a GRPO/RL adapter, downloads declared outputs locally, and sets the job data TTL to 1 day.
+The job uses DataSphere `g2.2` (2 × A100 80 GB) and 1 TB SSD working storage, trains a Qwen/Qwen3-VL-8B-Instruct SFT LoRA adapter and then a GRPO/RL adapter, downloads declared outputs locally, and sets the job data TTL to 1 day.
 
 ## DataSphere Jobs fixes
 

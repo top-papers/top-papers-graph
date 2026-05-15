@@ -43,7 +43,7 @@
 
 ## Выбранная схема
 
-- модель: `Qwen/Qwen2.5-VL-7B-Instruct`;
+- модель: `Qwen/Qwen3-VL-8B-Instruct`;
 - обучение: LoRA SFT → GRPO/RL поверх SFT adapter;
 - DataSphere config: `g2.2`;
 - диск: `working-storage.type=SSD`, `working-storage.size=1024Gb`;
