@@ -19,6 +19,11 @@ env:
     - HF_DATASET_SPLIT: validation
     - BASE_MODEL: Qwen/Qwen3-VL-8B-Instruct
     - OUT_PREFIX: hf_top_papers_qwen3vl_8b
+    - HF_UPLOAD_AFTER_TRAINING: "1"
+    - HF_REPO_ID: top-papers/Qwen3-VL-8B-Instruct-scireason
+    - HF_REPO_TYPE: model
+    - HF_REVISION: main
+    - HF_UPLOAD_PATH_PREFIX: ""
     - BUDGET_RUB: 100000
     - G2_2_RUB_PER_HOUR: 1085.76
     - MAX_SFT_STEPS: 180
@@ -45,6 +50,8 @@ outputs:
   - reports/hf_top_papers_qwen3vl_8b_datasphere_reports.tar.gz
   - reports/hf_top_papers_qwen3vl_8b_datasphere/budget_plan.json
   - reports/hf_top_papers_qwen3vl_8b_datasphere/final_summary.json
+  - reports/hf_top_papers_qwen3vl_8b_datasphere/hf_upload_summary.json
+  - reports/hf_top_papers_qwen3vl_8b_datasphere/hf_upload_bundle/artifacts/reports/hf_upload_manifest.json
   - reports/hf_top_papers_qwen3vl_8b_datasphere/artifact_manifest.txt
 
 cloud-instance-types:

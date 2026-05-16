@@ -10,6 +10,12 @@ DATA_DIR="data/derived/hf_top_papers_graph_experts"
 SFT_DIR="outputs/${OUT_PREFIX}_sft_lora"
 GRPO_DIR="outputs/${OUT_PREFIX}_grpo_lora"
 REPORT_DIR="reports/${OUT_PREFIX}_datasphere"
+HF_REPO_ID="${HF_REPO_ID:-top-papers/Qwen3-VL-8B-Instruct-scireason}"
+HF_REPO_TYPE="${HF_REPO_TYPE:-model}"
+HF_REVISION="${HF_REVISION:-main}"
+HF_UPLOAD_AFTER_TRAINING="${HF_UPLOAD_AFTER_TRAINING:-1}"
+HF_UPLOAD_PATH_PREFIX="${HF_UPLOAD_PATH_PREFIX:-}"
+HF_UPLOAD_BUNDLE_DIR="${HF_UPLOAD_BUNDLE_DIR:-$REPORT_DIR/hf_upload_bundle}"
 BUDGET_RUB="${BUDGET_RUB:-100000}"
 G2_2_RUB_PER_HOUR="${G2_2_RUB_PER_HOUR:-1085.76}"
 MAX_SFT_STEPS="${MAX_SFT_STEPS:-180}"
@@ -38,6 +44,13 @@ plan = {
     "configured_training_steps": {
         "sft": int("$MAX_SFT_STEPS"),
         "grpo": int("$MAX_GRPO_STEPS"),
+    },
+    "huggingface_upload": {
+        "enabled": "$HF_UPLOAD_AFTER_TRAINING" not in {"0", "false", "False", "no", "NO"},
+        "repo_id": "$HF_REPO_ID",
+        "repo_type": "$HF_REPO_TYPE",
+        "revision": "$HF_REVISION",
+        "path_in_repo": "$HF_UPLOAD_PATH_PREFIX" or ".",
     },
     "note": "DataSphere bills jobs per second on the selected configuration; the phase timeouts are a local hard stop. Configure official project spending thresholds in DataSphere for an account-level hard limit.",
 }
@@ -71,14 +84,50 @@ run_torchrun_timeout() {
 }
 
 package_artifacts() {
+  local had_errexit=0
+  case "$-" in
+    *e*) had_errexit=1 ;;
+  esac
   set +e
   mkdir -p "$REPORT_DIR"
   date -u +%Y-%m-%dT%H:%M:%SZ > "$REPORT_DIR/finished_at_utc.txt"
   find outputs "$DATA_DIR" "$REPORT_DIR" -maxdepth 3 -type f 2>/dev/null | sort > "$REPORT_DIR/artifact_manifest.txt"
   [ -d "$SFT_DIR" ] && tar -czf "outputs/${OUT_PREFIX}_sft_lora.tar.gz" "$SFT_DIR"
   [ -d "$GRPO_DIR" ] && tar -czf "outputs/${OUT_PREFIX}_grpo_lora.tar.gz" "$GRPO_DIR"
-  tar -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" 2>/dev/null
+  tar --exclude="$REPORT_DIR/hf_upload_bundle" -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" 2>/dev/null
+  if [ "$had_errexit" -eq 1 ]; then
+    set -e
+  fi
 }
+
+hf_upload_enabled() {
+  case "$(printf '%s' "$HF_UPLOAD_AFTER_TRAINING" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+upload_to_huggingface() {
+  if ! hf_upload_enabled; then
+    echo "[datasphere-pipeline] Hugging Face upload disabled: HF_UPLOAD_AFTER_TRAINING=$HF_UPLOAD_AFTER_TRAINING"
+    return 0
+  fi
+  echo "[datasphere-pipeline] uploading fine-tuned model and artifacts to Hugging Face: $HF_REPO_ID"
+  python experiments/vlm_finetuning/scripts/upload_hf_finetuned_artifacts.py \
+    --repo-id "$HF_REPO_ID" \
+    --repo-type "$HF_REPO_TYPE" \
+    --revision "$HF_REVISION" \
+    --path-in-repo "$HF_UPLOAD_PATH_PREFIX" \
+    --base-model "$BASE_MODEL" \
+    --dataset-id "$DATASET_ID" \
+    --out-prefix "$OUT_PREFIX" \
+    --data-dir "$DATA_DIR" \
+    --sft-dir "$SFT_DIR" \
+    --grpo-dir "$GRPO_DIR" \
+    --report-dir "$REPORT_DIR" \
+    --bundle-dir "$HF_UPLOAD_BUNDLE_DIR"
+}
+
 trap 'status=$?; package_artifacts; exit $status' EXIT
 
 run_timeout "$DATA_TIMEOUT_HOURS" python experiments/vlm_finetuning/scripts/build_hf_graph_experts_dataset.py \
@@ -151,3 +200,7 @@ for path in [Path("$DATA_DIR/summary.json"), Path("$SFT_DIR/run_config.json"), P
         summary[path.stem] = json.loads(path.read_text(encoding="utf-8"))
 print(json.dumps(summary, ensure_ascii=False, indent=2))
 PY
+
+package_artifacts
+upload_to_huggingface
+package_artifacts
