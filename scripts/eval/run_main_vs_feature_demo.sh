@@ -42,9 +42,13 @@ if [ ! -f "$CASES" ]; then
 fi
 
 # Чистое рабочее дерево обязательно — иначе git checkout затрёт правки.
-if ! git diff --quiet || ! git diff --cached --quiet; then
+# Исключаем auto-генерируемые файлы setuptools (egg-info): они регенерируются
+# при pip install -e . и в норме одинаковы на ветках, не мешают checkout'у.
+DIRTY_PATHSPEC=('.' ':(exclude,glob)**/*.egg-info' ':(exclude,glob)**/*.egg-info/**')
+if ! git diff --quiet -- "${DIRTY_PATHSPEC[@]}" \
+   || ! git diff --cached --quiet -- "${DIRTY_PATHSPEC[@]}"; then
   echo "Есть незакоммиченные изменения. Закоммить или отложи их вручную и повтори." >&2
-  git status --short >&2
+  git status --short -- "${DIRTY_PATHSPEC[@]}" >&2
   exit 1
 fi
 
