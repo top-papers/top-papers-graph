@@ -77,6 +77,9 @@ class TestFeatureExtraction:
         stats = compute_corpus_stats([edge], nodes, 3)
         f = extract_features(edge, nodes, stats)
         assert f.shape == (N_FEATURES,)
+        # На «хорошем» ребре хотя бы часть признаков должна быть ненулевой —
+        # иначе extract_features не считает контент, а просто возвращает нули.
+        assert (f > 0).sum() >= 5
 
     def test_all_features_in_range(self):
         nodes = make_nodes()
@@ -129,18 +132,27 @@ class TestFeatureExtraction:
 # === Tests: Scoring ===
 
 class TestScoring:
-    def test_score_range(self):
-        f = np.ones(N_FEATURES) * 0.5
-        s = assertion_score(f, DEFAULT_WEIGHTS, DEFAULT_BIAS)
-        assert 0.0 < s < 1.0
+    def test_score_responsive_to_input(self):
+        """Sigmoid реально реагирует на вход: нулевой → средний → максимальный."""
+        s_zero = assertion_score(np.zeros(N_FEATURES), DEFAULT_WEIGHTS, DEFAULT_BIAS)
+        s_half = assertion_score(np.full(N_FEATURES, 0.5), DEFAULT_WEIGHTS, DEFAULT_BIAS)
+        s_one = assertion_score(np.ones(N_FEATURES), DEFAULT_WEIGHTS, DEFAULT_BIAS)
+        assert 0.0 <= s_zero < s_half < s_one <= 1.0
 
-    def test_score_monotonic_with_features(self):
-        """Higher features → higher score (with positive weights)."""
-        low = np.ones(N_FEATURES) * 0.2
-        high = np.ones(N_FEATURES) * 0.8
-        s_low = assertion_score(low, DEFAULT_WEIGHTS, DEFAULT_BIAS)
-        s_high = assertion_score(high, DEFAULT_WEIGHTS, DEFAULT_BIAS)
-        assert s_high > s_low
+    def test_predicate_strength_contributes_positively(self):
+        """Бамп одного признака с положительным весом → скор растёт.
+
+        Проверяет, что линейная комбинация реально складывается из вкладов
+        отдельных признаков, а не игнорирует часть из них.
+        """
+        # predicate_strength (idx 2) должен иметь положительный вес в дефолтных.
+        assert DEFAULT_WEIGHTS[2] > 0
+        base = np.full(N_FEATURES, 0.5)
+        bumped = base.copy()
+        bumped[2] = 1.0
+        s_base = assertion_score(base, DEFAULT_WEIGHTS, DEFAULT_BIAS)
+        s_bumped = assertion_score(bumped, DEFAULT_WEIGHTS, DEFAULT_BIAS)
+        assert s_bumped > s_base
 
     def test_sigmoid_bounds(self):
         assert _sigmoid(100) == pytest.approx(1.0, abs=1e-6)
@@ -159,13 +171,23 @@ class TestTraining:
         w, b, log = train_scorer_weights(pos, neg, n_epochs=100, lr=0.01)
         assert log["final_loss"] <= log["loss_history_sample"][0]
 
-    def test_separation_after_training(self):
-        """After training, pos should score higher than neg."""
+    def test_separation_generalises_to_heldout(self):
+        """После обучения скор разделяет pos/neg на ОТЛОЖЕННОЙ выборке.
+
+        Прежний вариант сравнивал скоры на обучающих данных — это
+        тавтология (следует прямо из BCE-лосса). Здесь проверяется
+        обобщение на новые сэмплы из того же распределения, и требуется
+        заметный (> 0.3) разрыв средних скоров, а не любая разница.
+        """
         np.random.seed(42)
-        pos = np.random.uniform(0.5, 1.0, (30, N_FEATURES))
-        neg = np.random.uniform(0.0, 0.4, (10, N_FEATURES))
-        w, b, log = train_scorer_weights(pos, neg, n_epochs=200, lr=0.01)
-        assert log["mean_score_accept"] > log["mean_score_reject"]
+        pos_train = np.random.uniform(0.5, 1.0, (30, N_FEATURES))
+        neg_train = np.random.uniform(0.0, 0.4, (10, N_FEATURES))
+        w, b, _ = train_scorer_weights(pos_train, neg_train, n_epochs=200, lr=0.01)
+        pos_test = np.random.uniform(0.5, 1.0, (15, N_FEATURES))
+        neg_test = np.random.uniform(0.0, 0.4, (15, N_FEATURES))
+        s_pos = np.array([assertion_score(x, w, b) for x in pos_test])
+        s_neg = np.array([assertion_score(x, w, b) for x in neg_test])
+        assert s_pos.mean() - s_neg.mean() > 0.3
 
     def test_output_shapes(self):
         pos = np.random.uniform(0, 1, (10, N_FEATURES))
