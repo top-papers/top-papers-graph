@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов обучения с малым числом примеров: от метрического обучения с прототипами (Prototypical Networks) через model-agnostic мета-обучение (MAML) к адаптации эмбеддингов для конкретных задач (FEAT).
+domain: Q104173519
+domain_label: Few-shot learning
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1703.05175"
+    title: "Prototypical Networks for Few-shot Learning"
+    year: 2017
+  - id: "arxiv:1703.03400"
+    title: "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks"
+    year: 2017
+  - id: "arxiv:1812.03664"
+    title: "Few-Shot Learning via Embedding Adaptation with Set-to-Set Functions"
+    year: 2020
+steps:
+  - step_id: 1
+    claim: "Классификация через вычисление расстояний до прототипов классов в выученном метрическом пространстве обеспечивает простой и эффективный подход к few-shot обучению."
+    sources:
+      - type: text
+        source: "Snell et al. (2017)"
+        locator: "Section 3"
+        snippet_or_summary: "Prototypical Networks обучают метрическое пространство, где классификация выполняется через расстояние до среднего эмбеддинга (прототипа) каждого класса, что расширяется и на zero-shot сценарий."
+  - step_id: 2
+    claim: "MAML обучает начальные параметры модели так, чтобы несколько шагов градиентного спуска на малом числе примеров новой задачи давали хорошую генерализацию."
+    sources:
+      - type: text
+        source: "Finn et al. (2017)"
+        locator: "Section 2"
+        snippet_or_summary: "MAML оптимизирует инициализацию параметров через двухуровневую оптимизацию: внутренний цикл адаптирует к задаче, внешний — улучшает начальную точку для быстрой адаптации."
+  - step_id: 3
+    claim: "Адаптация эмбеддингов к конкретной задаче через set-to-set функцию (трансформер) делает представления задаче-специфичными и дискриминативными, превосходя статические метрические подходы."
+    sources:
+      - type: text
+        source: "Ye et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "FEAT использует set-to-set трансформер для адаптации эмбеддингов примеров поддержки к конкретной задаче, что делает представления более дискриминативными и устанавливает новый SOTA."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

@@ -685,6 +685,145 @@ def task2_bundle(
     console.print(f"[green]Task 2 bundle prepared:[/green] {bundle.bundle_dir}")
 
 
+@app.command("triage-triplets")
+def triage_triplets_cmd(
+    bundle_dir: Path = typer.Option(..., help="Путь к Task 2 bundle directory."),
+) -> None:
+    """Авто-triage триплетов в Task 2 bundle на accept / reject / review.
+
+    Применяет rule-based эвристики и проставляет ``verdict`` прямо в
+    ``automatic_triplets.csv`` — существующий ``task2_offline_review``
+    подхватит вердикты как pre-fill при ручной разметке.
+    """
+    from .task2_triage import triage_bundle
+
+    console.print(f"[bold]Running triage on[/bold] {bundle_dir} …")
+    summary = triage_bundle(bundle_dir)
+    console.print(
+        f"  [green]{summary.accepted} accept[/green]  "
+        f"[red]{summary.rejected} reject[/red]  "
+        f"[yellow]{summary.review} review[/yellow]  "
+        f"({summary.total} total)"
+    )
+    console.print(
+        f"[green]Verdicts pre-filled into {bundle_dir}/automatic_triplets.csv "
+        f"and report saved to triage_results.json[/green]"
+    )
+
+
+@app.command("train-scorer")
+def train_scorer_cmd(
+    bundle_dir: Path = typer.Option(..., help="Task 2 bundle directory with triage_results.json."),
+    labels: Path | None = typer.Option(None, "--labels", help="Path to triage_verdicts.json exported from HTML client."),
+    out: Path = typer.Option(Path("data/derived/assertion_scorer_weights.json"), help="Where to save trained weights."),
+    n_epochs: int = typer.Option(500, help="Training epochs."),
+    lr: float = typer.Option(0.01, help="Learning rate."),
+) -> None:
+    """Train assertion quality scorer weights from triage verdicts (auto or human-labeled)."""
+    from .temporal.assertion_scorer import (
+        AssertionScorer, compute_corpus_stats, extract_features,
+        train_scorer_weights, save_weights, N_FEATURES,
+    )
+    import csv
+    import numpy as np
+
+    bd = Path(bundle_dir)
+    candidates = [p for p in bd.iterdir() if p.is_dir() and not p.name.startswith(".")]
+    sub = candidates[0] if len(candidates) == 1 else bd
+
+    # Load labels
+    if labels and Path(labels).exists():
+        import json
+        raw = json.loads(Path(labels).read_text(encoding="utf-8"))
+        verdict_map = {r["assertion_id"]: r["verdict"] for r in raw}
+        console.print(f"Loaded {len(verdict_map)} human verdicts from {labels}")
+    else:
+        triage_path = sub / "triage_results.json"
+        if not triage_path.exists():
+            console.print("[red]No triage_results.json found. Run triage-triplets first.[/red]")
+            raise typer.Exit(1)
+        import json
+        triage = json.loads(triage_path.read_text(encoding="utf-8"))
+        verdict_map = {r["assertion_id"]: r["verdict"] for r in triage.get("results", [])}
+        console.print(f"Using {len(verdict_map)} auto-triage verdicts as weak labels")
+
+    # Load triplets
+    csv_path = sub / "automatic_triplets.csv"
+    if not csv_path.exists():
+        console.print(f"[red]No automatic_triplets.csv in {sub}[/red]")
+        raise typer.Exit(1)
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    # Build mock edges for feature extraction
+    from dataclasses import dataclass as _dc, field as _field
+
+    @_dc
+    class _MockNode:
+        term: str = ""
+        doc_freq: int = 1
+
+    @_dc
+    class _MockEdge:
+        source: str = ""
+        target: str = ""
+        predicate: str = ""
+        total_count: int = 1
+        mean_confidence: float = 0.8
+        papers: set = _field(default_factory=set)
+        evidence_quotes: list = _field(default_factory=list)
+        polarity_counts: dict = _field(default_factory=lambda: {"supports": 1, "contradicts": 0, "unknown": 0})
+        features: dict = _field(default_factory=dict)
+
+    # Build feature matrices
+    accept_feats, reject_feats, review_feats = [], [], []
+    nodes_mock: dict = {}
+    edges_mock = []
+
+    for r in rows:
+        e = _MockEdge(
+            source=r.get("subject", ""),
+            target=r.get("object", ""),
+            predicate=r.get("predicate", ""),
+            total_count=1,
+            mean_confidence=float(r.get("mean_confidence") or 0.8),
+            papers={r.get("papers", "paper1")},
+            evidence_quotes=[{"quote": r.get("evidence", "")}] if r.get("evidence") else [],
+            features={"pmi": float(r.get("score") or 0)},
+        )
+        edges_mock.append(e)
+        for term in (e.source, e.target):
+            if term and term not in nodes_mock:
+                nodes_mock[term] = _MockNode(term=term, doc_freq=1)
+
+    stats = compute_corpus_stats(edges_mock, nodes_mock, 3)
+
+    for r, e in zip(rows, edges_mock):
+        aid = r.get("assertion_id", "")
+        v = verdict_map.get(aid, "review")
+        feats = extract_features(e, nodes_mock, stats)
+        if v == "accept":
+            accept_feats.append(feats)
+        elif v == "reject":
+            reject_feats.append(feats)
+        else:
+            review_feats.append(feats)
+
+    fa = np.array(accept_feats) if accept_feats else np.zeros((0, N_FEATURES))
+    fr = np.array(reject_feats) if reject_feats else np.zeros((0, N_FEATURES))
+    fv = np.array(review_feats) if review_feats else None
+
+    console.print(f"Training: {len(accept_feats)} accept, {len(reject_feats)} reject, {len(review_feats)} review")
+
+    w, b, log_data = train_scorer_weights(fa, fr, n_epochs=n_epochs, lr=lr)
+
+    save_weights(out, w, b, training_meta=log_data)
+    console.print(f"[green]Assertion scorer weights saved to {out}[/green]")
+    console.print(f"  Final loss: {log_data['final_loss']:.4f}")
+    console.print(f"  Mean score accept: {log_data['mean_score_accept']:.3f}")
+    console.print(f"  Mean score reject: {log_data['mean_score_reject']:.3f}")
+
+
 @app.command("export-scidatapipe")
 def export_scidatapipe(
     task1: list[Path] = typer.Option(None, "--task1", help="Путь к Task 1 YAML. Можно передать несколько раз."),

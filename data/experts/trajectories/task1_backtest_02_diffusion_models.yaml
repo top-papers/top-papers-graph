@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Эволюция диффузионных моделей для генерации изображений: от вероятностных моделей шумоподавления (DDPM) через объединение с SDE к латентным диффузионным моделям, значительно снизившим вычислительные затраты.
+domain: Q129279
+domain_label: Generative model
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2006.11239"
+    title: "Denoising Diffusion Probabilistic Models"
+    year: 2020
+  - id: "arxiv:2011.13456"
+    title: "Score-Based Generative Modeling through Stochastic Differential Equations"
+    year: 2021
+  - id: "arxiv:2112.10752"
+    title: "High-Resolution Image Synthesis with Latent Diffusion Models"
+    year: 2022
+steps:
+  - step_id: 1
+    claim: "DDPM демонстрирует, что диффузионные вероятностные модели способны генерировать изображения высокого качества, конкурируя с GAN по метрике FID."
+    sources:
+      - type: text
+        source: "Ho et al. (2020)"
+        locator: "Section 4"
+        snippet_or_summary: "Модель DDPM достигает FID 3.17 на CIFAR-10 и генерирует изображения качества, сопоставимого с ProgressiveGAN, используя взвешенную вариационную границу и связь с denoising score matching."
+  - step_id: 2
+    claim: "Единая формулировка на основе стохастических дифференциальных уравнений объединяет различные подходы к score-based генеративному моделированию и позволяет точно вычислять правдоподобие."
+    sources:
+      - type: text
+        source: "Song et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "Предложена непрерывная формулировка диффузии через SDE, которая объединяет SMLD и DDPM как дискретизации, и обеспечивает генерацию через обратное SDE с оценкой score-функции нейронной сетью."
+  - step_id: 3
+    claim: "Применение диффузии в латентном пространстве предобученных автоэнкодеров радикально снижает вычислительные затраты при сохранении высокого качества генерации изображений высокого разрешения."
+    sources:
+      - type: text
+        source: "Rombach et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "Латентные диффузионные модели (LDM) обучают диффузию в сжатом пространстве автоэнкодера, что значительно снижает требования к вычислительным ресурсам и позволяет использовать cross-attention для условной генерации."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

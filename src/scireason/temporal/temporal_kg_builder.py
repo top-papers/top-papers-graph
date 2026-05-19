@@ -15,6 +15,7 @@ Both backends produce a unified in-memory representation that can be exported to
 
 import asyncio
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 import json
 import math
 from pathlib import Path
@@ -23,6 +24,7 @@ from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Set, 
 from rich.console import Console
 
 from ..domain import DomainConfig
+from ..ingest.vlm_ocr import extract_pdf_page_chunks_vlm_ocr
 from ..temporal.schemas import TemporalTriplet
 from ..config import settings
 from ..llm import _resolve_llm_selection
@@ -61,6 +63,7 @@ class PaperRecord:
     title: str
     year: Optional[int]
     text: str
+    pdf_path: str = ""
     url: str = ""
     source: str = ""
     multimodal_text: str = ""
@@ -340,6 +343,7 @@ def load_papers_from_processed(
                 title=title,
                 year=year_int,
                 text=text,
+                pdf_path=str((processed_dir.parent / "raw_pdfs" / f"{d.name}.pdf").resolve()),
                 url=str(meta.get("url") or ""),
                 source=str(meta.get("source") or ""),
                 multimodal_text=multimodal_text,
@@ -351,6 +355,73 @@ def load_papers_from_processed(
             break
 
     return out
+
+
+def _repairable_with_vlm(pr: PaperRecord, unit: PaperEvidenceUnit) -> bool:
+    if not bool(getattr(settings, "ocr_vlm_fallback_enabled", False)):
+        return False
+    if str(getattr(settings, "vlm_backend", "none") or "none").lower() == "none":
+        return False
+    if not pr.pdf_path or unit.page is None or not Path(pr.pdf_path).exists():
+        return False
+    return str(unit.metadata.get("source_backend") or "").lower() not in {"pymupdf_vlm_ocr", "multimodal"}
+
+
+def _best_repaired_page_chunk_text(original_text: str, repaired_chunks: Sequence[Any]) -> str:
+    probe = str(original_text or "").strip()[:600]
+    if not probe:
+        return ""
+    best_text = ""
+    best_score = -1.0
+    for rec in repaired_chunks:
+        candidate = str(getattr(rec, "text", "") or "").strip()
+        if not candidate:
+            continue
+        score = SequenceMatcher(None, probe, candidate[:600]).ratio()
+        if score > best_score:
+            best_score = score
+            best_text = candidate
+    return best_text
+
+
+def _retry_unit_with_vlm_page_repair(
+    *,
+    domain_title: str,
+    pr: PaperRecord,
+    unit: PaperEvidenceUnit,
+    llm_provider: Optional[str],
+    llm_model: Optional[str],
+) -> list[TemporalTriplet] | None:
+    if not _repairable_with_vlm(pr, unit):
+        return None
+    try:
+        repaired_chunks = extract_pdf_page_chunks_vlm_ocr(
+            pdf_path=Path(pr.pdf_path),
+            paper_id=pr.paper_id,
+            page_index=int(unit.page),
+            backend=str(getattr(settings, "vlm_backend", "none") or "none"),
+            model_id=str(getattr(settings, "vlm_model_id", "") or ""),
+        )
+    except Exception as e:
+        console.print(f"[yellow]    VLM page repair unavailable for {pr.paper_id}/{unit.unit_id}: {e}[/yellow]")
+        return None
+
+    repaired_text = _best_repaired_page_chunk_text(unit.text, repaired_chunks)
+    if not repaired_text or repaired_text == str(unit.text or "").strip():
+        return None
+
+    console.print(f"[cyan]    ↻ VLM page repair retry for page {unit.page}[/cyan]")
+    try:
+        return extract_temporal_triplets(
+            domain=domain_title,
+            chunk_text=repaired_text,
+            paper_year=pr.year,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+        )
+    except Exception as e:
+        console.print(f"[yellow]    VLM page repair retry failed for {pr.paper_id}/{unit.unit_id}: {e}[/yellow]")
+        return None
 
 
 def _sentences(text: str) -> List[str]:
@@ -649,6 +720,284 @@ def _merge_cooccurrence_into_graph(
                 )
 
 
+def _build_canonical_vocabulary(
+    papers: Sequence["PaperRecord"],
+    domain: "DomainConfig",
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+) -> List[str]:
+    """Улучшение D: формирование канонического словаря понятий по всему корпусу.
+
+    Один LLM-вызов на весь корпус статей (заголовки + аннотации). На выходе —
+    единый список ключевых научных понятий в канонической форме (2-4 слова).
+
+    Этот словарь инжектируется в промпт каждого chunk'а, чтобы LLM использовала
+    согласованные имена сущностей между статьями. Без этого одно и то же понятие
+    может называться по-разному в разных PDF ("treatment effect" vs "causal effect"
+    vs "heterogeneous treatment effect"), что приводит к фрагментации графа и
+    отсутствию кросс-документных связей.
+
+    Настройки:
+        canonical_vocabulary_enabled (bool): включить/выключить.
+        canonical_vocabulary_max_concepts (int): макс. число понятий в словаре.
+
+    Затраты: +1 LLM-вызов на весь корпус (~10-15с).
+    """
+    from ..llm import chat_json, temporary_llm_selection, _resolve_auto_provider
+
+    max_concepts = settings.canonical_vocabulary_max_concepts
+    # Build input: title + first 500 chars of each paper
+    paper_descriptions = []
+    for pr in papers:
+        desc = pr.title or ""
+        text_preview = (pr.text or "")[:500]
+        if text_preview:
+            desc += f"\n{text_preview}"
+        paper_descriptions.append(f"--- {pr.paper_id} ---\n{desc}")
+
+    corpus_text = "\n\n".join(paper_descriptions)
+
+    system = f"""Ты — помощник исследователя в области {domain.title}.
+Тебе даны заголовки и аннотации нескольких научных статей из одной предметной области.
+Твоя задача — составить единый канонический словарь ключевых научных понятий, которые встречаются или подразумеваются в этих статьях.
+
+Правила:
+- Используй короткие, канонические формы (2-4 слова): "causal inference", не "causal inference methods and approaches"
+- Включи как общие понятия области (методы, фреймворки), так и специфичные для этих статей
+- Если понятие встречается в нескольких статьях — оно обязательно должно быть в списке
+- Не включай имена авторов, названия журналов, годы
+- Верни JSON-массив строк, до {max_concepts} понятий
+"""
+
+    user = f"""Статьи:
+
+{corpus_text}
+
+Верни JSON-массив из {max_concepts} ключевых канонических понятий этой группы статей."""
+
+    with temporary_llm_selection(llm_provider=llm_provider, llm_model=llm_model):
+        provider = (settings.llm_provider or "").lower().strip() or "auto"
+        if provider == "auto":
+            provider = _resolve_auto_provider()
+        if provider == "mock":
+            return []
+
+        timeout_seconds = float(getattr(settings, "llm_request_timeout_seconds", 25) or 25)
+        try:
+            from .temporal_triplet_extractor import _run_with_timeout
+            data = _run_with_timeout(
+                timeout_seconds,
+                chat_json,
+                system=system,
+                user=user,
+                schema_hint="Верни JSON-массив строк: [\"concept1\", \"concept2\", ...]",
+                temperature=0.0,
+            )
+            if isinstance(data, list):
+                vocab = [str(c).strip().lower() for c in data if isinstance(c, str) and str(c).strip()]
+                return vocab[:max_concepts]
+            return []
+        except Exception as e:
+            console.print(f"  [yellow]Canonical vocabulary extraction failed: {e}[/yellow]")
+            return []
+
+
+def _extract_paper_summary_triplets(
+    pr: "PaperRecord",
+    domain: "DomainConfig",
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+) -> List[TemporalTriplet]:
+    """Улучшение C: извлечение якорных триплетов из abstract+intro статьи.
+
+    Один LLM-вызов на статью — извлекает 3-7 ключевых каузальных утверждений,
+    отражающих главный научный вклад. Якорные триплеты получают бонус +0.15 к
+    confidence и маркируются source_kind="paper_summary".
+
+    Цель: создать «скелет» графа из сильных утверждений. Без этого все chunk-level
+    триплеты имеют одинаковый вес, и scoring не может отличить ключевые связи от
+    деталей в разделе Related Work или Methodology.
+
+    Настройки:
+        paper_summary_triplets_enabled (bool): включить/выключить.
+        paper_summary_max_input_chars (int): макс. длина входного текста.
+
+    Затраты: +1 LLM-вызов на статью (~10-20с каждый).
+    """
+    from ..llm import chat_json, temporary_llm_selection, _resolve_auto_provider
+    from .temporal_triplet_extractor import (
+        _validate_triplet_payload,
+        _finalize_triplets,
+        TEMPORAL_TRIPLET_SCHEMA_HINT,
+    )
+
+    max_chars = settings.paper_summary_max_input_chars
+    text = f"{pr.title}\n\n{(pr.text or '')[:max_chars]}"
+
+    system = f"""Ты — помощник исследователя в области {domain.title}.
+Тебе дан заголовок и начало научной статьи. Извлеки 3-7 КЛЮЧЕВЫХ каузальных утверждений статьи — её главные научные находки и вклад.
+Фокусируйся на причинно-следственных связях, методологических вкладах и количественных результатах.
+Не извлекай общеизвестные факты или определения — только то, что является вкладом ЭТОЙ статьи."""
+
+    user = f"""{text}
+
+{TEMPORAL_TRIPLET_SCHEMA_HINT}
+
+Извлеки 3-7 ключевых каузальных утверждений этой статьи."""
+
+    with temporary_llm_selection(llm_provider=llm_provider, llm_model=llm_model):
+        provider = (settings.llm_provider or "").lower().strip() or "auto"
+        if provider == "auto":
+            provider = _resolve_auto_provider()
+        if provider == "mock":
+            return []
+
+        timeout_seconds = float(getattr(settings, "llm_request_timeout_seconds", 25) or 25)
+        try:
+            from .temporal_triplet_extractor import _run_with_timeout
+            data = _run_with_timeout(
+                timeout_seconds,
+                chat_json,
+                system=system,
+                user=user,
+                schema_hint=TEMPORAL_TRIPLET_SCHEMA_HINT,
+                temperature=0.0,
+            )
+            triplets = _finalize_triplets(_validate_triplet_payload(data), pr.year)
+            # Boost confidence for anchor triplets
+            for t in triplets:
+                t.confidence = min(1.0, t.confidence + 0.15)
+            return triplets
+        except Exception as e:
+            console.print(f"  [yellow]Paper summary extraction failed for {pr.paper_id}: {e}[/yellow]")
+            return []
+
+
+def _token_similarity(a: str, b: str) -> float:
+    """Токенная схожесть для fuzzy-matching сущностей (Jaccard + containment).
+
+    Возвращает max(Jaccard, containment * 0.9), где containment — доля
+    общих токенов к минимальному из двух множеств. Это позволяет
+    склеивать "credit limit" и "credit limit management" (containment=1.0),
+    но не "credit limit" и "credit card" (Jaccard=0.33).
+    """
+    ta = set(a.lower().split())
+    tb = set(b.lower().split())
+    if not ta or not tb:
+        return 0.0
+    intersection = len(ta & tb)
+    # Jaccard
+    jaccard = intersection / len(ta | tb)
+    # Containment: if one is subset of another
+    containment = intersection / min(len(ta), len(tb))
+    return max(jaccard, containment * 0.9)
+
+
+def _normalize_entities_fuzzy(
+    edges: Dict[Tuple[str, str, str], EdgeStats],
+    nodes: Dict[str, NodeStats],
+    threshold: float = 0.85,
+) -> Tuple[Dict[Tuple[str, str, str], EdgeStats], Dict[str, NodeStats]]:
+    """Улучшение B: post-hoc fuzzy-нормализация сущностей в графе.
+
+    После построения графа проходит по всем нодам и склеивает пары с
+    токенной схожестью >= threshold. Каноническим становится термин с
+    большей doc_freq (или более короткий при равной частоте).
+
+    При склейке: рёбра объединяются (суммируются counts, confidence,
+    papers, evidence_quotes), self-loops удаляются.
+
+    Настройки:
+        entity_normalization_enabled (bool): включить/выключить.
+        entity_normalization_threshold (float): порог схожести 0.0-1.0.
+            0.85 — хороший баланс (склеивает "credit limit" + "credit limit
+            management", но не "credit limit" + "credit card").
+            0.75 — агрессивнее, больше склеек, риск ложных.
+            0.92 — консервативно, только почти идентичные.
+
+    Сложность: O(n^2) по числу уникальных терминов. При ~1000 терминов <1с.
+    Затраты: 0 LLM-вызовов.
+    """
+    terms = sorted(nodes.keys())
+    if len(terms) < 2:
+        return edges, nodes
+
+    # Build merge map: term -> canonical
+    merge_map: Dict[str, str] = {}
+    canonical_set: Set[str] = set()
+
+    for i in range(len(terms)):
+        if terms[i] in merge_map:
+            continue
+        for j in range(i + 1, len(terms)):
+            if terms[j] in merge_map:
+                continue
+            sim = _token_similarity(terms[i], terms[j])
+            if sim >= threshold:
+                # Keep the one with higher doc_freq, or shorter name
+                ni = nodes.get(terms[i])
+                nj = nodes.get(terms[j])
+                freq_i = ni.doc_freq if ni else 0
+                freq_j = nj.doc_freq if nj else 0
+                if freq_i >= freq_j:
+                    canonical, alias = terms[i], terms[j]
+                else:
+                    canonical, alias = terms[j], terms[i]
+                merge_map[alias] = canonical
+                canonical_set.add(canonical)
+
+    if not merge_map:
+        return edges, nodes
+
+    console.print(f"  [cyan]Entity normalization: merging {len(merge_map)} aliases into {len(canonical_set)} canonical terms[/cyan]")
+
+    def _resolve(term: str) -> str:
+        seen: Set[str] = set()
+        while term in merge_map and term not in seen:
+            seen.add(term)
+            term = merge_map[term]
+        return term
+
+    # Rebuild edges with merged terms
+    new_edges: Dict[Tuple[str, str, str], EdgeStats] = {}
+    for (s, p, o), edge in edges.items():
+        ns = _resolve(s)
+        no = _resolve(o)
+        if ns == no:
+            continue  # self-loop after merge
+        key = (ns, p, no)
+        if key not in new_edges:
+            new_edges[key] = EdgeStats(source=ns, target=no, predicate=p, directed=edge.directed)
+        target = new_edges[key]
+        target.total_count += edge.total_count
+        for y, c in edge.yearly_count.items():
+            target.yearly_count[y] = target.yearly_count.get(y, 0) + c
+        target.confidence_sum += edge.confidence_sum
+        target.confidence_n += edge.confidence_n
+        for pol, cnt in edge.polarity_counts.items():
+            target.polarity_counts[pol] = target.polarity_counts.get(pol, 0) + cnt
+        target.papers.update(edge.papers)
+        target.evidence_quotes.extend(edge.evidence_quotes)
+        target.time_intervals.extend(edge.time_intervals)
+        for k, v in edge.features.items():
+            if k not in target.features:
+                target.features[k] = v
+
+    # Rebuild nodes
+    new_nodes: Dict[str, NodeStats] = {}
+    for term, node in nodes.items():
+        canonical = _resolve(term)
+        if canonical not in new_nodes:
+            new_nodes[canonical] = NodeStats(term=canonical)
+        target = new_nodes[canonical]
+        target.doc_freq += node.doc_freq
+        for y, c in node.yearly_doc_freq.items():
+            target.yearly_doc_freq[y] = target.yearly_doc_freq.get(y, 0) + c
+
+    console.print(f"  [cyan]Graph reduced: {len(nodes)} → {len(new_nodes)} nodes, {len(edges)} → {len(new_edges)} edges[/cyan]")
+    return new_edges, new_nodes
+
+
 def build_temporal_kg(
     papers: Sequence[PaperRecord],
     *,
@@ -692,11 +1041,71 @@ def build_temporal_kg(
         and bool(getattr(settings, "g4f_async_enabled", True))
     )
 
-    for pr in papers:
+    total_units_all = sum(len(_iter_paper_units(pr)) for pr in papers)
+    global_unit_idx = 0
+
+    # Каноническая лексика: общий словарь терминов для кросс-документной связности
+    _canonical_vocab: List[str] = []
+    if settings.canonical_vocabulary_enabled and base_mode == "llm_triplets" and len(papers) > 1:
+        import time as _time
+        _t0_vocab = _time.monotonic()
+        console.print("[bold cyan]Building canonical concept vocabulary across all papers...[/bold cyan]")
+        _canonical_vocab = _build_canonical_vocabulary(
+            papers, domain, llm_provider=llm_provider, llm_model=llm_model,
+        )
+        _elapsed_vocab = _time.monotonic() - _t0_vocab
+        if _canonical_vocab:
+            console.print(f"[green]✓ Canonical vocabulary: {len(_canonical_vocab)} concepts in {_elapsed_vocab:.1f}s[/green]")
+            for i, c in enumerate(_canonical_vocab):
+                console.print(f"  [dim]{i+1}. {c}[/dim]")
+        else:
+            console.print(f"[yellow]⚠ Canonical vocabulary: 0 concepts in {_elapsed_vocab:.1f}s[/yellow]")
+
+    for paper_idx, pr in enumerate(papers, 1):
         units = _iter_paper_units(pr)
         if not units:
             continue
         paper_term_set: Set[str] = set()
+        # Build paper context string for prompt enrichment (improvements A + D)
+        _paper_context: Optional[str] = None
+        if settings.triplet_paper_context_enabled or _canonical_vocab:
+            _ctx_parts = []
+            if pr.title:
+                _ctx_parts.append(pr.title)
+            _abstract_proxy = (pr.text or "")[:settings.triplet_paper_context_max_chars]
+            if _abstract_proxy:
+                _ctx_parts.append(_abstract_proxy)
+            if _canonical_vocab:
+                _ctx_parts.append(
+                    "Канонический словарь понятий (используй эти термины как сущности, если они подходят): "
+                    + ", ".join(_canonical_vocab)
+                )
+            _paper_context = "\n".join(_ctx_parts) if _ctx_parts else None
+        console.print(f"[bold cyan]── Paper {paper_idx}/{len(papers)}: {pr.title[:80]} ({len(units)} units) ──[/bold cyan]")
+
+        # Summary-триплеты: ключевые утверждения на уровне всей статьи
+        if settings.paper_summary_triplets_enabled and base_mode == "llm_triplets":
+            import time as _time
+            _t0_summary = _time.monotonic()
+            console.print(f"  [dim]Extracting paper summary triplets...[/dim]")
+            summary_triplets = _extract_paper_summary_triplets(
+                pr, domain, llm_provider=llm_provider, llm_model=llm_model,
+            )
+            _elapsed_summary = _time.monotonic() - _t0_summary
+            if summary_triplets:
+                anchor_unit = PaperEvidenceUnit(
+                    unit_id=f"{pr.paper_id}:summary",
+                    chunk_id=f"{pr.paper_id}:summary",
+                    text=pr.title,
+                    source_kind="paper_summary",
+                )
+                _merge_triplets_into_graph(
+                    pr=pr, unit=anchor_unit, triplets=summary_triplets,
+                    edges=edges, term_set=paper_term_set,
+                )
+                console.print(f"  [green]✓ Paper summary: {len(summary_triplets)} anchor triplets in {_elapsed_summary:.1f}s[/green]")
+            else:
+                console.print(f"  [yellow]⚠ Paper summary: 0 triplets in {_elapsed_summary:.1f}s[/yellow]")
 
         if use_g4f_async_batch:
             batch_results = _run_async_sync(
@@ -742,13 +1151,22 @@ def build_temporal_kg(
                     language=language,
                 )
         else:
-            for unit in units:
+            for unit_idx, unit in enumerate(units, 1):
                 unit_text = str(unit.text or "").strip()
                 if not unit_text:
                     continue
-                unit_mode = "cooccurrence" if (base_mode == "llm_triplets" and llm_disabled_after_timeout) else base_mode
+                global_unit_idx += 1
+                unit_chars = len(unit_text)
+                console.print(
+                    f"  [dim]chunk {unit_idx}/{len(units)} "
+                    f"(global {global_unit_idx}/{total_units_all}) "
+                    f"| {unit_chars} chars | {unit.unit_id}[/dim]"
+                )
+                unit_mode = base_mode
 
                 if unit_mode == "llm_triplets":
+                    import time as _time
+                    _t0 = _time.monotonic()
                     try:
                         triplets = extract_temporal_triplets(
                             domain=domain.title,
@@ -756,14 +1174,28 @@ def build_temporal_kg(
                             paper_year=pr.year,
                             llm_provider=llm_provider,
                             llm_model=llm_model,
+                            paper_context=_paper_context,
                         )
                     except TimeoutError as e:
+                        _elapsed = _time.monotonic() - _t0
                         llm_failures += 1
                         localized_fallbacks += 1
-                        llm_disabled_after_timeout = True
+                        repaired_triplets = _retry_unit_with_vlm_page_repair(
+                            domain_title=domain.title,
+                            pr=pr,
+                            unit=unit,
+                            llm_provider=llm_provider,
+                            llm_model=llm_model,
+                        )
+                        if repaired_triplets:
+                            console.print(
+                                f"[green]    ✓ VLM page repair recovered {len(repaired_triplets)} triplets after timeout[/green]"
+                            )
+                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=repaired_triplets, edges=edges, term_set=paper_term_set)
+                            continue
                         console.print(
-                            f"[yellow]Temporal triplets timed out for {pr.paper_id}/{unit.unit_id}: {e}. "
-                            "Disabling LLM triplet extraction for the remaining evidence units and switching to heuristic/co-occurrence fallback.[/yellow]"
+                            f"[red]✗ TIMEOUT after {_elapsed:.1f}s for {pr.paper_id}/{unit.unit_id}: {e}. "
+                            "Using heuristic fallback for this chunk only, continuing LLM for next chunks.[/red]"
                         )
                         triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
                         if triplets:
@@ -772,8 +1204,23 @@ def build_temporal_kg(
                             continue
                         unit_mode = "cooccurrence"
                     except Exception as e:
+                        _elapsed = _time.monotonic() - _t0
                         llm_failures += 1
                         localized_fallbacks += 1
+                        repaired_triplets = _retry_unit_with_vlm_page_repair(
+                            domain_title=domain.title,
+                            pr=pr,
+                            unit=unit,
+                            llm_provider=llm_provider,
+                            llm_model=llm_model,
+                        )
+                        if repaired_triplets:
+                            console.print(
+                                f"[green]    ✓ VLM page repair recovered {len(repaired_triplets)} triplets after error[/green]"
+                            )
+                            _merge_triplets_into_graph(pr=pr, unit=unit, triplets=repaired_triplets, edges=edges, term_set=paper_term_set)
+                            continue
+                        console.print(f"    [red]✗ LLM error after {_elapsed:.1f}s: {e}[/red]")
                         triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
                         if triplets:
                             heuristic_fallbacks += 1
@@ -789,9 +1236,16 @@ def build_temporal_kg(
                         )
                         unit_mode = "cooccurrence"
                     else:
+                        _elapsed = _time.monotonic() - _t0
                         if triplets:
+                            console.print(
+                                f"    [green]✓ LLM ok: {len(triplets)} triplets in {_elapsed:.1f}s[/green]"
+                            )
                             _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
                             continue
+                        console.print(
+                            f"    [yellow]⚠ LLM returned 0 triplets in {_elapsed:.1f}s → heuristic fallback[/yellow]"
+                        )
                         localized_fallbacks += 1
                         triplets = extract_temporal_triplets_localized_fallback(unit_text, paper_year=pr.year)
                         if triplets:
@@ -799,9 +1253,6 @@ def build_temporal_kg(
                             _merge_triplets_into_graph(pr=pr, unit=unit, triplets=triplets, edges=edges, term_set=paper_term_set)
                             continue
                         unit_mode = "cooccurrence"
-                elif base_mode == "llm_triplets" and llm_disabled_after_timeout:
-                    localized_fallbacks += 1
-
                 if unit_mode == "cooccurrence":
                     _merge_cooccurrence_into_graph(
                         pr=pr,
@@ -853,6 +1304,60 @@ def build_temporal_kg(
 
     _apply_expert_overrides(edges, expert_overrides_path)
 
+    # Fuzzy-нормализация сущностей: дедупликация похожих вершин
+    if settings.entity_normalization_enabled:
+        edges, nodes = _normalize_entities_fuzzy(edges, nodes, threshold=settings.entity_normalization_threshold)
+
+    # Верификация рёбер: confidence gate + LLM-проверка
+    _rejected_for_training: List[Dict[str, Any]] = []
+    _verify_rejected: List[EdgeStats] = []
+    if settings.triplet_verify_enabled and base_mode == "llm_triplets":
+        import time as _time
+        _t0_verify = _time.monotonic()
+        console.print("[bold cyan]Верификация рёбер...[/bold cyan]")
+        from .triplet_verifier import verify_edges
+        edges, _verify_rejected, _vresult = verify_edges(
+            edges,
+            papers,
+            confidence_threshold=settings.triplet_verify_confidence_threshold,
+            batch_size=settings.triplet_verify_batch_size,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+        )
+        _elapsed_verify = _time.monotonic() - _t0_verify
+        console.print(f"  [green]✓ Verification in {_elapsed_verify:.1f}s: {_vresult.summary_line()}[/green]")
+        # Rebuild nodes to remove orphans from rejected edges
+        _active_terms: Set[str] = set()
+        for e in edges.values():
+            _active_terms.add(e.source)
+            _active_terms.add(e.target)
+        nodes = {t: n for t, n in nodes.items() if t in _active_terms}
+        # Store rejected edges for scorer training (as negatives)
+        _rejected_for_training: List[Dict[str, Any]] = []
+        for re in _verify_rejected:
+            _rejected_for_training.append({
+                "source": re.source, "target": re.target, "predicate": re.predicate,
+                "total_count": re.total_count, "mean_confidence": re.mean_confidence,
+                "polarity_counts": re.polarity_counts,
+                "papers": sorted(list(re.papers))[:10],
+                "evidence_quotes": re.evidence_quotes[:5],
+                "features": re.features, "score": re.score,
+            })
+
+    # Assertion quality scoring (logistic regression on observable features) or legacy linear scoring
+    _use_scorer = getattr(settings, "assertion_scorer_enabled", False)
+    _quality_scorer = None
+    _scorer_stats = None
+    if _use_scorer:
+        try:
+            from .assertion_scorer import AssertionScorer, compute_corpus_stats as _compute_corpus_stats
+            _quality_scorer = AssertionScorer.load()
+            _scorer_stats = _compute_corpus_stats(edges.values(), nodes, n_docs)
+            console.print("[cyan]Using assertion quality scoring[/cyan]")
+        except Exception as _scorer_err:
+            console.print(f"[yellow]Assertion scoring unavailable ({_scorer_err}), falling back to legacy[/yellow]")
+            _use_scorer = False
+
     edge_list: List[EdgeStats] = []
     for e in edges.values():
         e.features.setdefault("pmi", pmi(e))
@@ -869,13 +1374,21 @@ def build_temporal_kg(
             )
 
         expert_w = float(e.features.get("expert_weight", 0.0) or 0.0)
-        e.score = (
-            1.0 * e.features["log_count"]
-            + 0.75 * e.features["pmi"]
-            + 1.25 * e.features["trend"]
-            + 0.5 * e.features["mean_conf"]
-            + 1.5 * expert_w
-        )
+
+        if _use_scorer and _quality_scorer is not None and _scorer_stats is not None:
+            e.score = _quality_scorer.score_edge(e, nodes, _scorer_stats)
+            e.features["quality_score"] = e.score
+            # Expert overrides as additive bonus
+            if expert_w != 0.0:
+                e.score = max(0.0, min(1.0, e.score + 0.15 * expert_w))
+        else:
+            e.score = (
+                1.0 * e.features["log_count"]
+                + 0.75 * e.features["pmi"]
+                + 1.25 * e.features["trend"]
+                + 0.5 * e.features["mean_conf"]
+                + 1.5 * expert_w
+            )
         edge_list.append(e)
 
     edge_list.sort(key=lambda x: x.score, reverse=True)
@@ -897,5 +1410,8 @@ def build_temporal_kg(
             "g4f_async_batch": use_g4f_async_batch,
             "g4f_async_max_concurrency": int(getattr(settings, "g4f_async_max_concurrency", 3) or 3) if use_g4f_async_batch else 0,
             "multimodal_enabled": any(bool(getattr(pr, "multimodal_text", "").strip()) for pr in papers),
+            "verify_enabled": bool(settings.triplet_verify_enabled),
+            "verify_rejected_count": len(_verify_rejected),
+            "verify_rejected_edges": _rejected_for_training if settings.triplet_verify_enabled else [],
         },
     )

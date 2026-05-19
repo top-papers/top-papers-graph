@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
+import signal
 import threading
 from typing import List, Optional
+
+log = logging.getLogger(__name__)
 
 from pydantic import TypeAdapter
 
@@ -31,6 +35,20 @@ def _run_with_timeout(timeout_seconds: float, fn, /, *args, **kwargs):
     timeout_seconds = float(timeout_seconds or 0)
     if timeout_seconds <= 0:
         return fn(*args, **kwargs)
+
+    if threading.current_thread() is threading.main_thread() and hasattr(signal, "setitimer"):
+        previous_handler = signal.getsignal(signal.SIGALRM)
+
+        def _handle_timeout(signum, frame):  # pragma: no cover - timing-sensitive path
+            raise TimeoutError(f"Temporal triplet extraction exceeded {timeout_seconds:g}s")
+
+        try:
+            signal.signal(signal.SIGALRM, _handle_timeout)
+            signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+            return fn(*args, **kwargs)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0.0)
+            signal.signal(signal.SIGALRM, previous_handler)
 
     result: dict[str, object] = {}
 
@@ -362,32 +380,65 @@ def _rule_based_triplets(chunk_text: str, paper_year: Optional[int] = None) -> L
 TEMPORAL_TRIPLET_SCHEMA_HINT = """Ожидается JSON массив объектов:
 [
   {
-    "subject": "...",
-    "predicate": "...",
-    "object": "...",
+    "subject": "конкретный термин предметной области (2-5 слов)",
+    "predicate": "канонический предикат из списка ниже, в snake_case",
+    "object": "конкретный термин предметной области (2-5 слов)",
     "confidence": 0.0-1.0,
     "polarity": "supports|contradicts|unknown",
-    "evidence_quote": "короткая цитата из фрагмента (<=200 символов)",
+    "evidence_quote": "дословная цитата из фрагмента (<=200 символов)",
     "time": {"start": "YYYY or YYYY-MM or YYYY-MM-DD", "end": "...", "granularity": "year|month|day|interval"} | null
   }
 ]
+Допустимые предикаты: causes, leads_to, results_in, prevents, inhibits, improves, reduces, increases, decreases, predicts, precedes, follows, depends_on, requires, enables, uses, outperforms, contradicts.
+НЕ используй предикат "associated_with" — он слишком слабый и неинформативный.
+
+Примеры ПЛОХИХ триплетов (НЕ извлекай такие):
+- {"subject": "Section 3", "predicate": "describes", "object": "model"} — структура статьи, не научный факт.
+- {"subject": "model", "predicate": "shows", "object": "good performance"} — сущности слишком абстрактные.
+- {"subject": "x = 0.5·C_rate", "predicate": "results_in", "object": "Figure 4"} — формулы и ссылки на рисунки не являются сущностями.
+
 Правила:
-- Извлекай только содержательные направленные или темпорально-якоренные связи, которые реально опираются на текст.
-- Предпочитай причинно-следственные и темпоральные предикаты: causes, leads_to, results_in, prevents, inhibits, improves, reduces, predicts, precedes, follows.
-- Не возвращай слабые общетематические связи, простое совместное упоминание сущностей и "section/show/states" как предикаты.
+- subject/object: конкретные термины домена (метод, явление, параметр, вещество), НЕ абстрактные слова (model, method, data, result, approach, study).
+- Извлекай ТОЛЬКО связи, которые явно выражены в тексте. Не додумывай.
+- НЕ используй числа, формулы, ссылки на таблицы/рисунки/секции как сущности.
 - НЕ выдумывай факты. Если не уверен — polarity="unknown" и confidence <= 0.5.
-- Если в тексте есть точная дата/месяц/период — обязательно сохрани её с максимально доступной гранулярностью.
-- Для диапазонов и периодов используй granularity="interval".
-- Время: если в фрагменте явно указан период — заполни time.
-  Если времени нет в тексте — оставь null (мы подставим год публикации из meta).
-- evidence_quote: возьми дословный кусок из фрагмента (можно укоротить), не придумывай.
+- Если в тексте есть точная дата/месяц/период — сохрани в time с максимальной гранулярностью.
+  Если времени нет в тексте — time=null.
+- evidence_quote: дословный кусок из фрагмента (можно укоротить), не придумывай.
 """
 
 
-def _build_temporal_triplet_prompt_parts(domain: str, chunk_text: str, use_demos: Optional[bool]) -> tuple[str, str]:
+def _build_temporal_triplet_prompt_parts(
+    domain: str,
+    chunk_text: str,
+    use_demos: Optional[bool],
+    paper_context: Optional[str] = None,
+) -> tuple[str, str]:
+    """Собирает системный и пользовательский промпт для извлечения триплетов.
+
+    Args:
+        domain: название предметной области для системного промпта.
+        chunk_text: текст фрагмента PDF для извлечения.
+        use_demos: использовать ли few-shot примеры из Qdrant.
+        paper_context: (улучшения A+D) контекст статьи — заголовок, аннотация,
+            и/или канонический словарь понятий. Инжектируется перед chunk_text,
+            чтобы LLM понимала тематику и использовала согласованные сущности.
+
+    Returns:
+        Кортеж (system_prompt, user_prompt).
+    """
     system = f"""Ты — помощник исследователя в области {domain}.
-Твоя задача — извлечь из фрагмента текста научные утверждения в виде триплетов (S-P-O) и сохранить временные метки с максимально возможной точностью.
-Возвращай только связи, которые действительно выражают направленное влияние, изменение, причинность, зависимость, прогноз или временной порядок. Не подменяй это co-occurrence или общим тематическим соседством.
+Задача: извлечь из фрагмента текста проверяемые научные утверждения в виде триплетов (subject–predicate–object).
+
+Что считается валидным триплетом:
+- Утверждение о причинности, влиянии, зависимости, прогнозе или временном порядке между двумя конкретными научными сущностями.
+- Каждая сущность — конкретный термин предметной области (метод, явление, параметр, модель конкретного типа), а НЕ абстрактное слово вроде «модель», «метод», «данные», «результат».
+
+Что НЕ является валидным триплетом:
+- Совместное упоминание терминов без явной направленной связи.
+- Описание структуры статьи («раздел 3 описывает X»).
+- Числовые результаты без интерпретации, формулы, ссылки на таблицы/рисунки.
+- Процедурные детали (разбиение выборки, уничтожение данных, благодарности).
 """
 
     enabled = getattr(settings, "demo_enabled", True) if use_demos is None else use_demos
@@ -403,13 +454,21 @@ def _build_temporal_triplet_prompt_parts(domain: str, chunk_text: str, use_demos
                 max_total_chars=int(getattr(settings, "demo_max_chars_total", 3500)),
                 title="Эталонные примеры извлечения триплетов",
             )
-        except Exception:
+        except Exception as exc:
+            log.debug("Demo block rendering failed: %s", exc)
             demo_block = ""
 
-    user = f"""{demo_block}Фрагмент:
+    context_block = ""
+    if paper_context:
+        context_block = f"""Контекст статьи:
+{paper_context}
+
+"""
+
+    user = f"""{demo_block}{context_block}Фрагмент:
 {chunk_text}
 
-Извлеки 3-10 самых важных утверждений. Для каждого триплета используй компактные сущности и канонический предикат в snake_case."""
+Извлеки до 5 триплетов, отражающих проверяемые причинно-следственные или темпоральные связи из этого фрагмента. Лучше вернуть 1-2 точных триплета, чем 5 сомнительных. Используй компактные сущности и канонический предикат из списка выше."""
     return system, user
 
 
@@ -469,10 +528,11 @@ async def extract_temporal_triplets_async(
     llm_provider: Optional[str] = None,
     llm_model: Optional[str] = None,
     semaphore: Optional[asyncio.Semaphore] = None,
+    paper_context: Optional[str] = None,
 ) -> List[TemporalTriplet]:
     """Async extractor used for high-throughput g4f triplet extraction."""
 
-    system, user = _build_temporal_triplet_prompt_parts(domain=domain, chunk_text=chunk_text, use_demos=use_demos)
+    system, user = _build_temporal_triplet_prompt_parts(domain=domain, chunk_text=chunk_text, use_demos=use_demos, paper_context=paper_context)
     provider, model = _resolve_llm_selection(llm_provider=llm_provider, llm_model=llm_model)
 
     if provider == 'mock':
@@ -504,8 +564,8 @@ async def extract_temporal_triplets_async(
                 return triplets
         except TimeoutError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Async triplet extraction failed, using regex fallback: %s", exc)
         return extract_temporal_triplets_localized_fallback(chunk_text=chunk_text, paper_year=paper_year)
 
     if semaphore is None:
@@ -522,16 +582,21 @@ def extract_temporal_triplets(
     use_demos: Optional[bool] = None,
     llm_provider: Optional[str] = None,
     llm_model: Optional[str] = None,
+    paper_context: Optional[str] = None,
 ) -> List[TemporalTriplet]:
-    """Extract temporal triplets from a chunk.
+    """Извлекает temporal triplets из chunk'а текста.
 
     If use_demos is True (or settings.demo_enabled), the function injects retrieval-few-shot
     examples from Qdrant demo store (task=temporal_triplets) to improve format and accuracy.
 
+    paper_context (улучшения A+D): если передан, добавляет в промпт контекст
+    статьи (заголовок, аннотация) и/или канонический словарь понятий. Это
+    позволяет LLM использовать согласованные имена сущностей.
+
     `llm_provider` / `llm_model` are explicit overrides for this extraction call. This makes
     notebook/CLI overrides deterministic instead of relying on ambient repo defaults.
     """
-    system, user = _build_temporal_triplet_prompt_parts(domain=domain, chunk_text=chunk_text, use_demos=use_demos)
+    system, user = _build_temporal_triplet_prompt_parts(domain=domain, chunk_text=chunk_text, use_demos=use_demos, paper_context=paper_context)
 
     with temporary_llm_selection(llm_provider=llm_provider, llm_model=llm_model):
         provider = (settings.llm_provider or '').lower().strip() or 'auto'
@@ -556,7 +621,8 @@ def extract_temporal_triplets(
                     triplets = extract_temporal_triplets_localized_fallback(chunk_text=chunk_text, paper_year=paper_year)
             except TimeoutError:
                 raise
-            except Exception:
+            except Exception as exc:
+                log.debug("Sync triplet extraction failed, using regex fallback: %s", exc)
                 triplets = extract_temporal_triplets_localized_fallback(chunk_text=chunk_text, paper_year=paper_year)
 
     return _finalize_triplets(triplets, paper_year)

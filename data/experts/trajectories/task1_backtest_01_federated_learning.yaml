@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов федеративного обучения: от базового алгоритма FedAvg к решению проблем гетерогенности данных и коррекции дрейфа клиентов с помощью FedProx и SCAFFOLD.
+domain: Q111835908
+domain_label: Federated Learning
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1602.05629"
+    title: "Communication-Efficient Learning of Deep Networks from Decentralized Data"
+    year: 2017
+  - id: "arxiv:1812.06127"
+    title: "Federated Optimization in Heterogeneous Networks"
+    year: 2020
+  - id: "arxiv:1910.06378"
+    title: "SCAFFOLD: Stochastic Controlled Averaging for Federated Learning"
+    year: 2020
+steps:
+  - step_id: 1
+    claim: "Алгоритм FedAvg позволяет обучать глубокие сети на децентрализованных данных путём итеративного усреднения локально обученных моделей, значительно снижая объём коммуникации."
+    sources:
+      - type: text
+        source: "McMahan et al. (2017)"
+        locator: "Section 2"
+        snippet_or_summary: "Предложен алгоритм Federated Averaging (FedAvg), который комбинирует локальный SGD с периодическим усреднением моделей для эффективного обучения на распределённых данных."
+  - step_id: 2
+    claim: "FedProx обобщает FedAvg для гетерогенных сетей, добавляя проксимальный член к локальной функции потерь, что обеспечивает устойчивую сходимость при неоднородности данных и систем."
+    sources:
+      - type: text
+        source: "Li et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "FedProx добавляет проксимальный регуляризатор к локальной целевой функции, ограничивая отклонение локальных моделей от глобальной и обеспечивая сходимость в гетерогенных условиях."
+  - step_id: 3
+    claim: "SCAFFOLD использует управляющие переменные (control variates) для коррекции дрейфа клиентов, что устраняет влияние гетерогенности данных на скорость сходимости."
+    sources:
+      - type: text
+        source: "Karimireddy et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "SCAFFOLD корректирует локальные обновления с помощью управляющих переменных, компенсируя расхождение между локальными и глобальными градиентами и устраняя зависимость от степени гетерогенности данных."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

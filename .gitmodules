@@ -1,0 +1,3 @@
+[submodule "third_party/papergraph"]
+	path = third_party/papergraph
+	url = https://github.com/IvanLukianenko/papergraph.git

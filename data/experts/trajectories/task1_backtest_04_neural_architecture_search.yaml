@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов поиска архитектуры нейронных сетей: от обучения с подкреплением для генерации архитектур (NAS) через разделение параметров (ENAS) к дифференцируемому поиску (DARTS).
+domain: Q7307384
+domain_label: Neural architecture search
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1611.01578"
+    title: "Neural Architecture Search with Reinforcement Learning"
+    year: 2017
+  - id: "arxiv:1802.03268"
+    title: "Efficient Neural Architecture Search via Parameter Sharing"
+    year: 2018
+  - id: "arxiv:1806.09055"
+    title: "DARTS: Differentiable Architecture Search"
+    year: 2019
+steps:
+  - step_id: 1
+    claim: "Рекуррентная сеть-контроллер, обучаемая с подкреплением, способна автоматически генерировать архитектуры нейронных сетей, превосходящие вручную спроектированные модели."
+    sources:
+      - type: text
+        source: "Zoph & Le (2017)"
+        locator: "Section 3"
+        snippet_or_summary: "RNN-контроллер генерирует описания архитектур и обучается через REINFORCE для максимизации точности на валидации, достигая ошибки 3.65% на CIFAR-10."
+  - step_id: 2
+    claim: "Разделение параметров между дочерними моделями через единый суперграф ускоряет поиск архитектуры в 1000 раз по сравнению с оригинальным NAS."
+    sources:
+      - type: text
+        source: "Pham et al. (2018)"
+        locator: "Section 2"
+        snippet_or_summary: "ENAS ищет оптимальный подграф в большом вычислительном графе, где все дочерние модели делят параметры, что снижает стоимость поиска до менее чем одного GPU-дня."
+  - step_id: 3
+    claim: "Непрерывная релаксация дискретного пространства архитектур позволяет использовать градиентный спуск для поиска, снижая стоимость на порядки при сохранении качества."
+    sources:
+      - type: text
+        source: "Liu et al. (2019)"
+        locator: "Section 3"
+        snippet_or_summary: "DARTS формулирует задачу поиска как оптимизацию непрерывных весов операций через двухуровневую оптимизацию, что позволяет найти конкурентоспособные архитектуры за несколько GPU-дней."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

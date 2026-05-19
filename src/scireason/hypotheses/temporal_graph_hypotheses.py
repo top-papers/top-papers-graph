@@ -457,7 +457,27 @@ def _llm_hypothesis(domain: str, query: str, c: HypothesisCandidate) -> Optional
     )
 
     data = chat_json(system=system, user=user, schema_hint=HYP_SCHEMA_HINT, temperature=0.2)
+    _coerce_hypothesis_payload(data)
     return HypothesisDraft.model_validate(data)
+
+
+def _coerce_hypothesis_payload(data: dict) -> None:
+    # Модель часто отдаёт proposed_experiment как объект ({design, metric, controls, ...}),
+    # хотя схема ждёт строку. Сплющиваем в "ключ: значение" построчно, чтобы не терять контент.
+    for key in ("proposed_experiment", "premise", "mechanism", "time_scope", "title"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            data[key] = "\n".join(f"{k}: {_stringify(v)}" for k, v in value.items() if v not in (None, ""))
+        elif isinstance(value, list):
+            data[key] = "\n".join(f"- {_stringify(v)}" for v in value if v not in (None, ""))
+
+
+def _stringify(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 def generate_hypotheses(

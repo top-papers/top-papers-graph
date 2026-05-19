@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов понимания видео: от расширения 2D свёрток до 3D (I3D) через двухпотоковую обработку на разных частотах кадров (SlowFast) к чисто трансформерному подходу (TimeSformer).
+domain: Q98453832
+domain_label: Video understanding
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1705.07750"
+    title: "Quo Vadis, Action Recognition? A New Model and the Kinetics Dataset"
+    year: 2017
+  - id: "arxiv:1812.03982"
+    title: "SlowFast Networks for Video Recognition"
+    year: 2019
+  - id: "arxiv:2102.05095"
+    title: "Is Space-Time Attention All You Need for Video Understanding?"
+    year: 2021
+steps:
+  - step_id: 1
+    claim: "Инфлирование 2D-свёрток ImageNet-моделей в 3D (I3D) с предобучением на Kinetics позволяет эффективно обучать пространственно-временные признаки для распознавания действий."
+    sources:
+      - type: text
+        source: "Carreira & Zisserman (2017)"
+        locator: "Section 3"
+        snippet_or_summary: "Two-Stream Inflated 3D ConvNet (I3D) расширяет 2D фильтры ImageNet-моделей до 3D, достигая 98.0% на UCF-101 и 80.9% на HMDB-51 после предобучения на Kinetics."
+  - step_id: 2
+    claim: "Разделение обработки на медленный (семантика) и быстрый (движение) потоки с разными частотами кадров позволяет эффективно совмещать пространственную и временную информацию."
+    sources:
+      - type: text
+        source: "Feichtenhofer et al. (2019)"
+        locator: "Section 3"
+        snippet_or_summary: "SlowFast использует Slow-поток с низкой частотой для пространственной семантики и лёгкий Fast-поток с высокой частотой для временной динамики, достигая SOTA на Kinetics, Charades и AVA."
+  - step_id: 3
+    claim: "Чисто трансформерная архитектура с разделённым пространственно-временным вниманием (divided attention) эффективно заменяет свёрточные сети для классификации видео."
+    sources:
+      - type: text
+        source: "Bertasius et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "TimeSformer применяет отдельное временное и пространственное self-attention в каждом блоке трансформера, достигая SOTA на Kinetics-400 без использования свёрток."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

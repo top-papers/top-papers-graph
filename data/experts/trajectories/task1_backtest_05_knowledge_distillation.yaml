@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Эволюция методов дистилляции знаний: от классической дистилляции мягких меток (Hinton) через использование промежуточных представлений (FitNets) к контрастной дистилляции представлений (CRD).
+domain: Q113216942
+domain_label: Knowledge distillation
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1503.02531"
+    title: "Distilling the Knowledge in a Neural Network"
+    year: 2015
+  - id: "arxiv:1412.6550"
+    title: "FitNets: Hints for Thin Deep Nets"
+    year: 2015
+  - id: "arxiv:1910.10699"
+    title: "Contrastive Representation Distillation"
+    year: 2020
+steps:
+  - step_id: 1
+    claim: "Использование мягких меток (soft targets) от учителя с высокой температурой softmax позволяет эффективно передавать знания ансамбля в компактную модель-ученика."
+    sources:
+      - type: text
+        source: "Hinton et al. (2015)"
+        locator: "Section 2"
+        snippet_or_summary: "Дистилляция знаний через обучение ученика на мягком распределении учителя с повышенной температурой позволяет передавать структурную информацию о сходстве между классами."
+  - step_id: 2
+    claim: "Использование промежуточных представлений учителя как подсказок (hints) для обучения тонких и глубоких сетей-учеников позволяет превзойти учителя при меньшем числе параметров."
+    sources:
+      - type: text
+        source: "Romero et al. (2015)"
+        locator: "Section 3"
+        snippet_or_summary: "FitNets обучает более глубокую и узкую сеть-ученика, используя промежуточные представления учителя как подсказки, достигая лучшей точности с 10-кратным сжатием."
+  - step_id: 3
+    claim: "Контрастная дистилляция представлений (CRD) формулирует передачу знаний как контрастную задачу, захватывая структурную информацию представлений учителя значительно лучше KL-дивергенции."
+    sources:
+      - type: text
+        source: "Tian et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "CRD максимизирует взаимную информацию между представлениями учителя и ученика через контрастную функцию потерь, превосходя стандартную дистилляцию на задачах сжатия и кросс-модальной передачи."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

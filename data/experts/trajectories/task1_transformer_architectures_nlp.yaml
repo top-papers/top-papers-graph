@@ -1,0 +1,189 @@
+artifact_version: 3
+topic: >-
+  Трансформерные архитектуры для обработки естественного языка: от механизма внимания как замены рекуррентности
+  до законов масштабирования языковых моделей.
+  Траектория прослеживает путь от введения архитектуры Transformer через парадигму предобучения
+  двунаправленных представлений (BERT) до эмпирических законов масштабирования, определяющих
+  оптимальное соотношение размера модели, данных и вычислительного бюджета.
+domain: Q30642
+domain_label: natural language processing
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1706.03762"
+    title: "Attention Is All You Need"
+    year: 2017
+  - id: "arxiv:1810.04805"
+    title: "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
+    year: 2019
+  - id: "arxiv:2001.08361"
+    title: "Scaling Laws for Neural Language Models"
+    year: 2020
+steps:
+  - step_id: 1
+    claim: >-
+      Архитектура Transformer, основанная исключительно на механизме внимания (self-attention)
+      без использования рекуррентных или свёрточных слоёв, превосходит существующие модели
+      машинного перевода по качеству (28.4 BLEU на WMT 2014 En-De, 41.8 BLEU на En-Fr)
+      при значительно меньшем времени обучения благодаря полной параллелизуемости вычислений.
+    sources:
+      - type: text
+        source: "arxiv:1706.03762"
+        page: 1
+        locator: "Abstract, Section 6"
+        snippet_or_summary: >-
+          Vaswani et al. предлагают архитектуру Transformer, построенную на multi-head
+          self-attention и позиционном кодировании, без рекуррентных или свёрточных слоёв.
+          Модель достигает 28.4 BLEU на WMT 2014 En-De (превышая предыдущий лучший результат
+          на 2+ BLEU) и 41.8 BLEU на En-Fr за 3.5 дня обучения на 8 GPU.
+    conditions:
+      system: "задача машинного перевода (WMT 2014 English-German, English-French)"
+      environment: "обучение на 8 GPU NVIDIA P100, ~3.5 дня для большой модели"
+      protocol: "encoder-decoder архитектура, multi-head self-attention, позиционное кодирование, label smoothing"
+      notes: "Первая архитектура, полностью отказавшаяся от рекуррентности в пользу внимания"
+    discovery_context:
+      simultaneous_discovery: false
+      geography:
+        country:
+          id: Q30
+          label: "США"
+        city:
+          id: Q62
+          label: "Сан-Франциско"
+      science_branches:
+        - id: Q30642
+          label: "обработка естественного языка"
+        - id: Q2539
+          label: "машинное обучение"
+    inference: >-
+      Transformer доказал, что механизм self-attention является достаточным для моделирования
+      последовательных зависимостей, при этом обеспечивая полную параллелизацию.
+      Это создаёт предпосылки для масштабирования языковых моделей за счёт увеличения
+      размера модели и объёма данных.
+    next_question: >-
+      Можно ли использовать Transformer не только для генерации в формате encoder-decoder,
+      но и для предобучения универсальных языковых представлений, применимых к широкому
+      спектру задач NLP через файнтюнинг?
+  - step_id: 2
+    claim: >-
+      Двунаправленное предобучение на основе архитектуры Transformer (модель BERT) с задачами
+      маскированного языкового моделирования (MLM) и предсказания следующего предложения (NSP)
+      создаёт универсальные языковые представления, которые при файнтюнинге устанавливают
+      state-of-the-art на 11 задачах NLP, включая GLUE (80.5%), SQuAD v1.1 (F1=93.2)
+      и SQuAD v2.0 (F1=83.1), при этом требуя минимальных архитектурных модификаций.
+    sources:
+      - type: text
+        source: "arxiv:1810.04805"
+        page: 1
+        locator: "Abstract, Table 1, Table 2"
+        snippet_or_summary: >-
+          Devlin et al. предлагают BERT -- модель на базе Transformer-энкодера,
+          предобученную двунаправленно через задачи MLM и NSP на корпусах BooksCorpus
+          и Wikipedia. После файнтюнинга BERT улучшает GLUE score на 7.7 п.п. (до 80.5%),
+          SQuAD v1.1 F1 на 1.5 п. (до 93.2), SQuAD v2.0 F1 на 5.1 п. (до 83.1).
+      - type: table
+        source: "arxiv:1810.04805"
+        page: 7
+        locator: "Table 1"
+        snippet_or_summary: >-
+          Таблица 1 показывает результаты BERT-Base и BERT-Large на GLUE-бенчмарке
+          по всем 8 подзадачам, демонстрируя устойчивое превосходство над предыдущими
+          моделями (OpenAI GPT, ELMo) на каждой задаче.
+    conditions:
+      system: "11 NLP-задач: GLUE (8 подзадач), SQuAD v1.1, SQuAD v2.0, SWAG"
+      environment: "предобучение на BooksCorpus + English Wikipedia (~3.3B слов), 4 Cloud TPU Pod (16 TPU chips)"
+      protocol: "предобучение MLM+NSP, затем файнтюнинг с одним дополнительным выходным слоем"
+      notes: "BERT-Large: 340M параметров, 24 слоя, 1024 hidden, 16 attention heads"
+    discovery_context:
+      simultaneous_discovery: false
+      geography:
+        country:
+          id: Q30
+          label: "США"
+        city: {}
+      science_branches:
+        - id: Q30642
+          label: "обработка естественного языка"
+        - id: Q2539
+          label: "машинное обучение"
+    inference: >-
+      BERT продемонстрировал, что парадигма «предобучение + файнтюнинг» на базе Transformer
+      является мощнейшим подходом к NLP: одна предобученная модель адаптируется ко множеству
+      задач без существенных архитектурных изменений. Это породило вопрос о том, как
+      масштабирование модели и данных влияет на качество.
+    next_question: >-
+      Существуют ли предсказуемые закономерности между размером модели, объёмом данных,
+      вычислительным бюджетом и итоговым качеством языковой модели?
+  - step_id: 3
+    claim: >-
+      Эмпирические законы масштабирования показывают, что loss языковой модели на базе
+      Transformer убывает как степенная функция от размера модели (числа параметров N),
+      объёма обучающих данных (D) и затраченного вычислительного бюджета (C), причём эти
+      зависимости прослеживаются на протяжении более семи порядков величин. Оптимальная
+      стратегия при фиксированном бюджете -- обучать очень большую модель на относительно
+      небольшом объёме данных, останавливая обучение значительно раньше сходимости.
+    sources:
+      - type: text
+        source: "arxiv:2001.08361"
+        page: 1
+        locator: "Abstract, Section 1, Figure 1"
+        snippet_or_summary: >-
+          Kaplan et al. обнаруживают, что test loss языковых моделей Transformer
+          подчиняется степенным законам L(N) ~ N^{-0.076}, L(D) ~ D^{-0.095},
+          L(C) ~ C^{-0.050}, где N -- число параметров, D -- размер данных, C -- compute.
+          Архитектурные детали (ширина vs. глубина) оказывают минимальное влияние
+          в широком диапазоне. При фиксированном C оптимально обучать большую модель
+          на меньшем количестве данных, не доводя до сходимости.
+      - type: image
+        source: "arxiv:2001.08361"
+        page: 3
+        locator: "Figure 1"
+        snippet_or_summary: >-
+          Рисунок 1 показывает степенные зависимости loss от N, D и C
+          на логарифмических шкалах, демонстрируя линейность (= степенной закон)
+          на протяжении 7+ порядков величин.
+    conditions:
+      system: "языковые модели Transformer (от 768 до 1.5B параметров)"
+      environment: "корпус WebText2, ~22B токенов, обучение на GPU-кластерах"
+      protocol: "систематическое варьирование N, D, compute при фиксации остальных; autoregressive LM"
+      notes: "Позднее Hoffmann et al. (Chinchilla, 2022) скорректировали оптимальные пропорции N и D"
+    discovery_context:
+      simultaneous_discovery: false
+      geography:
+        country:
+          id: Q30
+          label: "США"
+        city:
+          id: Q62
+          label: "Сан-Франциско"
+      science_branches:
+        - id: Q30642
+          label: "обработка естественного языка"
+        - id: Q2539
+          label: "машинное обучение"
+    inference: >-
+      Законы масштабирования превращают проектирование языковых моделей из искусства
+      в инженерную задачу: зная вычислительный бюджет, можно предсказать оптимальное
+      распределение между размером модели и объёмом данных. Это объясняет, почему
+      увеличение масштаба моделей (GPT-3, PaLM и др.) привело к качественным скачкам.
+    next_question: >-
+      Как эти законы масштабирования зависят от модальности данных (текст, код, изображения)
+      и от конкретных downstream-задач, а не только от perplexity?
+edges:
+  - from_step_id: 1
+    to_step_id: 2
+    predicate: enables
+    directionality: directed
+    direction_label: "Архитектура Transformer служит основой для предобученной модели BERT"
+    simultaneous_discovery: false
+  - from_step_id: 2
+    to_step_id: 3
+    predicate: motivates
+    directionality: directed
+    direction_label: "Успех BERT и парадигмы предобучения ставит вопрос о закономерностях масштабирования"
+    simultaneous_discovery: false
+  - from_step_id: 1
+    to_step_id: 3
+    predicate: builds_on
+    directionality: directed
+    direction_label: "Законы масштабирования изучают именно Transformer-архитектуру, предложенную Vaswani et al."
+    simultaneous_discovery: false

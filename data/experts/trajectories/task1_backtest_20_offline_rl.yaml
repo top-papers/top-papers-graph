@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие offline обучения с подкреплением: от формулировки проблемы и обзора подходов через консервативное Q-обучение (CQL) к неявному Q-обучению (IQL), избегающему оценки действий вне распределения.
+domain: Q830687
+domain_label: Reinforcement learning
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2005.01643"
+    title: "Offline Reinforcement Learning: Tutorial, Review, and Perspectives on Open Problems"
+    year: 2020
+  - id: "arxiv:2006.04779"
+    title: "Conservative Q-Learning for Offline Reinforcement Learning"
+    year: 2020
+  - id: "arxiv:2110.06169"
+    title: "Offline Reinforcement Learning with Implicit Q-Learning"
+    year: 2022
+steps:
+  - step_id: 1
+    claim: "Offline RL формулируется как обучение политики исключительно по ранее собранным данным, где ключевой проблемой является переоценка значений действий вне распределения данных."
+    sources:
+      - type: text
+        source: "Levine et al. (2020)"
+        locator: "Section 4"
+        snippet_or_summary: "Обзор определяет offline RL как обучение без онлайн-взаимодействия и систематизирует проблему distributional shift между данными и изучаемой политикой, ведущую к переоценке Q-значений."
+  - step_id: 2
+    claim: "Консервативное Q-обучение (CQL) решает проблему переоценки путём обучения консервативной Q-функции, нижняя граница которой гарантирует безопасную оценку политики."
+    sources:
+      - type: text
+        source: "Kumar et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "CQL добавляет регуляризатор, минимизирующий Q-значения для действий вне данных и максимизирующий для действий в данных, обеспечивая нижнюю границу истинных Q-значений."
+  - step_id: 3
+    claim: "Неявное Q-обучение (IQL) полностью избегает оценки действий вне распределения данных, аппроксимируя оптимальную value-функцию через expectile-регрессию."
+    sources:
+      - type: text
+        source: "Kostrikov et al. (2022)"
+        locator: "Section 4"
+        snippet_or_summary: "IQL обучает верхний expectile value-функции как случайной величины и извлекает политику через advantage-weighted behavioral cloning, никогда не оценивая Q для ненаблюдаемых действий."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

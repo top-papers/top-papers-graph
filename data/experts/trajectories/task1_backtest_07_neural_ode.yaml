@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие моделей с непрерывной глубиной: от нейронных обыкновенных дифференциальных уравнений (Neural ODE) через управляемые дифференциальные уравнения для нерегулярных временных рядов к систематическому анализу динамики Neural ODE.
+domain: Q107365955
+domain_label: Neural ordinary differential equation
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1806.07366"
+    title: "Neural Ordinary Differential Equations"
+    year: 2018
+  - id: "arxiv:2005.08926"
+    title: "Neural Controlled Differential Equations for Irregular Time Series"
+    year: 2020
+  - id: "arxiv:2002.08071"
+    title: "Dissecting Neural ODEs"
+    year: 2020
+steps:
+  - step_id: 1
+    claim: "Параметризация производной скрытого состояния нейронной сетью и решение ОДУ чёрным ящиком позволяет создать модели непрерывной глубины с постоянным расходом памяти."
+    sources:
+      - type: text
+        source: "Chen et al. (2018)"
+        locator: "Section 2"
+        snippet_or_summary: "Neural ODE параметризирует динамику скрытого состояния нейронной сетью, вычисляя градиенты через adjoint-метод, что обеспечивает постоянную память и адаптивную стратегию интегрирования."
+  - step_id: 2
+    claim: "Расширение Neural ODE на управляемые дифференциальные уравнения решает фундаментальную проблему обработки нерегулярно дискретизированных многомерных временных рядов."
+    sources:
+      - type: text
+        source: "Kidger et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "Neural CDE используют математику управляемых дифференциальных уравнений для обработки частично наблюдаемых нерегулярных временных рядов, достигая state-of-the-art среди ODE/RNN-моделей."
+  - step_id: 3
+    claim: "Систематический анализ проектных решений Neural ODE выявляет их влияние на динамику модели и связывает глубокое обучение с теорией динамических систем."
+    sources:
+      - type: text
+        source: "Massaroli et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "Работа анализирует влияние различных проектных решений (глубина, ширина, тип активации) на динамику Neural ODE, устанавливая мост между глубоким обучением и динамическими системами."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

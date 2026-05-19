@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие эффективных трансформеров: от линейного внимания через ядерную аппроксимацию (Performers) к аппаратно-оптимизированному точному вниманию (FlashAttention), решающему проблему квадратичной сложности.
+domain: Q113085834
+domain_label: Efficient transformer
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2006.16236"
+    title: "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention"
+    year: 2020
+  - id: "arxiv:2009.14794"
+    title: "Rethinking Attention with Performers"
+    year: 2021
+  - id: "arxiv:2205.14135"
+    title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
+    year: 2022
+steps:
+  - step_id: 1
+    claim: "Выражение self-attention через линейное ядро и использование ассоциативности матричного произведения снижает сложность с O(N^2) до O(N) и выявляет связь трансформеров с RNN."
+    sources:
+      - type: text
+        source: "Katharopoulos et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "Линейное внимание через feature maps ядра позволяет итеративное вычисление за O(N), ускоряя авторегрессивный вывод в 4000 раз на длинных последовательностях."
+  - step_id: 2
+    claim: "Аппроксимация softmax-ядра через положительные ортогональные случайные признаки (FAVOR+) обеспечивает линейную сложность с доказуемой точностью без предположений о разреженности."
+    sources:
+      - type: text
+        source: "Choromanski et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "Performers используют FAVOR+ — аппроксимацию softmax-ядра через случайные признаки — для достижения линейной сложности при сохранении точности стандартного внимания."
+  - step_id: 3
+    claim: "IO-aware алгоритм тайлинга позволяет вычислять точное (не аппроксимированное) внимание значительно быстрее за счёт минимизации обращений к медленной GPU-памяти."
+    sources:
+      - type: text
+        source: "Dao et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "FlashAttention использует тайлинг для минимизации чтений/записей между GPU HBM и SRAM, ускоряя BERT на 15% и GPT-2 в 3 раза при точном вычислении внимания."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

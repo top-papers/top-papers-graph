@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие мультимодального обучения: от контрастного предобучения на парах изображение-текст (CLIP) через бутстрэппинг подписей для объединения понимания и генерации (BLIP) к визуальному инструктивному дообучению (LLaVA).
+domain: Q114953838
+domain_label: Multimodal learning
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2103.00020"
+    title: "Learning Transferable Visual Models From Natural Language Supervision"
+    year: 2021
+  - id: "arxiv:2201.12086"
+    title: "BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation"
+    year: 2022
+  - id: "arxiv:2304.08485"
+    title: "Visual Instruction Tuning"
+    year: 2023
+steps:
+  - step_id: 1
+    claim: "Контрастное обучение на 400 миллионах пар изображение-текст из интернета создаёт трансферабельные визуальные представления, позволяющие zero-shot классификацию через естественный язык."
+    sources:
+      - type: text
+        source: "Radford et al. (2021)"
+        locator: "Section 2"
+        snippet_or_summary: "CLIP обучает визуальный и текстовый энкодеры через контрастную функцию потерь на 400M пар, где zero-shot классификатор превосходит supervised ResNet-50 на 16 из 27 датасетов."
+  - step_id: 2
+    claim: "Бутстрэппинг подписей через captioner и filter на зашумлённых веб-данных позволяет единой модели эффективно решать как задачи понимания, так и генерации в vision-language."
+    sources:
+      - type: text
+        source: "Li et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "BLIP генерирует синтетические подписи captioner-ом и фильтрует шумные, что позволяет единой модели предобучения гибко переноситься на задачи VQA, captioning и retrieval."
+  - step_id: 3
+    claim: "Инструктивное дообучение большой языковой модели на визуально-текстовых данных, сгенерированных GPT-4, создаёт мультимодального ассистента с впечатляющими диалоговыми способностями."
+    sources:
+      - type: text
+        source: "Liu et al. (2023)"
+        locator: "Section 3"
+        snippet_or_summary: "LLaVA использует GPT-4 для генерации мультимодальных инструктивных данных и дообучает LLM с визуальным энкодером, достигая 85.1% качества GPT-4 в мультимодальном диалоге."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

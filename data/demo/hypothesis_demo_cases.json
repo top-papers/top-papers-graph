@@ -1,0 +1,12 @@
+{
+  "description": "Фиксированный набор кейсов для side-by-side демонстрации генерации гипотез. Один и тот же набор прогоняется на двух версиях пайплайна — оба результата кладутся рядом в один отчёт.",
+  "cases": [
+    {
+      "id": "case01_knowledge_distillation",
+      "query": "knowledge distillation in neural networks",
+      "cutoff_year": "2024",
+      "top_papers": 4,
+      "top_hypotheses": 5
+    }
+  ]
+}

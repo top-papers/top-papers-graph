@@ -10,11 +10,13 @@ class Settings(BaseSettings):
     llm_provider: str = "auto"  # auto|mock|ollama|g4f|openai|anthropic|...
     llm_model: str = "auto"
     ollama_base_url: str = "http://localhost:11434"
+    ollama_runtime_serialized: bool = True
     g4f_providers: str | None = None
     g4f_api_key: str | None = None
     task2_default_g4f_model: str = "r1-1776"
     task2_default_local_vlm_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"
-    llm_request_timeout_seconds: int = 25
+    task2_default_ollama_vlm_model: str = "qwen2.5vl:3b"
+    llm_request_timeout_seconds: int = 180
     g4f_async_enabled: bool = True
     g4f_async_max_concurrency: int = 3
     g4f_async_retries: int = 3
@@ -31,6 +33,10 @@ class Settings(BaseSettings):
     ocr_backend: str = "auto"  # auto(default=PaddleOCR->local fallback)|paddleocr|grobid|pymupdf
     paddleocr_lang: str | None = None
     paddleocr_worker_timeout_seconds: int = 90
+    ocr_vlm_fallback_enabled: bool = False
+    ocr_vlm_min_chars_per_page: int = 120
+    ocr_vlm_repair_noisy_text_enabled: bool = True
+    ocr_vlm_repair_suspicious_chars_per_1k: int = 12
 
     # ===== Infra =====
     neo4j_uri: str = "bolt://localhost:7687"
@@ -96,6 +102,34 @@ class Settings(BaseSettings):
 
     # ===== Temporal GraphRAG =====
     temporal_default_granularity: str = "year"
+
+    # ===== Качество извлечения триплетов =====
+    # Контекст статьи в промпте (title + abstract → каждый чанк)
+    triplet_paper_context_enabled: bool = False
+    triplet_paper_context_max_chars: int = 500
+
+    # Fuzzy-нормализация сущностей после построения графа
+    entity_normalization_enabled: bool = False
+    entity_normalization_threshold: float = 0.85
+
+    # Summary-триплеты (один LLM-вызов на статью для ключевых утверждений)
+    paper_summary_triplets_enabled: bool = False
+    paper_summary_max_input_chars: int = 3000
+
+    # Каноническая лексика для кросс-документных рёбер
+    canonical_vocabulary_enabled: bool = False
+    canonical_vocabulary_max_concepts: int = 30
+
+    # Верификация рёбер (confidence gate + LLM-проверка)
+    triplet_verify_enabled: bool = False
+    triplet_verify_confidence_threshold: float = 0.5
+    triplet_verify_batch_size: int = 80
+
+    # Оценочная функция качества утверждений (10 признаков → логистическая регрессия)
+    assertion_scorer_enabled: bool = True
+    assertion_scorer_weights_path: str = "data/derived/assertion_scorer_weights.json"
+    assertion_scorer_accept_threshold: float = 0.7
+    assertion_scorer_reject_threshold: float = 0.25
 
     # ===== Domain =====
     domain_id: str = "science"

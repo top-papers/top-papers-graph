@@ -3,18 +3,24 @@ from __future__ import annotations
 import csv
 import html
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from .task2_filters import cooccurrence_strength_score, is_cooccurrence_triplet, is_likely_causal_triplet
 from .temporal.schemas import normalize_granularity
 
+log = logging.getLogger(__name__)
 
 _MANIFEST_LIST_KEYS = ("assertions", "rows", "triplets", "edges", "corrections", "hits")
 
 
 def _safe_json_load(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        log.warning("Failed to load JSON from %s: %s", path, exc)
+        return None
 
 
 def _parse_maybe_object(value: Any) -> Any:
@@ -444,11 +450,13 @@ _HTML_TEMPLATE = r"""<!doctype html>
 
     <div class="nav">
       <button class="active" data-section="graphs">Графы и assertions</button>
+      <button data-section="insights">Инсайты и гипотезы</button>
       <button data-section="validation">Валидация эксперта</button>
       <button data-section="summary">Сводка</button>
     </div>
 
     <section id="section-graphs" class="section active"></section>
+    <section id="section-insights" class="section"></section>
     <section id="section-validation" class="section"></section>
     <section id="section-summary" class="section"></section>
 
@@ -1430,6 +1438,209 @@ match_substrings:
     });
   }
 
+  function renderInsights() {
+    const host = document.getElementById('section-insights');
+    host.innerHTML = '';
+
+    const autoGraph = APP.graphs.auto || {};
+    const edges = graphEdges(autoGraph);
+    const nodes = graphNodes(autoGraph);
+    const meta = autoGraph.meta || {};
+    const comparison = APP.comparison_summary || {};
+
+    if (!edges.length) {
+      host.appendChild(el('div', { class: 'card', html: '<h2>Инсайты и гипотезы</h2><p class="muted">Автоматический граф пуст — инсайты недоступны.</p>' }));
+      return;
+    }
+
+    // --- 1. Overview card ---
+    const overviewCard = el('div', { class: 'card' });
+    overviewCard.style.padding = '20px';
+    overviewCard.appendChild(el('h2', { text: 'Обзор корпуса' }));
+
+    const topicText = APP.meta.topic || comparison.review_focus || '(тема не указана)';
+    overviewCard.appendChild(el('p', { html: `<b>Тема исследования:</b> ${htmlEscape(topicText)}` }));
+
+    const statsPills = el('div', { class: 'toolbar' });
+    statsPills.appendChild(el('span', { class: 'pill accepted', text: `${nodes.length} понятий` }));
+    statsPills.appendChild(el('span', { class: 'pill accepted', text: `${edges.length} связей` }));
+    statsPills.appendChild(el('span', { class: 'pill accepted', text: `${comparison.resolved_papers || meta.n_papers || '?'} статей` }));
+    const years = meta.years || [];
+    if (years.length) statsPills.appendChild(el('span', { class: 'pill', text: `${Math.min(...years)}–${Math.max(...years)}` }));
+    overviewCard.appendChild(statsPills);
+    host.appendChild(overviewCard);
+
+    // --- 2. Key findings (top edges by score) ---
+    const findingsCard = el('div', { class: 'card' });
+    findingsCard.style.padding = '20px';
+    findingsCard.appendChild(el('h2', { text: 'Ключевые научные связи' }));
+    findingsCard.appendChild(el('p', { class: 'muted', text: 'Наиболее значимые каузальные и направленные связи, обнаруженные автоматическим анализом (ранжированы по score = log_count + PMI + trend + confidence).' }));
+
+    const topEdges = edges
+      .filter(e => e.predicate !== 'cooccurs_with' && e.predicate !== 'associated_with')
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .slice(0, 15);
+
+    const findingsTable = el('table');
+    findingsTable.style.width = '100%';
+    const fHead = el('thead');
+    fHead.appendChild(el('tr', null,
+      el('th', { text: 'Связь' }),
+      el('th', { text: 'Предикат' }),
+      el('th', { text: 'Статьи' }),
+      el('th', { text: 'Evidence' })
+    ));
+    findingsTable.appendChild(fHead);
+    const fBody = el('tbody');
+    topEdges.forEach(e => {
+      const quotes = (e.evidence_quotes || []).slice(0, 2).map(q => q.quote || '').filter(Boolean).join(' | ');
+      const paperCount = (e.papers || []).length;
+      fBody.appendChild(el('tr', null,
+        el('td', { html: `<b>${htmlEscape(e.source)}</b> → <b>${htmlEscape(e.target)}</b>` }),
+        el('td', { html: `<code>${htmlEscape(e.predicate)}</code>` }),
+        el('td', { text: `${paperCount}` }),
+        el('td', { class: 'muted', html: htmlEscape(truncate(quotes, 200)) || '—' })
+      ));
+    });
+    findingsTable.appendChild(fBody);
+    findingsCard.appendChild(el('div', { class: 'table-wrap' }, findingsTable));
+    host.appendChild(findingsCard);
+
+    // --- 3. Cross-document concepts ---
+    const paperTerms = {};
+    edges.forEach(e => {
+      (e.papers || []).forEach(pid => {
+        if (!paperTerms[pid]) paperTerms[pid] = new Set();
+        paperTerms[pid].add(e.source);
+        paperTerms[pid].add(e.target);
+      });
+    });
+    const pids = Object.keys(paperTerms);
+    const crossTerms = {};
+    if (pids.length > 1) {
+      const allTerms = new Set();
+      pids.forEach(pid => paperTerms[pid].forEach(t => allTerms.add(t)));
+      allTerms.forEach(term => {
+        const inPapers = pids.filter(pid => paperTerms[pid].has(term));
+        if (inPapers.length >= 2) crossTerms[term] = inPapers;
+      });
+    }
+
+    if (Object.keys(crossTerms).length > 0) {
+      const crossCard = el('div', { class: 'card' });
+      crossCard.style.padding = '20px';
+      crossCard.appendChild(el('h2', { text: 'Кросс-документные понятия' }));
+      crossCard.appendChild(el('p', { class: 'muted', text: 'Понятия, встречающиеся в нескольких статьях. Через них проходят кросс-документные каузальные цепочки.' }));
+
+      const crossTable = el('table');
+      crossTable.style.width = '100%';
+      const cHead = el('thead');
+      cHead.appendChild(el('tr', null,
+        el('th', { text: 'Понятие' }),
+        el('th', { text: 'В скольких статьях' }),
+        el('th', { text: 'Связи (→ из / → в)' })
+      ));
+      crossTable.appendChild(cHead);
+      const cBody = el('tbody');
+
+      const sortedCross = Object.entries(crossTerms).sort((a, b) => b[1].length - a[1].length);
+      sortedCross.slice(0, 20).forEach(([term, papers]) => {
+        const outEdges = edges.filter(e => e.source === term).slice(0, 3);
+        const inEdges = edges.filter(e => e.target === term).slice(0, 3);
+        const edgeStr = [
+          ...outEdges.map(e => `→ ${e.target} (${e.predicate})`),
+          ...inEdges.map(e => `${e.source} → (${e.predicate})`),
+        ].join('; ');
+        cBody.appendChild(el('tr', null,
+          el('td', { html: `<b>${htmlEscape(term)}</b>` }),
+          el('td', { text: `${papers.length}` }),
+          el('td', { class: 'muted', text: truncate(edgeStr, 200) || '—' })
+        ));
+      });
+      crossTable.appendChild(cBody);
+      crossCard.appendChild(el('div', { class: 'table-wrap' }, crossTable));
+      host.appendChild(crossCard);
+    }
+
+    // --- 4. Hypotheses ---
+    const hypCard = el('div', { class: 'card' });
+    hypCard.style.padding = '20px';
+    hypCard.appendChild(el('h2', { text: 'Научные гипотезы' }));
+    hypCard.appendChild(el('p', { class: 'muted', text: 'Гипотезы сформулированы на основе кросс-документных связей и каузальных цепочек в графе.' }));
+
+    const hypotheses = [];
+
+    // Generate hypotheses from cross-document paths
+    const crossTermList = Object.keys(crossTerms);
+    const edgesBySource = {};
+    const edgesByTarget = {};
+    edges.forEach(e => {
+      if (!edgesBySource[e.source]) edgesBySource[e.source] = [];
+      edgesBySource[e.source].push(e);
+      if (!edgesByTarget[e.target]) edgesByTarget[e.target] = [];
+      edgesByTarget[e.target].push(e);
+    });
+
+    // Find 2-hop paths through cross-document nodes
+    crossTermList.forEach(hub => {
+      const incoming = (edgesByTarget[hub] || []).filter(e => e.predicate !== 'cooccurs_with').slice(0, 3);
+      const outgoing = (edgesBySource[hub] || []).filter(e => e.predicate !== 'cooccurs_with').slice(0, 3);
+      incoming.forEach(inE => {
+        outgoing.forEach(outE => {
+          if (inE.source === outE.target) return;
+          const inPapers = new Set(inE.papers || []);
+          const outPapers = new Set(outE.papers || []);
+          const crossPaper = [...inPapers].some(p => !outPapers.has(p)) || [...outPapers].some(p => !inPapers.has(p));
+          if (!crossPaper) return;
+          hypotheses.push({
+            path: `${inE.source} —[${inE.predicate}]→ ${hub} —[${outE.predicate}]→ ${outE.target}`,
+            hub,
+            premise: `${inE.source} ${inE.predicate.replace(/_/g, ' ')} ${hub}`,
+            consequence: `${hub} ${outE.predicate.replace(/_/g, ' ')} ${outE.target}`,
+            hypothesis: `Если ${inE.source} ${inE.predicate.replace(/_/g, ' ')} ${hub}, то это может ${outE.predicate.replace(/_/g, ' ')} ${outE.target}`,
+            papers: [...new Set([...(inE.papers || []), ...(outE.papers || [])])],
+            score: ((inE.score || 0) + (outE.score || 0)) / 2,
+          });
+        });
+      });
+    });
+
+    hypotheses.sort((a, b) => b.score - a.score);
+    const topHyp = hypotheses.slice(0, 10);
+
+    if (topHyp.length > 0) {
+      topHyp.forEach((h, idx) => {
+        const hypBlock = el('div');
+        hypBlock.style.cssText = 'border-left: 4px solid var(--accent); padding: 12px 16px; margin: 12px 0; background: var(--accent-soft); border-radius: 8px;';
+        hypBlock.appendChild(el('h4', { text: `Гипотеза ${idx + 1}` }));
+        hypBlock.appendChild(el('p', { html: `<b>Цепочка:</b> <code>${htmlEscape(h.path)}</code>` }));
+        hypBlock.appendChild(el('p', { html: `<b>Формулировка:</b> ${htmlEscape(h.hypothesis)}` }));
+        hypBlock.appendChild(el('p', { class: 'muted', html: `Источники: ${htmlEscape(h.papers.join(', '))} · Score: ${h.score.toFixed(2)}` }));
+        hypCard.appendChild(hypBlock);
+      });
+    } else {
+      hypCard.appendChild(el('p', { class: 'muted', text: 'Недостаточно кросс-документных связей для автоматической генерации гипотез.' }));
+    }
+
+    // Trajectory claims from comparison_summary
+    const claims = comparison.trajectory_claim_examples || [];
+    if (claims.length) {
+      const claimsCard = el('div', { class: 'card' });
+      claimsCard.style.padding = '20px';
+      claimsCard.appendChild(el('h2', { text: 'Экспертные утверждения из траектории' }));
+      claimsCard.appendChild(el('p', { class: 'muted', text: 'Ключевые тезисы из YAML-траектории эксперта (Task 1).' }));
+      claims.forEach((claim, idx) => {
+        const claimBlock = el('div');
+        claimBlock.style.cssText = 'padding: 10px 14px; margin: 8px 0; background: #f1f5f9; border-radius: 8px; font-size: 14px;';
+        claimBlock.appendChild(el('p', { text: `${idx + 1}. ${claim}` }));
+        claimsCard.appendChild(claimBlock);
+      });
+      host.appendChild(claimsCard);
+    }
+
+    host.appendChild(hypCard);
+  }
+
   function renderSummary() {
     const host = document.getElementById('section-summary');
     host.innerHTML = '';
@@ -1480,6 +1691,7 @@ match_substrings:
   renderMeta();
   bindNav();
   renderGraphs();
+  renderInsights();
   renderValidation();
   renderSummary();
   </script>

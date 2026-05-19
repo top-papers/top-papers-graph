@@ -17,7 +17,7 @@ from ..config import settings
 from ..contracts import ChunkRecord
 from ..domain import load_domain_config
 from ..graph.review_applier import compile_overrides
-from ..hypotheses.temporal_graph_hypotheses import HypothesisCandidate, generate_candidates
+from ..hypotheses.temporal_graph_hypotheses import HypothesisCandidate, _coerce_hypothesis_payload, generate_candidates
 from ..index.annoy_store import AnnoyBundle, build_annoy_index, search_annoy_index
 from ..ingest.acquire import AcquireResult, acquire_pdfs
 from ..ingest.mm_pipeline import ingest_pdf_multimodal_auto
@@ -1007,6 +1007,7 @@ def _llm_hypothesis_from_context(
         "с измеримыми метриками и контролями."
     )
     data = chat_json(system=system, user=user, schema_hint=TASK3_HYP_SCHEMA_HINT, temperature=0.2)
+    _coerce_hypothesis_payload(data)
     return HypothesisDraft.model_validate(data)
 
 

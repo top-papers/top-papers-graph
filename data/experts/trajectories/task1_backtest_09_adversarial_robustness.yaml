@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов adversarial robustness: от PGD-атаки и adversarial training (Madry) через теоретически обоснованный компромисс робастности и точности (TRADES) к систематическому изучению пределов adversarial training.
+domain: Q120747581
+domain_label: Adversarial machine learning
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1706.06083"
+    title: "Towards Deep Learning Models Resistant to Adversarial Attacks"
+    year: 2018
+  - id: "arxiv:1901.08573"
+    title: "Theoretically Principled Trade-off between Robustness and Accuracy"
+    year: 2019
+  - id: "arxiv:2010.03593"
+    title: "Uncovering the Limits of Adversarial Training against Norm-Bounded Adversarial Examples"
+    year: 2020
+steps:
+  - step_id: 1
+    claim: "PGD-атака является универсальным атакующим первого порядка, а adversarial training на PGD-примерах обеспечивает значительную устойчивость к широкому спектру атак."
+    sources:
+      - type: text
+        source: "Madry et al. (2018)"
+        locator: "Section 3"
+        snippet_or_summary: "Формулировка робастной оптимизации min-max определяет PGD как сильнейшую атаку первого порядка, а adversarial training на PGD-примерах формирует сети, устойчивые к различным атакам."
+  - step_id: 2
+    claim: "TRADES формализует компромисс между робастностью и точностью, декомпозируя ошибку на естественную и граничную составляющие, и предлагает дифференцируемую верхнюю границу для оптимизации."
+    sources:
+      - type: text
+        source: "Zhang et al. (2019)"
+        locator: "Section 3"
+        snippet_or_summary: "TRADES минимизирует сумму естественной ошибки классификации и граничной ошибки через регуляризацию KL-дивергенции между предсказаниями на чистых и adversarial примерах."
+  - step_id: 3
+    claim: "Систематическое исследование факторов adversarial training показывает, что комбинация больших моделей, активаций Swish и усреднения весов значительно расширяет пределы робастности."
+    sources:
+      - type: text
+        source: "Gowal et al. (2020)"
+        locator: "Section 4"
+        snippet_or_summary: "Исследование показывает, что увеличение модели, использование Swish/SiLU-активаций и усреднение весов достигают 65.88% точности под атакой на CIFAR-10, превышая предыдущий SOTA на 6.35%."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

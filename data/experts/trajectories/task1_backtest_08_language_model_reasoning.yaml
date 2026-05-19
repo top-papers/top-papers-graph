@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов рассуждения в больших языковых моделях: от цепочки мыслей (Chain-of-Thought) с примерами к zero-shot рассуждению и древовидному поиску решений (Tree of Thoughts).
+domain: Q126882399
+domain_label: Large language model
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2201.11903"
+    title: "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models"
+    year: 2022
+  - id: "arxiv:2205.11916"
+    title: "Large Language Models are Zero-Shot Reasoners"
+    year: 2022
+  - id: "arxiv:2305.10601"
+    title: "Tree of Thoughts: Deliberate Problem Solving with Large Language Models"
+    year: 2023
+steps:
+  - step_id: 1
+    claim: "Предоставление нескольких примеров с промежуточными шагами рассуждения (chain-of-thought) значительно улучшает способность больших языковых моделей решать задачи арифметического и логического вывода."
+    sources:
+      - type: text
+        source: "Wei et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "Chain-of-thought промптинг с несколькими демонстрациями промежуточных рассуждений значительно улучшает производительность LLM на задачах арифметики, здравого смысла и символического вывода."
+  - step_id: 2
+    claim: "Простая инструкция 'Let's think step by step' активирует способность к рассуждению в LLM без каких-либо обучающих примеров (zero-shot), что является task-agnostic подходом."
+    sources:
+      - type: text
+        source: "Kojima et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "Zero-shot-CoT с единственным шаблоном промпта значительно превосходит стандартные zero-shot результаты LLM на разнообразных задачах рассуждения без необходимости в специфических примерах."
+  - step_id: 3
+    claim: "Древовидная структура поиска (Tree of Thoughts) позволяет LLM рассматривать несколько путей рассуждения, оценивать их и выполнять возврат, что радикально повышает решение задач, требующих планирования."
+    sources:
+      - type: text
+        source: "Yao et al. (2023)"
+        locator: "Section 3"
+        snippet_or_summary: "Tree of Thoughts обобщает CoT, позволяя модели исследовать множество путей рассуждения с самооценкой и backtracking, повышая решение Game of 24 с 4% (CoT) до 74%."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

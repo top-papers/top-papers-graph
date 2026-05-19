@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие контрастного обучения для представлений предложений в NLP: от простого контрастного метода с dropout (SimCSE) через аугментации для трансфера представлений (ConSERT) к устранению смещения при выборке негативов (DCLR).
+domain: Q30642
+domain_label: Natural language processing
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2104.08821"
+    title: "SimCSE: Simple Contrastive Learning of Sentence Embeddings"
+    year: 2021
+  - id: "arxiv:2105.11741"
+    title: "ConSERT: A Contrastive Framework for Self-Supervised Sentence Representation Transfer"
+    year: 2021
+  - id: "arxiv:2205.00656"
+    title: "Debiased Contrastive Learning of Unsupervised Sentence Representations"
+    year: 2022
+steps:
+  - step_id: 1
+    claim: "Использование стандартного dropout как минимальной аугментации для создания позитивных пар в контрастном обучении позволяет значительно улучшить представления предложений без дополнительных данных."
+    sources:
+      - type: text
+        source: "Gao et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "SimCSE пропускает одно предложение дважды через энкодер с разными масками dropout для создания позитивных пар, достигая 76.3% Spearman-корреляции на задачах STS без разметки."
+  - step_id: 2
+    claim: "Комбинация различных стратегий аугментации (adversarial, token shuffling, cutoff, dropout) для контрастного fine-tuning BERT решает проблему коллапса представлений предложений."
+    sources:
+      - type: text
+        source: "Yan et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "ConSERT применяет четыре стратегии аугментации для контрастного дообучения BERT, улучшая представления на 8% по сравнению с предыдущим SOTA и сохраняя робастность при малых данных."
+  - step_id: 3
+    claim: "Устранение смещения выборки негативов (ложные негативы и анизотропные представления) через debiased контрастную функцию потерь улучшает равномерность пространства представлений."
+    sources:
+      - type: text
+        source: "Zhou et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "DCLR устраняет смещение от ложных негативов и анизотропных представлений в контрастном обучении, улучшая равномерность пространства и качество представлений предложений."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

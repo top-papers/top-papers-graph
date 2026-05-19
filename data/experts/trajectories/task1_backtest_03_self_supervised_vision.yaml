@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Прогресс самообучения в компьютерном зрении: от контрастного обучения с очередью импульсов (MoCo) и простых аугментаций (SimCLR) к самодистилляции на Vision Transformers (DINO) с эмерджентными свойствами сегментации.
+domain: Q751950
+domain_label: Self-supervised learning
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1911.05722"
+    title: "Momentum Contrast for Unsupervised Visual Representation Learning"
+    year: 2020
+  - id: "arxiv:2002.05709"
+    title: "A Simple Framework for Contrastive Learning of Visual Representations"
+    year: 2020
+  - id: "arxiv:2104.14294"
+    title: "Emerging Properties in Self-Supervised Vision Transformers"
+    year: 2021
+steps:
+  - step_id: 1
+    claim: "MoCo формулирует контрастное обучение как задачу поиска в словаре, используя очередь и momentum-кодировщик для построения большого и согласованного набора негативных примеров."
+    sources:
+      - type: text
+        source: "He et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "Метод MoCo строит динамический словарь с помощью очереди и экспоненциально скользящего среднего кодировщика, что обеспечивает масштабируемое контрастное обучение без необходимости больших батчей."
+  - step_id: 2
+    claim: "SimCLR показывает, что простая комбинация аугментаций данных, нелинейной проекционной головки и больших батчей позволяет достичь качества supervised-обучения без сложных архитектурных решений."
+    sources:
+      - type: text
+        source: "Chen et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "SimCLR достигает 76.5% top-1 на ImageNet с линейным классификатором, демонстрируя, что композиция аугментаций и нелинейная проекция критически важны для контрастного обучения."
+  - step_id: 3
+    claim: "DINO демонстрирует, что самодистилляция Vision Transformer порождает эмерджентные свойства — представления содержат явную информацию о семантической сегментации без какого-либо supervision."
+    sources:
+      - type: text
+        source: "Caron et al. (2021)"
+        locator: "Section 4"
+        snippet_or_summary: "Самообученные ViT через DINO генерируют признаки с явной информацией о сегментации объектов, достигая 80.1% top-1 на ImageNet при линейной оценке с ViT-Base."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

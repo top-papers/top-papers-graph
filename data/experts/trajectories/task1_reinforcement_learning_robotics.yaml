@@ -1,0 +1,187 @@
+artifact_version: 3
+topic: >-
+  Глубокое обучение с подкреплением для робототехники: от алгоритмов непрерывного управления
+  до массивно-параллельного обучения локомоции с переносом в реальный мир.
+  Траектория прослеживает развитие RL-методов от первого алгоритма глубокого обучения с подкреплением
+  для непрерывных действий (DDPG) через стабильный и простой в реализации PPO до массивно-параллельного
+  обучения ходьбе четвероногих роботов с успешным sim-to-real трансфером.
+domain: Q830687
+domain_label: reinforcement learning
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1509.02971"
+    title: "Continuous control with deep reinforcement learning"
+    year: 2016
+  - id: "arxiv:1707.06347"
+    title: "Proximal Policy Optimization Algorithms"
+    year: 2017
+  - id: "arxiv:2109.11978"
+    title: "Learning to Walk in Minutes Using Massively Parallel Deep Reinforcement Learning"
+    year: 2022
+steps:
+  - step_id: 1
+    claim: >-
+      Алгоритм DDPG (Deep Deterministic Policy Gradient), сочетающий детерминистический
+      градиент политики с приёмами глубокого обучения (replay buffer, target network),
+      впервые демонстрирует, что единый алгоритм глубокого RL способен решать более
+      20 задач непрерывного управления (от swing-up маятника до локомоции и манипуляции)
+      напрямую из сырых сенсорных данных, без ручного конструирования признаков.
+    sources:
+      - type: text
+        source: "arxiv:1509.02971"
+        page: 1
+        locator: "Abstract, Section 3, Table 1"
+        snippet_or_summary: >-
+          Lillicrap et al. предлагают DDPG -- actor-critic алгоритм, работающий
+          в пространствах непрерывных действий. Алгоритм адаптирует идеи DQN
+          (experience replay, target networks) к policy gradient и демонстрирует
+          решение 20+ задач MuJoCo с одними и теми же гиперпараметрами.
+          В нескольких задачах агент обучается напрямую из пиксельных наблюдений.
+    conditions:
+      system: "20+ задач непрерывного управления в симуляторе MuJoCo (cartpole, reacher, walker, humanoid и др.)"
+      environment: "симуляция физики MuJoCo, наблюдения: состояние сочленений или пиксели"
+      protocol: "off-policy actor-critic, deterministic policy gradient, replay buffer, soft target updates"
+      notes: "Первый end-to-end deep RL для непрерывного управления; опубликован на ICLR 2016"
+    discovery_context:
+      simultaneous_discovery: false
+      geography:
+        country:
+          id: Q145
+          label: "Великобритания"
+        city:
+          id: Q84
+          label: "Лондон"
+      science_branches:
+        - id: Q830687
+          label: "обучение с подкреплением"
+        - id: Q11012
+          label: "робототехника"
+    inference: >-
+      DDPG показал принципиальную возможность глубокого RL в пространствах непрерывных действий,
+      но алгоритм чувствителен к гиперпараметрам и нестабилен при обучении из-за off-policy
+      характера и детерминистической политики. Это мотивирует разработку более стабильных
+      policy gradient методов.
+    next_question: >-
+      Можно ли создать on-policy алгоритм, который сохраняет эффективность DDPG,
+      но при этом значительно проще в реализации, стабильнее и менее чувствителен
+      к выбору гиперпараметров?
+  - step_id: 2
+    claim: >-
+      Proximal Policy Optimization (PPO) -- семейство on-policy алгоритмов градиента
+      политики с ограничением (clipped surrogate objective) -- обеспечивает стабильность
+      обучения, сравнимую с TRPO, при значительно более простой реализации.
+      PPO превосходит другие on-policy методы на задачах непрерывной локомоции (MuJoCo)
+      и дискретного управления (Atari), становясь де-факто стандартом для RL-обучения.
+    sources:
+      - type: text
+        source: "arxiv:1707.06347"
+        page: 1
+        locator: "Abstract, Section 3, Figure 3"
+        snippet_or_summary: >-
+          Schulman et al. предлагают PPO с clipped surrogate objective, который
+          ограничивает обновление политики без вычисления KL-дивергенции или
+          решения задачи условной оптимизации (как в TRPO). На бенчмарках MuJoCo
+          и Atari PPO демонстрирует лучшую или сопоставимую производительность
+          по сравнению с A2C, ACER и TRPO, при этом код реализации существенно проще.
+    conditions:
+      system: "задачи MuJoCo (HalfCheetah, Hopper, Walker2d и др.) и 49 игр Atari"
+      environment: "симуляция MuJoCo для непрерывного управления, Atari ALE для дискретного"
+      protocol: "on-policy, clipped surrogate objective, multiple epochs of SGD per batch, GAE"
+      notes: "PPO стал стандартным алгоритмом для RLHF в LLM (InstructGPT, ChatGPT)"
+    discovery_context:
+      simultaneous_discovery: false
+      geography:
+        country:
+          id: Q30
+          label: "США"
+        city:
+          id: Q62
+          label: "Сан-Франциско"
+      science_branches:
+        - id: Q830687
+          label: "обучение с подкреплением"
+        - id: Q2539
+          label: "машинное обучение"
+    inference: >-
+      PPO решил проблему стабильности и простоты реализации on-policy RL, став
+      стандартным алгоритмом для широкого спектра задач. Его on-policy природа
+      хорошо подходит для массивной параллелизации (одновременное выполнение
+      тысяч сред), что открывает путь к радикальному ускорению обучения.
+    next_question: >-
+      Можно ли использовать массивную параллелизацию GPU-симуляций вместе с PPO
+      для обучения локомоции реальных роботов за минуты вместо часов, с последующим
+      sim-to-real трансфером?
+  - step_id: 3
+    claim: >-
+      Массивно-параллельное обучение (до 4096 одновременных сред на одном GPU)
+      с использованием алгоритма PPO позволяет обучить политику ходьбы четвероногого
+      робота ANYmal за 4 минуты на ровной поверхности и за 20 минут на неровном рельефе,
+      что на несколько порядков быстрее предшествующих подходов. Обученная политика
+      успешно переносится на реального робота (sim-to-real) через рандомизацию домена.
+    sources:
+      - type: text
+        source: "arxiv:2109.11978"
+        page: 1
+        locator: "Abstract, Section 4, Table 1"
+        snippet_or_summary: >-
+          Rudin et al. реализуют массивно-параллельное RL-обучение на GPU с использованием
+          Isaac Gym, запуская до 4096 экземпляров симуляции параллельно. С алгоритмом PPO
+          политика ходьбы на ровном рельефе обучается за ~4 мин, на сложном рельефе --
+          за ~20 мин. Domain randomization обеспечивает sim-to-real трансфер:
+          политика успешно работает на реальном роботе ANYmal без дополнительного обучения.
+      - type: image
+        source: "arxiv:2109.11978"
+        page: 3
+        locator: "Figure 2"
+        snippet_or_summary: >-
+          Рисунок 2 показывает кривые обучения при различном числе параллельных сред
+          (от 16 до 4096), демонстрируя практически линейное ускорение обучения
+          с ростом параллелизма на одном GPU.
+    conditions:
+      system: "четвероногий робот ANYmal, задача локомоции (ровный и неровный рельеф)"
+      environment: "NVIDIA Isaac Gym (GPU-симулятор), до 4096 параллельных сред на одном GPU"
+      protocol: "PPO + massively parallel simulation + domain randomization для sim-to-real"
+      notes: "Ускорение обучения на несколько порядков по сравнению с CPU-симуляцией; CoRL 2022"
+    discovery_context:
+      simultaneous_discovery: false
+      geography:
+        country:
+          id: Q39
+          label: "Швейцария"
+        city:
+          id: Q72
+          label: "Цюрих"
+      science_branches:
+        - id: Q830687
+          label: "обучение с подкреплением"
+        - id: Q11012
+          label: "робототехника"
+    inference: >-
+      Комбинация PPO с массивно-параллельной GPU-симуляцией и domain randomization
+      делает обучение RL-политик для реальных роботов практически мгновенным.
+      Это замыкает цепочку: DDPG (доказательство концепции deep RL для непрерывного
+      управления) -> PPO (стабильный и масштабируемый алгоритм) -> массивный параллелизм
+      + sim-to-real (практическое применение в реальной робототехнике).
+    next_question: >-
+      Можно ли обобщить данный подход на более сложные манипуляционные задачи
+      с деформируемыми объектами и тактильной обратной связью, где sim-to-real gap
+      значительно больше?
+edges:
+  - from_step_id: 1
+    to_step_id: 2
+    predicate: motivates
+    directionality: directed
+    direction_label: "Нестабильность DDPG мотивирует разработку более стабильного PPO"
+    simultaneous_discovery: false
+  - from_step_id: 2
+    to_step_id: 3
+    predicate: enables
+    directionality: directed
+    direction_label: "PPO как стабильный on-policy алгоритм идеально подходит для массивной параллелизации"
+    simultaneous_discovery: false
+  - from_step_id: 1
+    to_step_id: 3
+    predicate: builds_on
+    directionality: directed
+    direction_label: "Rudin et al. решают ту же задачу непрерывного управления, что и DDPG, но на реальном роботе"
+    simultaneous_discovery: false

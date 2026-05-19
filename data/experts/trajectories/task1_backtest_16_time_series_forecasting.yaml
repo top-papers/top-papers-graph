@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие трансформерных моделей для прогнозирования временных рядов: от ProbSparse-внимания (Informer) через авто-корреляцию и декомпозицию (Autoformer) к патч-представлениям с канальной независимостью (PatchTST).
+domain: Q1266946
+domain_label: Time series
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2012.07436"
+    title: "Informer: Beyond Efficient Transformer for Long Sequence Time-Series Forecasting"
+    year: 2021
+  - id: "arxiv:2106.13008"
+    title: "Autoformer: Decomposition Transformers with Auto-Correlation for Long-Term Series Forecasting"
+    year: 2021
+  - id: "arxiv:2211.14730"
+    title: "A Time Series is Worth 64 Words: Long-term Forecasting with Transformers"
+    year: 2023
+steps:
+  - step_id: 1
+    claim: "ProbSparse self-attention выбирает наиболее информативные запросы, снижая сложность до O(L log L) и решая проблему квадратичных затрат трансформера для длинных временных рядов."
+    sources:
+      - type: text
+        source: "Zhou et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "Informer предлагает ProbSparse механизм внимания с O(L log L) сложностью, generative-декодер для длинных предсказаний и self-attention distilling для снижения размерности."
+  - step_id: 2
+    claim: "Замена self-attention на авто-корреляционный механизм на уровне подрядов в сочетании с прогрессивной декомпозицией ряда обеспечивает 38% улучшение в долгосрочном прогнозировании."
+    sources:
+      - type: text
+        source: "Wu et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "Autoformer вводит Auto-Correlation механизм для обнаружения зависимостей на уровне подрядов на основе периодичности и прогрессивную декомпозицию тренда и сезонности."
+  - step_id: 3
+    claim: "Сегментация временного ряда на патчи в качестве токенов трансформера с канальной независимостью позволяет сохранять локальную семантику и обрабатывать значительно более длинную историю."
+    sources:
+      - type: text
+        source: "Nie et al. (2023)"
+        locator: "Section 3"
+        snippet_or_summary: "PatchTST разбивает ряд на патчи-токены с канальной независимостью, что квадратично снижает затраты на внимание, сохраняет локальную информацию и расширяет окно наблюдения."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие детекции объектов на основе трансформеров: от базовой архитектуры DETR через деформируемое внимание (Deformable DETR) к ускорению обучения через денойзинг запросов (DN-DETR).
+domain: Q108025091
+domain_label: Object detection
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2005.12872"
+    title: "End-to-End Object Detection with Transformers"
+    year: 2020
+  - id: "arxiv:2010.04159"
+    title: "Deformable DETR: Deformable Transformers for End-to-End Object Detection"
+    year: 2021
+  - id: "arxiv:2203.01305"
+    title: "DN-DETR: Accelerate DETR Training by Introducing Query DeNoising"
+    year: 2022
+steps:
+  - step_id: 1
+    claim: "DETR устраняет необходимость в ручных компонентах детекции (NMS, якоря), формулируя задачу как прямое предсказание множества через трансформер и венгерское сопоставление."
+    sources:
+      - type: text
+        source: "Carion et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "DETR использует энкодер-декодер трансформер с set-based глобальной функцией потерь на основе двудольного сопоставления, достигая результатов Faster R-CNN на COCO без NMS и якорей."
+  - step_id: 2
+    claim: "Деформируемое внимание решает проблемы медленной сходимости и низкого разрешения признаков DETR, обращая внимание только на малое число ключевых точек вокруг опорной позиции."
+    sources:
+      - type: text
+        source: "Zhu et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "Deformable DETR заменяет стандартное внимание деформируемым модулем, который обрабатывает только K точек выборки вокруг опорной точки, достигая лучших результатов с 10x меньшим обучением."
+  - step_id: 3
+    claim: "Подход денойзинга запросов (query denoising) ускоряет обучение DETR, снижая нестабильность двудольного сопоставления на ранних этапах тренировки."
+    sources:
+      - type: text
+        source: "Li et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "DN-DETR подаёт зашумлённые ground-truth боксы в декодер и обучает модель восстанавливать оригинальные боксы, что стабилизирует сопоставление и даёт +1.9 AP при тех же условиях."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

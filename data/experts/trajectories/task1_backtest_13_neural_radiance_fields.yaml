@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие нейронных полей излучения: от оригинального NeRF для синтеза новых ракурсов через расширение на неограниченные сцены (Mip-NeRF 360) к рендерингу в реальном времени через 3D Gaussian Splatting.
+domain: Q108673568
+domain_label: Neural radiance field
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:2003.08934"
+    title: "NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis"
+    year: 2020
+  - id: "arxiv:2111.12077"
+    title: "Mip-NeRF 360: Unbounded Anti-Aliased Neural Radiance Fields"
+    year: 2022
+  - id: "arxiv:2308.04079"
+    title: "3D Gaussian Splatting for Real-Time Radiance Field Rendering"
+    year: 2023
+steps:
+  - step_id: 1
+    claim: "Оптимизация непрерывного объёмного поля излучения (5D функция: координаты + направление) нейронной сетью по разреженным изображениям позволяет синтезировать фотореалистичные новые ракурсы."
+    sources:
+      - type: text
+        source: "Mildenhall et al. (2020)"
+        locator: "Section 4"
+        snippet_or_summary: "NeRF представляет сцену полносвязной сетью, принимающей 5D координаты и выдающей плотность и излучение, с объёмным рендерингом по лучам и позиционным кодированием для высокочастотных деталей."
+  - step_id: 2
+    claim: "Нелинейная параметризация сцены, онлайн-дистилляция и регуляризатор искажений расширяют NeRF на неограниченные 360-градусные сцены с устранением алиасинга."
+    sources:
+      - type: text
+        source: "Barron et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "Mip-NeRF 360 вводит нелинейное сжатие координат для неограниченных сцен, дистилляцию из крупной в компактную модель и регуляризатор искажений для устранения артефактов."
+  - step_id: 3
+    claim: "Представление сцены анизотропными 3D гауссианами с дифференцируемым растровым рендерингом обеспечивает фотореалистичное качество при рендеринге в реальном времени (>30 FPS при 1080p)."
+    sources:
+      - type: text
+        source: "Kerbl et al. (2023)"
+        locator: "Section 4"
+        snippet_or_summary: "3D Gaussian Splatting представляет сцену набором 3D гауссианов с оптимизируемыми параметрами, достигая качества SOTA NeRF-методов при рендеринге в реальном времени через дифференцируемый сплэттинг."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов каузального обнаружения из данных: от непрерывной оптимизации для обучения DAG (NOTEARS) через нейросетевое расширение (GraN-DAG) к дифференцируемому обнаружению из интервенционных данных (DCDI).
+domain: Q5765080
+domain_label: Causal inference
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1803.01422"
+    title: "DAGs with NO TEARS: Continuous Optimization for Structure Learning"
+    year: 2018
+  - id: "arxiv:1906.02226"
+    title: "Gradient-Based Neural DAG Learning"
+    year: 2020
+  - id: "arxiv:2007.01754"
+    title: "Differentiable Causal Discovery from Interventional Data"
+    year: 2020
+steps:
+  - step_id: 1
+    claim: "Формулировка обучения структуры DAG как непрерывной оптимизации с алгебраическим ограничением ацикличности через экспоненту матрицы устраняет необходимость комбинаторного поиска."
+    sources:
+      - type: text
+        source: "Zheng et al. (2018)"
+        locator: "Section 3"
+        snippet_or_summary: "NOTEARS вводит гладкое ограничение ацикличности tr(e^{W∘W}) - d = 0, превращая обучение DAG в задачу непрерывной оптимизации, решаемую методом множителей Лагранжа."
+  - step_id: 2
+    claim: "Расширение непрерывной формулировки на нелинейные зависимости с помощью нейронных сетей позволяет обучать DAG с произвольными функциональными связями между переменными."
+    sources:
+      - type: text
+        source: "Lachapelle et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "GraN-DAG параметризирует нелинейные зависимости нейронными сетями и применяет непрерывное ограничение ацикличности к масштабированным весам, превосходя линейные методы на реальных данных."
+  - step_id: 3
+    claim: "Использование интервенционных данных в дифференцируемой формулировке каузального обнаружения через нормализующие потоки позволяет идентифицировать каузальные связи даже при неизвестных целях вмешательств."
+    sources:
+      - type: text
+        source: "Brouillard et al. (2020)"
+        locator: "Section 3"
+        snippet_or_summary: "DCDI объединяет непрерывную оптимизацию с нормализующими потоками и теоретически обоснованным использованием интервенционных данных для идентификации каузальных связей."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

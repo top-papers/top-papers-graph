@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие языковых моделей белков: от обучения эмбеддингов последовательностей с учётом структуры через масштабное самообучение на сотнях миллиардов аминокислот (ProtTrans) к генерации белковых структур через диффузию.
+domain: Q8054
+domain_label: Protein
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1902.08661"
+    title: "Learning protein sequence embeddings using information from structure"
+    year: 2019
+  - id: "arxiv:2007.06225"
+    title: "ProtTrans: Towards Cracking the Language of Life's Code Through Self-Supervised Deep Learning and High Performance Computing"
+    year: 2021
+  - id: "arxiv:2209.15611"
+    title: "Protein structure generation via folding diffusion"
+    year: 2022
+steps:
+  - step_id: 1
+    claim: "Обучение эмбеддингов белковых последовательностей с использованием информации о структуре создаёт представления, кодирующие биофизические свойства без необходимости выравнивания последовательностей."
+    sources:
+      - type: text
+        source: "Bepler & Berger (2019)"
+        locator: "Section 3"
+        snippet_or_summary: "Предложена структурно-информированная модель, обучающая эмбеддинги белковых последовательностей, которые кодируют информацию о вторичной и третичной структуре белка."
+  - step_id: 2
+    claim: "Масштабное самообучение языковых моделей (BERT, T5) на 393 миллиардах аминокислот позволяет впервые превзойти SOTA без эволюционной информации, обходя дорогостоящий поиск по базам данных."
+    sources:
+      - type: text
+        source: "Elnaggar et al. (2021)"
+        locator: "Section 4"
+        snippet_or_summary: "ProtTrans обучает 6 моделей на данных UniRef/BFD с 393B аминокислот, где ProtT5 впервые превосходит SOTA в предсказании структуры без использования MSA и эволюционной информации."
+  - step_id: 3
+    claim: "Диффузионная генеративная модель, описывающая белковый остов через последовательные углы, способна генерировать реалистичные белковые структуры через процесс денойзинга от развёрнутого состояния."
+    sources:
+      - type: text
+        source: "Wu et al. (2022)"
+        locator: "Section 3"
+        snippet_or_summary: "Модель генерирует белковые структуры через диффузию в пространстве торсионных углов, используя трансформер для денойзинга, создавая структуры с паттернами, подобными натуральным белкам."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"

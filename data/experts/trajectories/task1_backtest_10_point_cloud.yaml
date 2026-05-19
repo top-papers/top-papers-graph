@@ -1,0 +1,45 @@
+artifact_version: 3
+topic: >-
+  Развитие методов обработки облаков точек: от прямой обработки неупорядоченных множеств (PointNet) через динамические графовые свёртки (DGCNN) к трансформерам для 3D-точек (Point Transformer).
+domain: Q1756387
+domain_label: Point cloud
+submission_id: claude_opus_4_7_high
+papers:
+  - id: "arxiv:1612.00593"
+    title: "PointNet: Deep Learning on Point Sets for 3D Classification and Segmentation"
+    year: 2017
+  - id: "arxiv:1801.07829"
+    title: "Dynamic Graph CNN for Learning on Point Clouds"
+    year: 2019
+  - id: "arxiv:2012.09164"
+    title: "Point Transformer"
+    year: 2021
+steps:
+  - step_id: 1
+    claim: "PointNet впервые напрямую обрабатывает неупорядоченные облака точек с помощью симметричных функций, обеспечивая инвариантность к перестановкам и единую архитектуру для классификации и сегментации."
+    sources:
+      - type: text
+        source: "Qi et al. (2017)"
+        locator: "Section 4"
+        snippet_or_summary: "PointNet использует shared MLP с max-pooling как симметричную функцию для обработки неупорядоченных множеств точек, достигая конкурентоспособных результатов в классификации и сегментации 3D-сцен."
+  - step_id: 2
+    claim: "Динамическое построение графа в пространстве признаков на каждом слое (EdgeConv) позволяет захватывать локальную геометрическую структуру, которую пропускает глобальная агрегация PointNet."
+    sources:
+      - type: text
+        source: "Wang et al. (2019)"
+        locator: "Section 3"
+        snippet_or_summary: "DGCNN вводит модуль EdgeConv, динамически перестраивающий граф ближайших соседей в пространстве признаков на каждом слое, что позволяет захватывать эволюционирующую локальную геометрию."
+  - step_id: 3
+    claim: "Применение self-attention к облакам точек через векторное внимание обеспечивает адаптивное взвешивание локальных признаков, превосходя как MLP-, так и графовые подходы."
+    sources:
+      - type: text
+        source: "Zhao et al. (2021)"
+        locator: "Section 3"
+        snippet_or_summary: "Point Transformer применяет векторный self-attention к 3D-точкам с позиционным кодированием, достигая state-of-the-art на задачах семантической сегментации и классификации."
+edges:
+  - from_step: 1
+    to_step: 2
+    label: "leads_to"
+  - from_step: 2
+    to_step: 3
+    label: "leads_to"
