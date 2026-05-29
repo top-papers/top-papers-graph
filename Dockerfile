@@ -25,7 +25,7 @@ COPY experiments ./experiments
 
 RUN python -m pip install --upgrade pip setuptools wheel && \
     python -m pip install -e . && \
-    python -m pip install pymupdf pillow reportlab
+    python -m pip install pymupdf pillow reportlab g4f
 
 ENTRYPOINT ["top-papers-graph"]
-CMD ["env"]
+CMD ["doctor"]

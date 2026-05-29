@@ -9,15 +9,40 @@ services:
       - .env
     environment:
       QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-please_change_me}
       MEMGRAPH_URI: bolt://memgraph:7687
-      GRAPH_BACKEND: memgraph
       GROBID_URL: http://grobid:8070
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-neo4j}
     volumes:
       - ./:/app
     depends_on:
-      - qdrant
-      - memgraph
-    command: ["env"]
+      qdrant:
+        condition: service_started
+      neo4j:
+        condition: service_started
+      grobid:
+        condition: service_started
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: top-papers-graph-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-please_change_me}
+      NEO4J_server_memory_pagecache_size: 512M
+      NEO4J_server_memory_heap_max__size: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u $${NEO4J_USER:-neo4j} -p $${NEO4J_PASSWORD:-please_change_me} 'RETURN 1;' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
 
   qdrant:
     image: qdrant/qdrant:v1.17.0
@@ -41,8 +66,9 @@ services:
   memgraph:
     image: memgraph/memgraph-mage:latest
     container_name: top-papers-graph-memgraph
+    profiles: ["full", "bot"]
     healthcheck:
-      test: [ "CMD", "sh", "-c", 'echo "RETURN \"DB OK\";" | mgconsole' ]
+      test: ["CMD", "sh", "-c", 'echo "RETURN \"DB OK\";" | mgconsole']
       interval: 30s
       timeout: 10s
       retries: 3
@@ -57,8 +83,9 @@ services:
   lab:
     image: memgraph/lab:latest
     container_name: top-papers-graph-memgraph-lab
+    profiles: ["full", "bot"]
     healthcheck:
-      test: [ "CMD", "nc", "-z", "localhost", "3000" ]
+      test: ["CMD", "nc", "-z", "localhost", "3000"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -75,7 +102,7 @@ services:
     image: lfoppiano/grobid:0.8.2.1-crf
     container_name: top-papers-graph-grobid
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8070/api/isalive" ]
+      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -83,6 +110,27 @@ services:
     ports:
       - "8070:8070"
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: top-papers-graph-postgres
+    profiles: ["bot"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-mydatabase}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-user} -d $${POSTGRES_DB:-mydatabase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
 volumes:
   qdrant_storage:
+  neo4j_data:
   memgraph_data:
+  pg_data:

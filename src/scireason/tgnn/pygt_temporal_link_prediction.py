@@ -36,6 +36,8 @@ try:  # pragma: no cover
 except Exception:  # pragma: no cover
     GConvGRU = None  # type: ignore[assignment]
 
+_ModuleBase: type = nn.Module if nn is not None else object
+
 
 @dataclass(frozen=True)
 class PyGTemporalLinkPredConfig:
@@ -55,7 +57,7 @@ class PyGTemporalUnavailableError(RuntimeError):
     pass
 
 
-class _TemporalEdgeScorer(nn.Module):  # type: ignore[misc]
+class _TemporalEdgeScorer(_ModuleBase):  # type: ignore[misc]
     def __init__(self, in_channels: int, hidden_dim: int, k_hops: int) -> None:
         super().__init__()
         self.encoder = GConvGRU(in_channels, hidden_dim, k_hops)
