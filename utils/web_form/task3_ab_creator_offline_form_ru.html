@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task 3 — офлайн-форма создателя набора</title>
+<style>
+:root{
+  --bg:#f6f8fb; --card:#ffffff; --text:#0f172a; --muted:#475569; --line:#dbe3ef;
+  --blue:#2563eb; --bluebg:#eff6ff; --green:#166534; --greenbg:#ecfdf5; --amber:#a16207; --amberbg:#fefce8; --red:#b91c1c; --redbg:#fef2f2;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
+.page{max-width:1280px;margin:0 auto;padding:24px}
+.hero,.card,.case{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.05)}
+.hero,.card{margin-bottom:16px}
+.case{margin-top:14px}
+h1,h2,h3{margin:0 0 10px 0}
+p{margin:8px 0}
+.muted{color:var(--muted)}
+.grid{display:grid;gap:12px}
+.cols2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.cols3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.case-toolbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;align-items:stretch}
+.stepper{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:#fff}
+.stepper-main{display:flex;flex-direction:column;gap:4px}
+.stepper-label{font-weight:800}
+.stepper-sub{font-size:12px;color:var(--muted);line-height:1.35}
+.stepper-controls{display:flex;align-items:center;gap:8px}
+.countbadge{min-width:34px;text-align:center;font-weight:800}
+button,.buttonlike{border:1px solid #cbd5e1;border-radius:12px;padding:10px 14px;background:#fff;cursor:pointer;font-weight:600}
+button.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.iconbtn{width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:20px;line-height:1}
+input,textarea,select{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;font:inherit;background:#fff}
+textarea{min-height:88px;resize:vertical}
+label.field{display:block}
+label.field .title{display:block;font-weight:700;margin-bottom:6px}
+label.field .help{display:block;color:var(--muted);font-size:13px;line-height:1.4;margin-top:6px}
+.section-title{font-size:15px;font-weight:800;margin:10px 0 8px}
+.pills{display:flex;gap:8px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:var(--bluebg);color:var(--blue);font-size:12px;font-weight:700}
+.pill.ok{background:var(--greenbg);color:var(--green)}
+.pill.warn{background:var(--amberbg);color:var(--amber)}
+.pill.bad{background:var(--redbg);color:var(--red)}
+.checkgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.check{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fcfdff}
+.check input{width:auto;margin-top:3px}
+details{border:1px dashed #cbd5e1;border-radius:14px;padding:12px;background:#fbfdff}
+summary{cursor:pointer;font-weight:700}
+.notice{border-left:4px solid var(--blue);background:#f8fbff;padding:12px 14px;border-radius:12px}
+.casehead{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.case-actions{display:flex;gap:8px;flex-wrap:wrap}
+.small{font-size:12px}
+hr.sep{border:none;border-top:1px solid var(--line);margin:16px 0}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Task 3 — форма создателя набора A/B</h1>
+    <p class="muted">Эту форму заполняет эксперт-создатель. Её задача — подготовить диагностические кейсы, на которых различия между baseline VLM и SFT/DPO VLM будут видны именно там, где это важно для Task 3: в multimodal evidence extraction, evidence linkage и temporal grounding.</p>
+    <div class="notice">
+      <b>Как пользоваться формой</b><br>
+      1) заполните метаданные эксперимента; 2) добавляйте и убирайте кейсы по нужным стратам кнопками + и -; 3) при необходимости скачайте черновик и продолжите позже через загрузку JSON; 4) для каждого кейса кратко сформулируйте, что должен оценивать участник A/B; 5) при необходимости раскройте технический блок сопоставления; 6) скачайте заполненный JSON или перейдите в Google Форму для отправки данных.
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <button class="primary" id="exportFilled">Скачать заполненный JSON</button>
+      <button id="exportDraft">Скачать черновик JSON</button>
+      <label class="buttonlike" for="loadDraft">Загрузить черновик JSON</label>
+      <input id="loadDraft" type="file" accept="application/json" style="display:none">
+      <button id="clearLocalDraft">Очистить локальный черновик</button>
+      <a class="buttonlike" id="openGoogleForm" href="https://forms.gle/h5RwEA8DsZh9pBAt8" target="_blank" rel="noopener noreferrer">Открыть Google Форму для отправки данных</a>
+    </div>
+    <div class="notice" style="margin-top:12px">
+      <b>Работа с черновиком</b><br>
+      Нажмите <b>«Скачать черновик JSON»</b>, если хотите продолжить позже или передать незавершённый вариант коллеге. Чтобы восстановить работу, используйте <b>«Загрузить черновик JSON»</b>. Для быстрой отправки данных в веб-канал используйте кнопку <b>«Открыть Google Форму для отправки данных»</b>.
+    </div>
+    <div class="pills" id="stats" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>1. Метаданные эксперимента</h2>
+    <p class="muted">Сначала зафиксируйте тему, submission_id и цель проверки. Эти поля попадут в итоговый manifest.</p>
+    <div class="grid cols3" id="meta"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Кейсы для набора</h2>
+    <p class="muted">Рекомендуемый баланс: больше <b>multimodal_hard</b> и <b>temporal_hard</b>, меньше <b>easy_control</b>.</p>
+    <div class="toolbar case-toolbar" id="caseToolbar"></div>
+    <p class="muted small">Используйте кнопки + и - для быстрого добавления и удаления карточек кейсов прямо в офлайн-форме.</p>
+    <div id="cases"></div>
+  </div>
+</div>
+
+<script>
+const APP = {"schema_version": "task3-ab-creator-v1", "experiment_meta": {"topic": "", "submission_id": "", "creator_id": "", "cutoff_year": "", "review_goal": ""}, "cases": []};
+const STORAGE_KEY = `task3-authoring-ru:${(APP.experiment_meta||{}).submission_id||'draft'}`;
+
+const STRATUM_LABELS = {
+  multimodal_hard: "multimodal_hard — важный факт сидит в figure/table/page",
+  temporal_hard: "temporal_hard — важны временные рамки, динамика, before/after",
+  easy_control: "easy_control — простой контрольный кейс"
+};
+const EVIDENCE_KIND_OPTIONS = [
+  ["figure","figure"],
+  ["table","table"],
+  ["figure_or_table","figure_or_table"],
+  ["formula","formula"],
+  ["page","page"],
+  ["mixed","mixed"]
+];
+const REVIEW_FOCUS_OPTIONS = [
+  ["evidence","Извлечение evidence"],
+  ["visual_fact","Визуальный факт / figure/table-driven факт"],
+  ["temporal","Временная привязка и temporal scope"],
+  ["overall","Общее качество кейса"]
+];
+const ERROR_OPTIONS = [
+  ["missed_visual_fact","Пропущен важный visual fact"],
+  ["wrong_evidence_linkage","Неверная привязка evidence"],
+  ["needs_time_fix","Ошибка во временной привязке"],
+  ["hallucinated_visual_inference","Придуман visual inference"]
+];
+const FIELD_HELP = {
+  topic: "Например: Temporal catalyst latency forecasting",
+  submission_id: "Заполняется автоматически, но можно скорректировать вручную",
+  creator_id: "Имя или идентификатор эксперта-создателя",
+  cutoff_year: "Верхняя граница по году публикаций",
+  review_goal: "Коротко: что именно должен показать A/B тест",
+  case_id: "Уникальный ID кейса, например CASE-001",
+  paper_title: "Полное или сокращённое название статьи",
+  paper_id: "DOI / arXiv / PMID / локальный paper_id",
+  year: "Год статьи",
+  evidence_kind: "Где сидит ключевой факт: figure, table, page, formula...",
+  page_hint: "Например: p.4, Fig.2 или Table 3",
+  creator_prompt: "Коротко и по делу: на что должен смотреть эксперт-участник",
+  creator_rationale: "Почему этот кейс диагностический именно для VLM-разницы",
+  notes: "Необязательные внутренние заметки создателя",
+  candidate_signature: "Если сигнатура известна и стабильна — это самый точный способ сопоставления",
+  candidate_source_contains: "Фрагмент source из candidate",
+  candidate_predicate_contains: "Фрагмент predicate из candidate",
+  candidate_target_contains: "Фрагмент target из candidate",
+  hypothesis_title_contains: "Подстрока из title гипотезы",
+  premise_contains: "Подстрока из premise",
+  mechanism_contains: "Подстрока из mechanism",
+  time_scope_contains: "Подстрока из time_scope",
+  rank_hint: "Ожидаемый rank, если он полезен как дополнительная подсказка"
+};
+
+const el = (tag, attrs, ...children) => {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const [k,v] of Object.entries(attrs)) {
+      if (v == null) continue;
+      if (k === "class") node.className = v;
+      else if (k === "text") node.textContent = v;
+      else if (k === "html") node.innerHTML = v;
+      else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+      else node.setAttribute(k, v);
+    }
+  }
+  children.flat().forEach(ch => {
+    if (ch == null) return;
+    node.appendChild(typeof ch === "string" ? document.createTextNode(ch) : ch);
+  });
+  return node;
+};
+
+const state = JSON.parse(JSON.stringify(APP));
+
+function save() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) Object.assign(state, JSON.parse(raw));
+  } catch (_) {}
+}
+function download(name, text, mime='application/json') {
+  const blob = new Blob([text], {type:mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function field(label, help, inputNode) {
+  return el('label', {class:'field'},
+    el('span', {class:'title', text:label}),
+    inputNode,
+    help ? el('span', {class:'help', text:help}) : null
+  );
+}
+function norm(v){ return String(v||'').trim(); }
+function requiredMissing(caseObj) {
+  const miss = [];
+  if (!norm(caseObj.paper_title)) miss.push("paper_title");
+  if (!norm(caseObj.creator_prompt)) miss.push("creator_prompt");
+  if (!norm(caseObj.creator_rationale)) miss.push("creator_rationale");
+  if (!Array.isArray(caseObj.review_focus) || !caseObj.review_focus.length) miss.push("review_focus");
+  const m = caseObj.match || {};
+  const anyMatch = ["candidate_signature","candidate_source_contains","candidate_predicate_contains","candidate_target_contains","hypothesis_title_contains","premise_contains","mechanism_contains","time_scope_contains","rank_hint"].some(k => norm(m[k]));
+  if (!anyMatch) miss.push("минимум одно поле match.*");
+  return miss;
+}
+function caseStatus(caseObj) {
+  const miss = requiredMissing(caseObj);
+  if (!miss.length) return {label:"Готов к экспорту", cls:"ok"};
+  if (miss.length <= 2) return {label:`Нужно дополнить: ${miss.join(", ")}`, cls:"warn"};
+  return {label:`Не готов: ${miss.join(", ")}`, cls:"bad"};
+}
+function nextCaseId() {
+  const maxId = (state.cases || []).reduce((max, c) => {
+    const m = String(c.case_id || '').match(/CASE-(\d+)/i);
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
+  return `CASE-${String(maxId + 1).padStart(3,'0')}`;
+}
+function countCases(stratum) {
+  return (state.cases || []).filter(c => c.stratum === stratum).length;
+}
+function removeLastCase(stratum) {
+  const idx = [...(state.cases || [])]
+    .map((c, index) => ({c, index}))
+    .reverse()
+    .find(item => item.c.stratum === stratum)?.index;
+  if (idx == null) return;
+  state.cases.splice(idx, 1);
+  render();
+  save();
+}
+function stratumControl(stratum, title, subtitle) {
+  return el('div', {class:'stepper'},
+    el('div', {class:'stepper-main'},
+      el('div', {class:'stepper-label', text:title}),
+      el('div', {class:'stepper-sub', text:subtitle})
+    ),
+    el('div', {class:'stepper-controls'},
+      el('button', {
+        class:'iconbtn',
+        type:'button',
+        title:`Убрать один кейс из ${title}`,
+        onClick:() => removeLastCase(stratum)
+      }, '-'),
+      el('span', {class:'countbadge', text:String(countCases(stratum))}),
+      el('button', {
+        class:'iconbtn primary',
+        type:'button',
+        title:`Добавить один кейс в ${title}`,
+        onClick:() => addCase(stratum)
+      }, '+')
+    )
+  );
+}
+function renderCaseToolbar() {
+  const host = document.getElementById('caseToolbar');
+  host.innerHTML = '';
+  host.append(
+    stratumControl('multimodal_hard', 'multimodal_hard', 'Важный факт сидит в figure, table или page'),
+    stratumControl('temporal_hard', 'temporal_hard', 'Ключевые временные рамки, динамика, before/after'),
+    stratumControl('easy_control', 'easy_control', 'Простой контрольный кейс для сравнения')
+  );
+}
+function renderStats() {
+  const cases = (state.cases || []).filter(c => c.enabled !== false);
+  const ready = cases.filter(c => !requiredMissing(c).length).length;
+  const by = {multimodal_hard:0, temporal_hard:0, easy_control:0};
+  cases.forEach(c => by[c.stratum] = (by[c.stratum] || 0) + 1);
+  const host = document.getElementById('stats');
+  host.innerHTML = '';
+  host.append(
+    el('span', {class:'pill', text:`Всего кейсов: ${cases.length}`}),
+    el('span', {class:'pill ok', text:`Готовы: ${ready}`}),
+    el('span', {class:'pill', text:`MM: ${by.multimodal_hard||0}`}),
+    el('span', {class:'pill', text:`Temporal: ${by.temporal_hard||0}`}),
+    el('span', {class:'pill', text:`Control: ${by.easy_control||0}`}),
+  );
+}
+function renderMeta() {
+  const meta = state.experiment_meta || (state.experiment_meta = {});
+  const host = document.getElementById('meta');
+  host.innerHTML = '';
+  [["topic","Тема"],["submission_id","submission_id"],["creator_id","creator_id"],["cutoff_year","cutoff_year"],["review_goal","Цель проверки"]]
+    .forEach(([key,label]) => {
+      const node = key === "review_goal" ? el('textarea', {}) : el('input', {type:'text'});
+      node.value = meta[key] || '';
+      node.oninput = () => { meta[key] = node.value; save(); renderStats(); };
+      host.append(field(label, FIELD_HELP[key], node));
+    });
+}
+function setPreset(caseObj, stratum) {
+  caseObj.stratum = stratum;
+  if (stratum === 'multimodal_hard') {
+    caseObj.review_focus = ['evidence','visual_fact'];
+    caseObj.expected_error_modes = ['missed_visual_fact','wrong_evidence_linkage'];
+    caseObj.evidence_kind = caseObj.evidence_kind || 'figure_or_table';
+  } else if (stratum === 'temporal_hard') {
+    caseObj.review_focus = ['temporal','evidence'];
+    caseObj.expected_error_modes = ['needs_time_fix','wrong_evidence_linkage'];
+    caseObj.evidence_kind = caseObj.evidence_kind || 'figure_or_table';
+  } else {
+    caseObj.review_focus = ['overall'];
+    caseObj.expected_error_modes = [];
+    caseObj.evidence_kind = caseObj.evidence_kind || 'page';
+  }
+}
+function checkboxGroup(options, selected, onChange) {
+  const set = new Set(selected || []);
+  const box = el('div', {class:'checkgrid'});
+  options.forEach(([value,label]) => {
+    const input = el('input', {type:'checkbox'});
+    input.checked = set.has(value);
+    input.onchange = () => {
+      if (input.checked) set.add(value); else set.delete(value);
+      onChange(Array.from(set));
+    };
+    box.append(el('label', {class:'check'}, input, el('div', null, el('div', {text:label}), el('div', {class:'small muted', text:value}))));
+  });
+  return box;
+}
+function addCase(stratum='multimodal_hard') {
+  const c = {
+    case_id: nextCaseId(),
+    enabled: true,
+    primary_endpoint: stratum !== 'easy_control',
+    stratum,
+    paper_title: '',
+    paper_id: '',
+    year: '',
+    evidence_kind: '',
+    page_hint: '',
+    creator_prompt: '',
+    creator_rationale: '',
+    review_focus: [],
+    expected_error_modes: [],
+    match: {
+      candidate_signature: '',
+      candidate_source_contains: '',
+      candidate_predicate_contains: '',
+      candidate_target_contains: '',
+      hypothesis_title_contains: '',
+      premise_contains: '',
+      mechanism_contains: '',
+      time_scope_contains: '',
+      rank_hint: '',
+    },
+    notes: '',
+  };
+  setPreset(c, stratum);
+  (state.cases || (state.cases = [])).push(c);
+  render();
+  save();
+}
+function cloneCase(idx) {
+  const original = state.cases[idx];
+  const cloned = JSON.parse(JSON.stringify(original));
+  cloned.case_id = nextCaseId();
+  state.cases.push(cloned);
+  render();
+  save();
+}
+function selectStratum(c) {
+  const s = el('select', null,
+    ['multimodal_hard','temporal_hard','easy_control'].map(v => el('option', {value:v, text:STRATUM_LABELS[v]}))
+  );
+  s.value = c.stratum || 'multimodal_hard';
+  s.onchange = () => { setPreset(c, s.value); render(); save(); };
+  return s;
+}
+function selectEvidenceKind(c) {
+  const s = el('select', null, EVIDENCE_KIND_OPTIONS.map(([v,label]) => el('option', {value:v, text:label})));
+  s.value = c.evidence_kind || 'figure_or_table';
+  s.onchange = () => { c.evidence_kind = s.value; save(); };
+  return s;
+}
+function caseCard(c, idx) {
+  const status = caseStatus(c);
+  const box = el('div', {class:'case'});
+  const enabled = el('input', {type:'checkbox'});
+  enabled.checked = c.enabled !== false;
+  enabled.onchange = () => { c.enabled = enabled.checked; save(); renderStats(); };
+  const primary = el('input', {type:'checkbox'});
+  primary.checked = !!c.primary_endpoint;
+  primary.onchange = () => { c.primary_endpoint = primary.checked; save(); };
+
+  box.append(
+    el('div', {class:'casehead'},
+      el('div', null,
+        el('div', {class:'pills'},
+          el('span', {class:'pill', text:c.case_id || `CASE-${String(idx+1).padStart(3,'0')}`}),
+          el('span', {class:`pill ${status.cls}`, text:status.label})
+        ),
+        el('p', {class:'muted small', text:'Сначала заполните контекст кейса, затем задайте понятный creator_prompt, а технические match-поля раскрывайте только при необходимости.'})
+      ),
+      el('div', {class:'case-actions'},
+        el('label', {class:'small'}, enabled, document.createTextNode(' включён')),
+        el('label', {class:'small'}, primary, document.createTextNode(' primary endpoint')),
+        el('button', {
+          class:'iconbtn primary',
+          type:'button',
+          title:'Добавить ещё один такой кейс',
+          onClick:() => cloneCase(idx)
+        }, '+'),
+        el('button', {
+          class:'iconbtn',
+          type:'button',
+          title:'Убрать этот кейс',
+          onClick:() => { state.cases.splice(idx, 1); render(); save(); }
+        }, '-')
+      )
+    )
+  );
+
+  box.append(el('div', {class:'section-title', text:'A. Контекст кейса'}));
+  const top = el('div', {class:'grid cols3'});
+  const caseIdInput = el('input', {type:'text', value:c.case_id || ''});
+  caseIdInput.oninput = () => { c.case_id = caseIdInput.value; save(); renderStats(); };
+  const paperTitle = el('input', {type:'text', value:c.paper_title || '', placeholder:'Например: Catalyst latency under periodic modulation'});
+  paperTitle.oninput = () => { c.paper_title = paperTitle.value; save(); render(); };
+  const paperId = el('input', {type:'text', value:c.paper_id || '', placeholder:'doi:..., arXiv:..., pmid:...'});
+  paperId.oninput = () => { c.paper_id = paperId.value; save(); };
+  const year = el('input', {type:'text', value:c.year || '', placeholder:'2024'});
+  year.oninput = () => { c.year = year.value; save(); };
+  const pageHint = el('input', {type:'text', value:c.page_hint || '', placeholder:'p.4, Fig.2 / Table 3'});
+  pageHint.oninput = () => { c.page_hint = pageHint.value; save(); };
+  top.append(
+    field('case_id', FIELD_HELP.case_id, caseIdInput),
+    field('paper_title', FIELD_HELP.paper_title, paperTitle),
+    field('paper_id', FIELD_HELP.paper_id, paperId),
+    field('year', FIELD_HELP.year, year),
+    field('evidence_kind', FIELD_HELP.evidence_kind, selectEvidenceKind(c)),
+    field('page_hint', FIELD_HELP.page_hint, pageHint),
+    field('stratum', 'Выберите тип сложности кейса. Это влияет на рекомендуемые focus/error presets.', selectStratum(c))
+  );
+  box.append(top);
+
+  box.append(el('hr', {class:'sep'}));
+  box.append(el('div', {class:'section-title', text:'B. Что должен оценивать участник A/B'}));
+  const prompt = el('textarea', {placeholder:'Пример: Сравните, какой вариант лучше извлекает численные значения из таблицы 3 и не теряет их в hypothesis support.'});
+  prompt.value = c.creator_prompt || '';
+  prompt.oninput = () => { c.creator_prompt = prompt.value; save(); render(); };
+  const rationale = el('textarea', {placeholder:'Пример: baseline часто пропускает колонку с доверительными интервалами, а tuned VLM должен сохранить численные evidence и правильную привязку к таблице.'});
+  rationale.value = c.creator_rationale || '';
+  rationale.oninput = () => { c.creator_rationale = rationale.value; save(); render(); };
+  box.append(field('creator_prompt', FIELD_HELP.creator_prompt, prompt));
+  box.append(field('creator_rationale', FIELD_HELP.creator_rationale, rationale));
+
+  box.append(el('hr', {class:'sep'}));
+  box.append(el('div', {class:'section-title', text:'C. На что смотреть при ревью'}));
+  const focusWrap = el('div');
+  focusWrap.append(
+    el('div', {class:'muted small', text:'Выберите зоны внимания. Лучше 1–3 пункта, а не всё сразу.'}),
+    checkboxGroup(REVIEW_FOCUS_OPTIONS, c.review_focus || [], (vals) => { c.review_focus = vals; save(); render(); })
+  );
+  const errWrap = el('div');
+  errWrap.append(
+    el('div', {class:'muted small', text:'Отметьте ожидаемые типы ошибок, которые этот кейс должен уметь вскрывать.'}),
+    checkboxGroup(ERROR_OPTIONS, c.expected_error_modes || [], (vals) => { c.expected_error_modes = vals; save(); })
+  );
+  box.append(
+    el('div', {class:'grid cols2'},
+      field('review_focus', 'Это то, что участник должен оценить в первую очередь.', focusWrap),
+      field('expected_error_modes', 'Это ожидаемые fail modes именно для этого кейса.', errWrap)
+    )
+  );
+
+  box.append(el('hr', {class:'sep'}));
+  const details = el('details', null,
+    el('summary', {text:'D. Техническое сопоставление (advanced)'}),
+    el('p', {class:'muted small', text:'Раскрывайте этот блок, если нужно точнее привязать кейс к candidate/hypothesis в downstream runner. Для большинства кейсов достаточно 1–2 match-полей.'})
+  );
+  const m = c.match || (c.match = {});
+  const matchGrid = el('div', {class:'grid cols2'});
+  [
+    ['candidate_signature','candidate_signature'],
+    ['candidate_source_contains','candidate_source_contains'],
+    ['candidate_predicate_contains','candidate_predicate_contains'],
+    ['candidate_target_contains','candidate_target_contains'],
+    ['hypothesis_title_contains','hypothesis_title_contains'],
+    ['premise_contains','premise_contains'],
+    ['mechanism_contains','mechanism_contains'],
+    ['time_scope_contains','time_scope_contains'],
+    ['rank_hint','rank_hint'],
+  ].forEach(([key,label]) => {
+    const input = el('input', {type:'text', value:m[key] || ''});
+    input.oninput = () => { m[key] = input.value; save(); render(); };
+    matchGrid.append(field(label, FIELD_HELP[key], input));
+  });
+  details.append(matchGrid);
+  box.append(details);
+
+  box.append(el('hr', {class:'sep'}));
+  const notes = el('textarea', {placeholder:'Необязательные заметки: почему кейс спорный, что проверить вручную, чего избегать.'});
+  notes.value = c.notes || '';
+  notes.oninput = () => { c.notes = notes.value; save(); };
+  box.append(field('notes', FIELD_HELP.notes, notes));
+
+  return box;
+}
+function renderCases() {
+  const host = document.getElementById('cases');
+  host.innerHTML = '';
+  (state.cases || []).forEach((c, idx) => host.append(caseCard(c, idx)));
+}
+function render() {
+  renderMeta();
+  renderCaseToolbar();
+  renderCases();
+  renderStats();
+}
+document.getElementById('exportFilled').onclick = () => download('task3_ab_case_manifest.filled.json', JSON.stringify(state, null, 2));
+document.getElementById('exportDraft').onclick = () => download('task3_ab_case_manifest.draft.json', JSON.stringify(state, null, 2));
+document.getElementById('clearLocalDraft').onclick = () => {
+  if (!confirm('Удалить локально сохранённый черновик из браузера?')) return;
+  try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+  alert('Локальный черновик удалён. Текущие данные на экране не изменены. Чтобы начать с нуля, обновите страницу.');
+};
+document.getElementById('loadDraft').addEventListener('change', (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    Object.assign(state, JSON.parse(String(reader.result || '{}')));
+    render();
+    save();
+  };
+  reader.readAsText(f, 'utf-8');
+});
+load();
+/* стартовые кейсы не создаём — берутся из config/манифеста */
+render();
+save();
+
+/* --- server bridge (added by scripts/build.py for web_form/serve.py) --- */
+(function(){
+  function onServer(){ return location.protocol === 'http:' || location.protocol === 'https:'; }
+  try {
+    var bar = document.querySelector('.toolbar');
+    if (bar) {
+      var btn = document.createElement('button');
+      btn.id = 'saveServer'; btn.className = 'primary';
+      btn.textContent = 'Сохранить на сервер';
+      btn.onclick = function(){
+        fetch('/api/manifest', {method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(state, null, 2)})
+          .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+          .then(function(res){
+            if (res.ok && res.j && res.j.ok) alert('Сохранено в репозиторий: ' + res.j.cases + ' кейсов.');
+            else alert('Ошибка сохранения: ' + ((res.j && res.j.error) || JSON.stringify(res.j)));
+          })
+          .catch(function(e){ alert('Сервер недоступен (офлайн-режим). Используйте «Скачать заполненный JSON». ' + e); });
+      };
+      bar.appendChild(btn);
+    }
+  } catch(e){}
+  if (onServer()) {
+    fetch('/api/manifest').then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(m){
+        if (m && Array.isArray(m.cases) && m.cases.length) { Object.assign(state, m); render(); save(); }
+      })
+      .catch(function(){});
+  }
+})();
+</script>
+</body>
+</html>
