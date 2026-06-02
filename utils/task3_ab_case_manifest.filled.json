@@ -1,0 +1,11 @@
+{
+  "schema_version": "task3-ab-creator-v1",
+  "experiment_meta": {
+    "topic": "",
+    "submission_id": "",
+    "creator_id": "",
+    "cutoff_year": "",
+    "review_goal": ""
+  },
+  "cases": []
+}

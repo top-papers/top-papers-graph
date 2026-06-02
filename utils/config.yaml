@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Конфиг утилиты-сборщика диагностического набора Task 3 (A/B).
+# Заполните два списка ниже и выполните:  python3 scripts/build.py
+# Метаданные эксперимента (topic, creator_id, cutoff_year, review_goal)
+# заполняются НЕ здесь, а в GUI (веб-форма на :9000 или telegram-бот).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Статьи, на которые ссылаются кейсы. Кейс ссылается на статью по полю id.
+# id — произвольный идентификатор (например, arxiv:2305.02402). title/year опциональны.
+papers: []
+#  - id: arxiv:2305.02402
+#    title: Normalizing flows for lattice gauge theory
+#    year: 2023
+
+# Кейсы набора. case_id проставляется автоматически (case_01, case_02, …),
+# если не задан явно. paper_id ссылается на papers[].id (title/year подтянутся оттуда);
+# можно вместо этого указать paper_title/year прямо в кейсе.
+cases: []
+#  - paper_id: arxiv:2305.02402
+#    stratum: multimodal_hard            # multimodal_hard | temporal_hard | easy_control
+#    evidence_kind: figure               # figure | table | figure_or_table | formula | page | mixed
+#    page_hint: "Fig. 1"
+#    creator_prompt: "Один короткий конкретный вопрос по объекту статьи."
+#    creator_rationale: "Почему этот кейс диагностичен и что теряет baseline."
+#    review_focus: [evidence, visual_fact]      # evidence | visual_fact | temporal | overall
+#    expected_error_modes: [missed_visual_fact] # missed_visual_fact | wrong_evidence_linkage | needs_time_fix | hallucinated_visual_inference
+#    match:
+#      hypothesis_title_contains: "..."
+#      premise_contains: "..."
