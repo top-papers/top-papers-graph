@@ -12,8 +12,9 @@ from typing import List, MutableMapping
 
 DEFAULT_CONFIG = Path("experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_grpo_full_g2_2.yaml")
 JOB_ID_PATTERNS = [
-    re.compile(r"job[_-][a-z0-9-]+", re.IGNORECASE),
-    re.compile(r"\b[a-z0-9]{20,}\b", re.IGNORECASE),
+    re.compile(r"created job [`'\"]?([a-z][a-z0-9]{10,})[`'\"]?", re.IGNORECASE),
+    re.compile(r"/job/([a-z][a-z0-9]{10,})\b", re.IGNORECASE),
+    re.compile(r"(?:job\s*)?(?:id|идентификатор)[\s:=`'\"]+([a-z][a-z0-9]{10,})\b", re.IGNORECASE),
 ]
 
 
@@ -68,14 +69,15 @@ def run(
 
 
 def parse_job_id(text: str) -> str | None:
-    # Prefer explicit `id: ...`/`job id ...` lines when DataSphere CLI prints them.
-    explicit = re.search(r"(?:job\s*)?(?:id|идентификатор)[\s:=]+([a-z0-9_-]{10,})", text, re.IGNORECASE)
-    if explicit:
-        return explicit.group(1)
+    """Return a real DataSphere job id from CLI output, never a local log path.
+
+    DataSphere CLI also prints local paths like /tmp/datasphere/job_2026-..., so
+    the parser must only accept explicit job creation/id messages or job URLs.
+    """
     for pattern in JOB_ID_PATTERNS:
         match = pattern.search(text)
         if match:
-            return match.group(0)
+            return match.group(1)
     return None
 
 
@@ -132,6 +134,7 @@ def main() -> None:
     ensure_datasphere_cli()
     job_id = None
     job_id_sink = {"job_id": None}
+    execute_returncode: int | None = None
     try:
         proc = run(execute_cmd, log_file=log_file, check=True, job_id_sink=job_id_sink)
         job_id = job_id_sink.get("job_id") or parse_job_id(proc.stdout or "")
@@ -146,13 +149,13 @@ def main() -> None:
             run(["datasphere", "project", "job", "cancel", "--id", job_id], log_file=log_file, check=False)
         raise
     except subprocess.CalledProcessError as exc:
+        execute_returncode = exc.returncode
         job_id = job_id_sink.get("job_id") or parse_job_id(exc.output or "")
         manifest["job_id"] = job_id
         manifest["status"] = "execute_failed"
+        manifest["returncode"] = exc.returncode
+        manifest["note"] = "The execute command already finished with a non-zero status; managed launcher will not cancel it again."
         write_manifest(manifest_file, manifest)
-        if job_id:
-            run(["datasphere", "project", "job", "cancel", "--id", job_id], log_file=log_file, check=False)
-        raise SystemExit(exc.returncode) from exc
     finally:
         if job_id:
             # A finished DataSphere Job releases its ephemeral VM; the TTL below removes cached job data quickly.
@@ -160,16 +163,18 @@ def main() -> None:
 
     if job_id and not args.no_download:
         run(["datasphere", "project", "job", "download-files", "--id", job_id], log_file=log_file, check=False)
-        manifest["status"] = "download_requested"
+        manifest["status"] = "download_requested_after_failure" if execute_returncode else "download_requested"
     elif not job_id:
-        manifest["status"] = "finished_but_job_id_not_parsed"
-        manifest["warning"] = "The job completed, but the CLI output did not expose a parsable job id. Declared outputs should still be present after blocking execute."
+        manifest["status"] = "finished_but_job_id_not_parsed" if execute_returncode is None else "failed_and_job_id_not_parsed"
+        manifest["warning"] = "The CLI output did not expose a parsable DataSphere job id. Check the DataSphere UI/job list and download declared outputs manually if needed."
     else:
-        manifest["status"] = "finished_no_download"
+        manifest["status"] = "finished_no_download" if execute_returncode is None else "failed_no_download"
 
     manifest["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
     write_manifest(manifest_file, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    if execute_returncode is not None:
+        raise SystemExit(execute_returncode)
 
 
 if __name__ == "__main__":

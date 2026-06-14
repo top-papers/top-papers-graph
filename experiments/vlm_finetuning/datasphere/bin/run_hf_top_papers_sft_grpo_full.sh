@@ -2,6 +2,15 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
+# DataSphere secret bridge: a project secret named HFTOKEN is exposed as $HFTOKEN,
+# while Hugging Face Hub libraries expect HF_TOKEN/HUGGING_FACE_HUB_TOKEN.
+if [ -z "${HF_TOKEN:-}" ] && [ -n "${HFTOKEN:-}" ]; then
+  export HF_TOKEN="$HFTOKEN"
+fi
+if [ -z "${HUGGING_FACE_HUB_TOKEN:-}" ] && [ -n "${HF_TOKEN:-}" ]; then
+  export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+fi
+
 DATASET_ID="${HF_DATASET_ID:-top-papers/top-papers-graph-experts-data}"
 DATASET_SPLIT="${HF_DATASET_SPLIT:-validation}"
 DATASET_REVISION="${HF_DATASET_REVISION:-main}"
@@ -13,6 +22,7 @@ DATA_DIR="data/derived/hf_top_papers_graph_experts"
 SFT_DIR="outputs/${OUT_PREFIX}_sft_lora"
 GRPO_DIR="outputs/${OUT_PREFIX}_grpo_lora"
 REPORT_DIR="reports/${OUT_PREFIX}_datasphere"
+export REPORT_DIR
 HF_REPO_ID="${HF_REPO_ID:-top-papers/Qwen3-VL-8B-Instruct-scireason}"
 HF_REPO_TYPE="${HF_REPO_TYPE:-model}"
 HF_REVISION="${HF_REVISION:-main}"
@@ -207,6 +217,12 @@ upload_to_huggingface() {
 }
 
 trap 'status=$?; package_artifacts; exit $status' EXIT
+
+if [ "${ENABLE_GPU_PREFLIGHT:-1}" != "0" ]; then
+  python experiments/vlm_finetuning/datasphere/bin/check_gpu_before_pipeline.py --report-dir "$REPORT_DIR" --require-bf16
+else
+  echo "[gpu-check] ENABLE_GPU_PREFLIGHT=0; skipping early CUDA/BF16 preflight"
+fi
 
 PIXEL_ARGS=()
 if [ -n "$VLM_MIN_PIXELS" ]; then

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 {hf-full|hf-full-managed|build-datasets|sft-smoke|sft-pilot|dpo-pilot|teacher-sft-30b|student-distill-4b|validate|list|get|attach|cancel|ttl|download} [args...]"
+  echo "Usage: $0 {hf-full|hf-full-managed|hf-smoke-managed|build-datasets|sft-smoke|sft-pilot|dpo-pilot|teacher-sft-30b|student-distill-4b|validate|list|get|attach|cancel|ttl|download} [args...]"
   exit 1
 fi
 
@@ -33,6 +33,13 @@ case "$ACTION" in
   hf-full-managed)
     need_project
     python experiments/vlm_finetuning/datasphere/run_full_pipeline.py --project-id "$PROJECT_ID" "$@"
+    ;;
+  hf-smoke-managed)
+    need_project
+    python experiments/vlm_finetuning/datasphere/run_full_pipeline.py \
+      --project-id "$PROJECT_ID" \
+      --config experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_grpo_smoke_g2_2.yaml \
+      "$@"
     ;;
   build-datasets)
     need_project

@@ -1,9 +1,6 @@
-name: hf-top-papers-qwen3vl-8b-sft-grpo-g2-2
-desc: 'Budget-guarded full SFT plus GRPO VLM fine-tuning for Qwen3-VL-8B-Instruct
-  on top-papers/top-papers-graph-experts-data export exports/colab-run-001, DataSphere
-  g2.2 A100 x2, 1 TB SSD, hard project budget guard below 100000 RUB.
-
-  '
+name: hf-top-papers-qwen3vl-8b-sft-grpo-smoke-g2-2
+desc: Smoke test for Qwen3-VL-8B SFT+GRPO DataSphere pipeline with CUDA/BF16 preflight,
+  tiny steps and no Hugging Face upload.
 cmd: 'bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_grpo_full.sh
 
   '
@@ -26,8 +23,8 @@ env:
   - MAX_IMAGES_PER_EXAMPLE_SFT: 3
   - MAX_IMAGES_PER_EXAMPLE_GRPO: 2
   - BASE_MODEL: Qwen/Qwen3-VL-8B-Instruct
-  - OUT_PREFIX: hf_top_papers_qwen3vl_8b
-  - HF_UPLOAD_AFTER_TRAINING: '1'
+  - OUT_PREFIX: hf_top_papers_qwen3vl_8b_smoke
+  - HF_UPLOAD_AFTER_TRAINING: '0'
   - HF_REPO_ID: top-papers/Qwen3-VL-8B-Instruct-scireason
   - HF_REPO_TYPE: model
   - HF_REVISION: main
@@ -38,10 +35,10 @@ env:
   - BUDGET_SHUTDOWN_MARGIN_SECONDS: 900
   - G2_2_RUB_PER_HOUR: 1085.76
   - DATA_TIMEOUT_HOURS: 3
-  - SFT_TIMEOUT_HOURS: 48
-  - GRPO_TIMEOUT_HOURS: 35
-  - MAX_SFT_STEPS: 480
-  - MAX_GRPO_STEPS: 160
+  - SFT_TIMEOUT_HOURS: 4
+  - GRPO_TIMEOUT_HOURS: 4
+  - MAX_SFT_STEPS: 20
+  - MAX_GRPO_STEPS: 5
   - SFT_EPOCHS: 4
   - GRPO_EPOCHS: 1
   - SFT_LR: 7e-5
@@ -63,9 +60,9 @@ env:
   - GRPO_MAX_GRAD_NORM: '0.3'
   - GRPO_PER_DEVICE_BATCH: 1
   - GRPO_GRAD_ACCUM: 8
-  - GRPO_NUM_GENERATIONS: 2
-  - GRPO_NUM_GENERATIONS_EVAL: 2
-  - GRPO_MAX_COMPLETION_LENGTH: 384
+  - GRPO_NUM_GENERATIONS: 1
+  - GRPO_NUM_GENERATIONS_EVAL: 1
+  - GRPO_MAX_COMPLETION_LENGTH: 32
   - GRPO_TEMPERATURE: '0.8'
   - GRPO_TOP_P: '0.95'
   - GRPO_TOP_K: 0
@@ -96,15 +93,13 @@ outputs:
 - data/derived/hf_top_papers_graph_experts/grpo_all.jsonl
 - data/derived/hf_top_papers_graph_experts/grpo_train.jsonl
 - data/derived/hf_top_papers_graph_experts/grpo_eval.jsonl
-- outputs/hf_top_papers_qwen3vl_8b_sft_lora.tar.gz
-- outputs/hf_top_papers_qwen3vl_8b_grpo_lora.tar.gz
-- reports/hf_top_papers_qwen3vl_8b_datasphere_reports.tar.gz
-- reports/hf_top_papers_qwen3vl_8b_datasphere/budget_plan.json
-- reports/hf_top_papers_qwen3vl_8b_datasphere/gpu_preflight_status.json
-- reports/hf_top_papers_qwen3vl_8b_datasphere/final_summary.json
-- reports/hf_top_papers_qwen3vl_8b_datasphere/hf_upload_summary.json
-- reports/hf_top_papers_qwen3vl_8b_datasphere/hf_upload_bundle/artifacts/reports/hf_upload_manifest.json
-- reports/hf_top_papers_qwen3vl_8b_datasphere/artifact_manifest.txt
+- outputs/hf_top_papers_qwen3vl_8b_smoke_sft_lora.tar.gz
+- outputs/hf_top_papers_qwen3vl_8b_smoke_grpo_lora.tar.gz
+- reports/hf_top_papers_qwen3vl_8b_smoke_datasphere_reports.tar.gz
+- reports/hf_top_papers_qwen3vl_8b_smoke_datasphere/budget_plan.json
+- reports/hf_top_papers_qwen3vl_8b_smoke_datasphere/gpu_preflight_status.json
+- reports/hf_top_papers_qwen3vl_8b_smoke_datasphere/final_summary.json
+- reports/hf_top_papers_qwen3vl_8b_smoke_datasphere/artifact_manifest.txt
 cloud-instance-types:
 - g2.2
 working-storage:
