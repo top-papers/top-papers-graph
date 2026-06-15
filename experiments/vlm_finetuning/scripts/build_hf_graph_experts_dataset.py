@@ -292,25 +292,90 @@ def normalise_export_rows(
     return output, stats
 
 
-def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
-    out_dir = args.out_dir.resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    export_subdir = args.export_subdir.strip("/")
-    allow_patterns = [
+
+def select_debug_rows(rows: List[Dict[str, Any]], max_samples: int, seed: int) -> List[Dict[str, Any]]:
+    """Deterministically cap rows before downloading export assets for smoke jobs."""
+    selected = list(rows)
+    if max_samples and max_samples > 0 and len(selected) > max_samples:
+        rng = random.Random(seed)
+        rng.shuffle(selected)
+        selected = selected[:max_samples]
+    return selected
+
+
+def export_metadata_allow_patterns(export_subdir: str) -> List[str]:
+    return [
         f"{export_subdir}/sft.jsonl",
         f"{export_subdir}/grpo.jsonl",
         f"{export_subdir}/README.md",
         f"{export_subdir}/export_summary.json",
         f"{export_subdir}/article_image_sources.jsonl",
         f"{export_subdir}/ARTICLE_IMAGE_SOURCES.md",
-        f"{export_subdir}/assets/**",
     ]
+
+
+def _asset_allow_pattern(value: Any, export_subdir: str) -> str | None:
+    """Convert a JSON image reference to an exact HF snapshot allow_pattern."""
+    if isinstance(value, dict):
+        value = value.get("path") or value.get("image") or value.get("url") or value.get("bytes")
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lstrip("./")
+    if not text or text.startswith("http://") or text.startswith("https://") or text.startswith("/"):
+        return None
+    if text.startswith(f"{export_subdir}/assets/"):
+        return text
+    if text.startswith("assets/"):
+        return f"{export_subdir}/{text}"
+    marker = f"/{export_subdir}/assets/"
+    if marker in text:
+        return f"{export_subdir}/assets/{text.split(marker, 1)[1]}"
+    marker = "/assets/"
+    if marker in text:
+        return f"{export_subdir}/assets/{text.split(marker, 1)[1]}"
+    return None
+
+
+def collect_asset_allow_patterns(
+    rows: List[Dict[str, Any]],
+    export_subdir: str,
+    max_images: int,
+) -> List[str]:
+    patterns: List[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        raw_images = as_list(row.get("images")) or as_list(row.get("image"))
+        if max_images > 0:
+            raw_images = raw_images[:max_images]
+        for item in raw_images:
+            pattern = _asset_allow_pattern(item, export_subdir)
+            if pattern and pattern not in seen:
+                seen.add(pattern)
+                patterns.append(pattern)
+    return patterns
+
+def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
+    out_dir = args.out_dir.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    export_subdir = args.export_subdir.strip("/")
+    metadata_patterns = export_metadata_allow_patterns(export_subdir)
+
+    # Smoke/debug runs should not ask Hugging Face Hub for every image in the
+    # export. Download metadata first, select a small deterministic subset, then
+    # request only the assets referenced by that subset. This avoids thousands of
+    # HEAD requests and the 429 backoff visible in DataSphere smoke logs.
+    using_debug_caps = bool(
+        (args.max_sft_samples and args.max_sft_samples > 0)
+        or (args.max_grpo_samples and args.max_grpo_samples > 0)
+    )
+    initial_allow_patterns = metadata_patterns if using_debug_caps else [*metadata_patterns, f"{export_subdir}/assets/**"]
+
     repo_root = Path(
         snapshot_download(
             repo_id=args.dataset_id,
             repo_type="dataset",
             revision=args.revision,
-            allow_patterns=allow_patterns,
+            allow_patterns=initial_allow_patterns,
             local_dir=args.snapshot_dir,
             local_dir_use_symlinks=False if args.snapshot_dir else None,
         )
@@ -324,14 +389,39 @@ def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
             f"Got sft={sft_path.exists()}, grpo={grpo_path.exists()}"
         )
 
-    sft_rows_raw = read_jsonl(sft_path)
-    grpo_rows_raw = read_jsonl(grpo_path)
+    sft_rows_raw_all = read_jsonl(sft_path)
+    grpo_rows_raw_all = read_jsonl(grpo_path)
+    sft_rows_raw = select_debug_rows(sft_rows_raw_all, args.max_sft_samples, args.seed)
+    grpo_rows_raw = select_debug_rows(grpo_rows_raw_all, args.max_grpo_samples, args.seed + 17)
+
+    asset_patterns: List[str] = []
+    if using_debug_caps:
+        asset_patterns.extend(
+            collect_asset_allow_patterns(sft_rows_raw, export_subdir, args.max_images_per_example_sft)
+        )
+        asset_patterns.extend(
+            p for p in collect_asset_allow_patterns(grpo_rows_raw, export_subdir, args.max_images_per_example_grpo)
+            if p not in asset_patterns
+        )
+        if asset_patterns:
+            repo_root = Path(
+                snapshot_download(
+                    repo_id=args.dataset_id,
+                    repo_type="dataset",
+                    revision=args.revision,
+                    allow_patterns=[*metadata_patterns, *asset_patterns],
+                    local_dir=args.snapshot_dir,
+                    local_dir_use_symlinks=False if args.snapshot_dir else None,
+                )
+            ).resolve()
+            export_dir = repo_root / export_subdir
+
     sft_rows, sft_stats = normalise_export_rows(
         sft_rows_raw,
         repo_root,
         export_dir,
         max_images=args.max_images_per_example_sft,
-        max_samples=args.max_sft_samples,
+        max_samples=0,
         seed=args.seed,
     )
     grpo_rows, grpo_stats = normalise_export_rows(
@@ -339,7 +429,7 @@ def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
         repo_root,
         export_dir,
         max_images=args.max_images_per_example_grpo,
-        max_samples=args.max_grpo_samples,
+        max_samples=0,
         seed=args.seed + 17,
     )
 
@@ -367,6 +457,12 @@ def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
         "export_dir": export_dir.as_posix(),
         "eval_ratio": args.eval_ratio,
         "seed": args.seed,
+        "max_sft_samples": args.max_sft_samples,
+        "max_grpo_samples": args.max_grpo_samples,
+        "raw_sft_rows_total": len(sft_rows_raw_all),
+        "raw_grpo_rows_total": len(grpo_rows_raw_all),
+        "sample_limited_asset_download": using_debug_caps,
+        "asset_patterns_requested": len(asset_patterns),
         "max_images_per_example_sft": args.max_images_per_example_sft,
         "max_images_per_example_grpo": args.max_images_per_example_grpo,
         "sft": {
@@ -388,7 +484,6 @@ def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
-
 
 def build_from_imagefolder(args: argparse.Namespace) -> Dict[str, Any]:
     out_dir = args.out_dir.resolve()

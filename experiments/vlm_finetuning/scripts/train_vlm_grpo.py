@@ -475,39 +475,104 @@ def _resolve_image_ref(value, base_dir: Path):
     return str(path.as_posix())
 
 
-def _canonicalize_messages(messages, base_dir: Path):
-    canonical = []
-    images = []
+
+def _safe_text(value: Any) -> str:
+    """Convert arbitrary JSON-like prompt content into chat-template-safe text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return str(value)
+
+
+def _text_block(value: Any) -> Dict[str, str]:
+    return {'type': 'text', 'text': _safe_text(value)}
+
+
+def _append_text_block(blocks: list[Dict[str, Any]], value: Any) -> None:
+    text = _safe_text(value)
+    if text.strip():
+        blocks.append({'type': 'text', 'text': text})
+
+
+def _append_image_block(blocks: list[Dict[str, Any]], images: list[Any], image_ref: Any) -> None:
+    if image_ref and image_ref not in images:
+        images.append(image_ref)
+    blocks.append({'type': 'image'})
+
+
+def _canonicalize_content_blocks(content: Any, base_dir: Path, images: list[Any]) -> list[Dict[str, Any]]:
+    """Return only Qwen/TRL-safe VLM blocks.
+
+    Qwen3-VL's chat template checks expressions such as ``'image' in
+    content`` for each content item. Raw integers or arbitrary nested objects
+    in exported prompt content can therefore crash Jinja with ``TypeError``.
+    This function ensures that prompt content contains only explicit text/image
+    blocks before TRL calls ``apply_chat_template``.
+    """
+    blocks: list[Dict[str, Any]] = []
+    if content in (None, ''):
+        return blocks
+    if isinstance(content, str):
+        _append_text_block(blocks, content)
+        return blocks
+    if isinstance(content, dict):
+        content = [content]
+    elif not isinstance(content, list):
+        _append_text_block(blocks, content)
+        return blocks
+
+    for item in content:
+        if item in (None, ''):
+            continue
+        if isinstance(item, str):
+            _append_text_block(blocks, item)
+            continue
+        if not isinstance(item, dict):
+            _append_text_block(blocks, item)
+            continue
+
+        block_type = str(item.get('type') or '').lower()
+        image_candidate = item.get('image') or item.get('image_url') or item.get('path') or item.get('url')
+        if block_type == 'image' or image_candidate:
+            image_ref = _resolve_image_ref(image_candidate, base_dir) if image_candidate else None
+            _append_image_block(blocks, images, image_ref)
+            continue
+        if block_type == 'video' or item.get('video'):
+            _append_text_block(blocks, item)
+            continue
+        if 'text' in item:
+            _append_text_block(blocks, item.get('text'))
+            continue
+        _append_text_block(blocks, item)
+    return blocks
+
+
+def _canonicalize_messages(messages: Any, base_dir: Path):
+    canonical: list[Dict[str, Any]] = []
+    images: list[Any] = []
     if not isinstance(messages, list):
+        if messages not in (None, '', []):
+            canonical.append({'role': 'user', 'content': [_text_block(messages)]})
         return canonical, images
+
     for msg in messages:
         if not isinstance(msg, dict):
+            if msg not in (None, '', []):
+                canonical.append({'role': 'user', 'content': [_text_block(msg)]})
             continue
-        role = str(msg.get('role') or 'user')
-        content = msg.get('content')
-        if isinstance(content, str):
-            canonical.append({'role': role, 'content': [{'type': 'text', 'text': content}]})
-            continue
-        blocks = []
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, str):
-                    if block.strip():
-                        blocks.append({'type': 'text', 'text': block})
-                    continue
-                if not isinstance(block, dict):
-                    continue
-                block_type = str(block.get('type') or 'text').lower()
-                if block_type == 'image':
-                    image_ref = _resolve_image_ref(block.get('image') or block.get('path') or block.get('url'), base_dir)
-                    if image_ref and image_ref not in images:
-                        images.append(image_ref)
-                    blocks.append({'type': 'image'})
-                elif block_type == 'text':
-                    text = block.get('text')
-                    if text is not None and str(text):
-                        blocks.append({'type': 'text', 'text': str(text)})
-        canonical.append({'role': role, 'content': blocks})
+        role = str(msg.get('role') or msg.get('from') or 'user')
+        if role == 'human':
+            role = 'user'
+        elif role in {'gpt', 'bot', 'model'}:
+            role = 'assistant'
+        content = msg.get('content', msg.get('value'))
+        blocks = _canonicalize_content_blocks(content, base_dir, images)
+        if blocks:
+            canonical.append({'role': role, 'content': blocks})
     return canonical, images
 
 
@@ -540,6 +605,31 @@ def _flatten_single_text_messages(messages):
     return flattened
 
 
+def _messages_have_image_block(messages: list[Dict[str, Any]]) -> bool:
+    for msg in messages:
+        content = msg.get('content')
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'image':
+                    return True
+    return False
+
+
+def _ensure_image_placeholder(messages: list[Dict[str, Any]], has_images: bool) -> list[Dict[str, Any]]:
+    if not has_images or _messages_have_image_block(messages):
+        return messages
+    for msg in messages:
+        if msg.get('role') == 'user':
+            content = msg.setdefault('content', [])
+            if isinstance(content, str):
+                msg['content'] = [{'type': 'image'}, {'type': 'text', 'text': content}]
+            elif isinstance(content, list):
+                content.insert(0, {'type': 'image'})
+            return messages
+    messages.insert(0, {'role': 'user', 'content': [{'type': 'image'}]})
+    return messages
+
+
 def format_grpo_keys(example, base_dir: Path | None = None):
     """Backward-compatible normalizer used by regression tests.
 
@@ -553,14 +643,14 @@ def format_grpo_keys(example, base_dir: Path | None = None):
     if not source_messages and example.get('prompt_messages'):
         source_messages = example.get('prompt_messages')
     prompt, embedded_images = _canonicalize_messages(source_messages, base_dir)
-    if prompt:
-        example['prompt'] = _flatten_single_text_messages(prompt)
     images = []
     images.extend(_normalize_image_list(example.get('images'), base_dir))
     images.extend(_normalize_image_list(example.get('image'), base_dir))
     for image_ref in embedded_images:
         if image_ref not in images:
             images.append(image_ref)
+    if prompt:
+        example['prompt'] = _flatten_single_text_messages(_ensure_image_placeholder(prompt, bool(images)))
     example['images'] = images
     return example
 
@@ -573,20 +663,19 @@ def make_grpo_formatter(base_dir: Path):
         if not source_messages and example.get('prompt_messages'):
             source_messages = example.get('prompt_messages')
         prompt, embedded_images = _canonicalize_messages(source_messages, base_dir)
-        if prompt:
-            example['prompt'] = prompt
         images = []
         images.extend(_normalize_image_list(example.get('images'), base_dir))
         images.extend(_normalize_image_list(example.get('image'), base_dir))
         for image_ref in embedded_images:
             if image_ref not in images:
                 images.append(image_ref)
+        if prompt:
+            example['prompt'] = _ensure_image_placeholder(prompt, bool(images))
         # Keep a stable list column: VLM rows contain resolved image paths,
         # text-only rows contain [] and can coexist in recent TRL/Transformers.
         example['images'] = images
         return example
     return format_grpo
-
 
 def _value_has_image(value) -> bool:
     if value in (None, ''):

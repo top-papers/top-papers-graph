@@ -32,3 +32,12 @@
 
 ### Packaging
 - Added missing `__init__.py` files for subpackages so that setuptools package discovery works reliably.
+
+## 2026-06-15 - DataSphere smoke chat-template and rate-limit fix
+
+- Fixed Qwen3-VL/TRL SFT tokenization crash caused by raw non-dict content items inside multimodal chat messages.
+- Added robust SFT/GRPO message-content canonicalization to emit only safe text/image blocks.
+- Added smoke-only HF export asset subsetting to avoid downloading the full 15k-file asset tree and reduce Hugging Face 429 rate-limit retries.
+- Added smoke dataset caps: MAX_SFT_SAMPLES=96 and MAX_GRPO_SAMPLES=48.
+- Added regression tests for raw content normalization and smoke asset allow-pattern collection.
+

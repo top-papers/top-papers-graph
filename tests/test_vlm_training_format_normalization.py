@@ -85,7 +85,7 @@ def test_sft_normalizes_chat_to_messages_and_images(monkeypatch):
     row = {"chat": _sample_chat()}
     out = mod._normalise_sft_example(row)
 
-    assert out["messages"][0] == {"role": "system", "content": "sys"}
+    assert out["messages"][0] == {"role": "system", "content": [{"type": "text", "text": "sys"}]}
     assert out["messages"][1]["content"] == [
         {"type": "text", "text": "question"},
         {"type": "image"},
@@ -106,3 +106,59 @@ def test_grpo_normalizes_prompt_chat_to_prompt_and_images(monkeypatch):
         {"type": "image"},
     ]
     assert out["images"] == ["/tmp/page_001.png"]
+
+
+
+def test_sft_converts_raw_non_dict_content_to_text_blocks(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_raw_content_test")
+
+    row = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    123,
+                    {"type": "image", "image": "/tmp/page_002.png"},
+                    {"unexpected": 456},
+                ],
+            },
+            {"role": "assistant", "content": [789]},
+        ]
+    }
+    out = mod._normalise_sft_example(row)
+
+    assert out["messages"][0]["content"] == [
+        {"type": "text", "text": "123"},
+        {"type": "image"},
+        {"type": "text", "text": '{"unexpected": 456}'},
+    ]
+    assert out["messages"][1]["content"] == [{"type": "text", "text": "789"}]
+    assert out["images"] == ["/tmp/page_002.png"]
+
+
+def test_grpo_training_formatter_converts_raw_non_dict_content_to_text_blocks(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_raw_content_test")
+
+    formatter = mod.make_grpo_formatter(Path("."))
+    row = {
+        "prompt": [
+            {
+                "role": "user",
+                "content": [
+                    123,
+                    {"type": "image", "image": "/tmp/page_003.png"},
+                    {"unexpected": 456},
+                ],
+            }
+        ]
+    }
+    out = formatter(row)
+
+    assert out["prompt"][0]["content"] == [
+        {"type": "text", "text": "123"},
+        {"type": "image"},
+        {"type": "text", "text": '{"unexpected": 456}'},
+    ]
+    assert out["images"] == ["/tmp/page_003.png"]

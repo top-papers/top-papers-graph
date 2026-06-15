@@ -197,44 +197,115 @@ def _resolve_image_ref(value, base_dir: Path):
     return str(path.as_posix())
 
 
-def _canonicalize_messages(messages, base_dir: Path):
-    canonical = []
-    images = []
+def _safe_text(value: Any) -> str:
+    """Convert arbitrary JSON-like content into text that chat templates can render safely."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return str(value)
+
+
+def _text_block(value: Any) -> Dict[str, str]:
+    return {'type': 'text', 'text': _safe_text(value)}
+
+
+def _append_text_block(blocks: list[Dict[str, Any]], value: Any) -> None:
+    text = _safe_text(value)
+    if text.strip():
+        blocks.append({'type': 'text', 'text': text})
+
+
+def _append_image_block(blocks: list[Dict[str, Any]], images: list[Any], image_ref: Any) -> None:
+    resolved = image_ref
+    if resolved and resolved not in images:
+        images.append(resolved)
+    # TRL VLM datasets carry actual images in the top-level image/images column.
+    # Keep the message block minimal and template-safe.
+    blocks.append({'type': 'image'})
+
+
+def _canonicalize_content_blocks(content: Any, base_dir: Path, images: list[Any]) -> list[Dict[str, Any]]:
+    """Return only Qwen/TRL-safe content blocks.
+
+    Qwen3-VL's Jinja chat template performs membership tests such as
+    ``'image' in content`` on each content item. If a raw export contains an
+    integer, list, or arbitrary JSON object inside message.content, the template
+    can raise ``TypeError: argument of type 'int' is not iterable``.  This
+    normalizer makes every item either ``{'type': 'text', 'text': ...}`` or
+    ``{'type': 'image'}`` before TRL tokenization.
+    """
+    blocks: list[Dict[str, Any]] = []
+    if content in (None, ''):
+        return blocks
+    if isinstance(content, str):
+        _append_text_block(blocks, content)
+        return blocks
+    if isinstance(content, dict):
+        content = [content]
+    elif not isinstance(content, list):
+        _append_text_block(blocks, content)
+        return blocks
+
+    for item in content:
+        if item in (None, ''):
+            continue
+        if isinstance(item, str):
+            _append_text_block(blocks, item)
+            continue
+        if not isinstance(item, dict):
+            _append_text_block(blocks, item)
+            continue
+
+        block_type = str(item.get('type') or '').lower()
+        image_candidate = item.get('image') or item.get('image_url') or item.get('path') or item.get('url')
+        if block_type == 'image' or image_candidate:
+            image_ref = _resolve_image_ref(image_candidate, base_dir) if image_candidate else None
+            _append_image_block(blocks, images, image_ref)
+            continue
+        if block_type == 'video' or item.get('video'):
+            # This training pipeline is image-only. Preserve the information as
+            # text rather than sending unsupported video blocks into Qwen3-VL SFT.
+            _append_text_block(blocks, item)
+            continue
+        if 'text' in item:
+            _append_text_block(blocks, item.get('text'))
+            continue
+        # Arbitrary structured export content is retained as JSON text so that
+        # the sample remains useful and the chat template never sees raw ints.
+        _append_text_block(blocks, item)
+    return blocks
+
+
+def _canonicalize_messages(messages: Any, base_dir: Path):
+    canonical: list[Dict[str, Any]] = []
+    images: list[Any] = []
     if not isinstance(messages, list):
+        if messages not in (None, '', []):
+            canonical.append({'role': 'user', 'content': [_text_block(messages)]})
         return canonical, images
     for msg in messages:
         if not isinstance(msg, dict):
+            if msg not in (None, '', []):
+                canonical.append({'role': 'user', 'content': [_text_block(msg)]})
             continue
-        role = str(msg.get('role') or 'user')
-        content = msg.get('content')
-        if isinstance(content, str):
-            canonical.append({'role': role, 'content': [{'type': 'text', 'text': content}]})
-            continue
-        blocks = []
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, str):
-                    if block.strip():
-                        blocks.append({'type': 'text', 'text': block})
-                    continue
-                if not isinstance(block, dict):
-                    continue
-                block_type = str(block.get('type') or 'text').lower()
-                if block_type == 'image':
-                    image_ref = _resolve_image_ref(block.get('image') or block.get('path') or block.get('url'), base_dir)
-                    if image_ref and image_ref not in images:
-                        images.append(image_ref)
-                    blocks.append({'type': 'image'})
-                elif block_type == 'text':
-                    text = block.get('text')
-                    if text is not None and str(text):
-                        blocks.append({'type': 'text', 'text': str(text)})
-        canonical.append({'role': role, 'content': blocks})
+        role = str(msg.get('role') or msg.get('from') or 'user')
+        if role == 'human':
+            role = 'user'
+        elif role in {'gpt', 'bot', 'model'}:
+            role = 'assistant'
+        content = msg.get('content', msg.get('value'))
+        blocks = _canonicalize_content_blocks(content, base_dir, images)
+        if blocks:
+            canonical.append({'role': role, 'content': blocks})
     return canonical, images
 
 
 def _flatten_single_text_messages(messages):
-    """Keep pure text turns in classic TRL chat format; keep multimodal turns as blocks."""
+    """Keep pure text turns in classic TRL chat format for legacy callers only."""
     flattened = []
     for msg in messages:
         content = msg.get('content')
@@ -250,6 +321,48 @@ def _flatten_single_text_messages(messages):
     return flattened
 
 
+def _messages_have_image_block(messages: list[Dict[str, Any]]) -> bool:
+    for msg in messages:
+        content = msg.get('content')
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'image':
+                    return True
+    return False
+
+
+def _ensure_image_placeholder(messages: list[Dict[str, Any]], has_images: bool) -> list[Dict[str, Any]]:
+    if not has_images or _messages_have_image_block(messages):
+        return messages
+    for msg in messages:
+        if msg.get('role') == 'user':
+            content = msg.setdefault('content', [])
+            if isinstance(content, str):
+                msg['content'] = [{'type': 'image'}, {'type': 'text', 'text': content}]
+            elif isinstance(content, list):
+                content.insert(0, {'type': 'image'})
+            return messages
+    messages.insert(0, {'role': 'user', 'content': [{'type': 'image'}]})
+    return messages
+
+
+def _make_label_messages(label_value: Any) -> list[Dict[str, Any]]:
+    return [
+        {
+            'role': 'user',
+            'content': [
+                {'type': 'image'},
+                {'type': 'text', 'text': 'What is the correct label for this image? Return only the class label.'},
+            ],
+        },
+        {
+            'role': 'assistant',
+            'content': [{'type': 'text', 'text': str(label_value)}],
+        },
+    ]
+
+
+
 def _normalize_image_list(value, base_dir: Path):
     if value in (None, '', []):
         return []
@@ -263,29 +376,38 @@ def _normalize_image_list(value, base_dir: Path):
 
 
 def _normalise_sft_example(example, base_dir: Path | None = None):
-    """Normalize SFT rows from HF export, imagefolder, or task chat artifacts."""
+    """Normalize SFT rows from HF export, imagefolder, or task chat artifacts.
+
+    The returned ``messages`` value intentionally keeps every content field as a
+    list of explicit blocks.  This avoids heterogeneous Arrow schemas and keeps
+    Qwen3-VL's Jinja chat template from seeing raw integers/lists inside
+    ``message.content``.
+    """
     base_dir = base_dir or Path('.')
     if example.get('image') not in (None, '', []):
         example['image'] = _resolve_image_ref(example.get('image'), base_dir)
     if example.get('images') not in (None, '', []):
         example['images'] = _normalize_image_list(example.get('images'), base_dir)
+
     source_messages = example.get('messages')
     if not source_messages and isinstance(example.get('chat'), dict):
         source_messages = example['chat'].get('messages')
 
+    images = []
+    images.extend(_normalize_image_list(example.get('images'), base_dir))
+    if example.get('image') not in (None, '', []):
+        image_ref = _resolve_image_ref(example.get('image'), base_dir)
+        if image_ref and image_ref not in images:
+            images.append(image_ref)
+
     if source_messages:
         messages, embedded_images = _canonicalize_messages(source_messages, base_dir)
-        if messages:
-            example['messages'] = _flatten_single_text_messages(messages)
-        images = []
-        images.extend(_normalize_image_list(example.get('images'), base_dir))
-        if example.get('image') not in (None, '', []):
-            image_ref = _resolve_image_ref(example.get('image'), base_dir)
-            if image_ref and image_ref not in images:
-                images.append(image_ref)
         for image_ref in embedded_images:
             if image_ref not in images:
                 images.append(image_ref)
+        if not messages and 'label' in example:
+            messages = _make_label_messages(example.get('label_text', example['label']))
+        example['messages'] = _ensure_image_placeholder(messages, bool(images))
         example['images'] = images
         if images:
             example['image'] = images[0]
@@ -293,21 +415,12 @@ def _normalise_sft_example(example, base_dir: Path | None = None):
 
     if 'label' in example:
         label_value = example.get('label_text', example['label'])
-        example['messages'] = [
-            {
-                'role': 'user',
-                'content': [
-                    {'type': 'image'},
-                    {'type': 'text', 'text': 'What is the correct label for this image? Return only the class label.'},
-                ],
-            },
-            {
-                'role': 'assistant',
-                'content': str(label_value),
-            },
-        ]
+        example['messages'] = _make_label_messages(label_value)
+    if images:
+        example['messages'] = _ensure_image_placeholder(example.get('messages', []), True)
+        example['images'] = images
+        example['image'] = images[0]
     return example
-
 
 def _value_has_image(value) -> bool:
     if value in (None, ''):
