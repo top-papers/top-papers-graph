@@ -347,6 +347,65 @@ def _messages_have_image_block(messages: list[Dict[str, Any]]) -> bool:
                     return True
     return False
 
+def _count_image_placeholders(messages: list[Dict[str, Any]]) -> int:
+    count = 0
+    for msg in messages:
+        content = msg.get('content')
+        if isinstance(content, list):
+            count += sum(1 for block in content if isinstance(block, dict) and block.get('type') == 'image')
+    return count
+
+
+def _align_image_placeholders_to_images(messages: list[Dict[str, Any]], image_count: int) -> list[Dict[str, Any]]:
+    """Make TRL's image placeholders match the top-level images column exactly.
+
+    TRL's VLM collator calls ``prepare_multimodal_messages(messages, images=...)``
+    and raises ``ValueError`` when the number of ``{'type': 'image'}`` blocks
+    differs from ``len(images)``.  Our exported rows may contain more image
+    placeholders than the smoke cap keeps in the top-level ``images`` column,
+    so extra placeholders must be dropped before the batch collator runs.
+    """
+    image_count = max(0, int(image_count or 0))
+    kept_images = 0
+    aligned: list[Dict[str, Any]] = []
+
+    for msg in messages:
+        role = str(msg.get('role') or 'user')
+        content = msg.get('content')
+        if not isinstance(content, list):
+            aligned.append({'role': role, 'content': content})
+            continue
+
+        new_content: list[Dict[str, Any]] = []
+        for block in content:
+            if isinstance(block, dict) and block.get('type') == 'image':
+                if kept_images < image_count:
+                    new_content.append({'type': 'image'})
+                    kept_images += 1
+                # Drop placeholders beyond the actual images list.
+                continue
+            new_content.append(block if isinstance(block, dict) else _text_block(block))
+        if new_content:
+            aligned.append({'role': role, 'content': new_content})
+
+    missing = image_count - kept_images
+    if missing > 0:
+        placeholders = [{'type': 'image'} for _ in range(missing)]
+        for msg in aligned:
+            if msg.get('role') == 'user':
+                content = msg.get('content')
+                if isinstance(content, str):
+                    msg['content'] = placeholders + [{'type': 'text', 'text': content}]
+                elif isinstance(content, list):
+                    msg['content'] = placeholders + content
+                else:
+                    msg['content'] = placeholders
+                break
+        else:
+            aligned.insert(0, {'role': 'user', 'content': placeholders})
+
+    return aligned
+
 
 def _ensure_image_placeholder(messages: list[Dict[str, Any]], has_images: bool) -> list[Dict[str, Any]]:
     if not has_images or _messages_have_image_block(messages):
@@ -408,9 +467,19 @@ def _strict_qwen_safe_messages(messages: Any, row_idx: int | None = None) -> lis
     return out
 
 
+def _row_images_for_placeholder_alignment(example: Dict[str, Any]) -> list[Any]:
+    images: list[Any] = []
+    images.extend(_normalize_image_list(example.get('images'), Path('.')))
+    if not images:
+        images.extend(_normalize_image_list(example.get('image'), Path('.')))
+    return images
+
+
 def _sanitize_sft_row_for_trl(example: Dict[str, Any], idx: int | None = None) -> Dict[str, Any]:
     example = dict(example)
-    example['messages'] = _strict_qwen_safe_messages(example.get('messages'), idx)
+    images = _row_images_for_placeholder_alignment(example)
+    messages = _strict_qwen_safe_messages(example.get('messages'), idx)
+    example['messages'] = _align_image_placeholders_to_images(messages, len(images))
     return example
 
 
@@ -426,8 +495,15 @@ def _keep_only_trl_sft_columns(ds, image_column: str):
 def _validate_sft_dataset_for_qwen(ds, split_name: str, limit: int = 256) -> None:
     n = min(len(ds), limit)
     for i in range(n):
-        messages = ds[i].get('messages')
-        _strict_qwen_safe_messages(messages, i)
+        row = ds[i]
+        messages = _strict_qwen_safe_messages(row.get('messages'), i)
+        image_count = len(_row_images_for_placeholder_alignment(row))
+        placeholder_count = _count_image_placeholders(messages)
+        if placeholder_count != image_count:
+            raise ValueError(
+                f'{split_name} row {i}: image placeholder count ({placeholder_count}) '
+                f'does not match images count ({image_count}) before SFTTrainer'
+            )
     print(f'[train_vlm_sft] validated {n}/{len(ds)} {split_name} rows for Qwen3-VL chat template safety.', flush=True)
 
 def _make_label_messages(label_value: Any) -> list[Dict[str, Any]]:
@@ -491,7 +567,8 @@ def _normalise_sft_example(example, base_dir: Path | None = None):
                 images.append(image_ref)
         if not messages and 'label' in example:
             messages = _make_label_messages(example.get('label_text', example['label']))
-        example['messages'] = _ensure_image_placeholder(messages, bool(images))
+        messages = _ensure_image_placeholder(messages, bool(images))
+        example['messages'] = _align_image_placeholders_to_images(messages, len(images))
         example['images'] = images
         if images:
             example['image'] = images[0]
@@ -501,7 +578,8 @@ def _normalise_sft_example(example, base_dir: Path | None = None):
         label_value = example.get('label_text', example['label'])
         example['messages'] = _make_label_messages(label_value)
     if images:
-        example['messages'] = _ensure_image_placeholder(example.get('messages', []), True)
+        messages = _ensure_image_placeholder(example.get('messages', []), True)
+        example['messages'] = _align_image_placeholders_to_images(messages, len(images))
         example['images'] = images
         example['image'] = images[0]
     return example

@@ -178,3 +178,81 @@ def test_sft_vlm_disables_assistant_only_loss_before_sftconfig(monkeypatch, caps
     mod.disable_unsupported_vlm_assistant_only_loss(text_args, "text")
     assert text_args.assistant_only_loss is True
 
+
+
+def test_sft_aligns_image_placeholders_to_capped_images(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_placeholder_align_test")
+
+    row = {
+        "images": ["/tmp/kept_1.png", "/tmp/kept_2.png", "/tmp/kept_3.png"],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "text", "text": "compare"},
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "image"},
+                ],
+            },
+            {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+        ],
+    }
+
+    out = mod._sanitize_sft_row_for_trl(row)
+    assert mod._count_image_placeholders(out["messages"]) == 3
+    assert out["messages"][0]["content"] == [
+        {"type": "image"},
+        {"type": "image"},
+        {"type": "text", "text": "compare"},
+        {"type": "image"},
+    ]
+
+
+def test_sft_adds_missing_placeholders_for_images(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_placeholder_add_test")
+
+    row = {
+        "images": ["/tmp/kept_1.png", "/tmp/kept_2.png"],
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "describe"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+        ],
+    }
+
+    out = mod._sanitize_sft_row_for_trl(row)
+    assert mod._count_image_placeholders(out["messages"]) == 2
+    assert out["messages"][0]["content"][:2] == [{"type": "image"}, {"type": "image"}]
+
+
+def test_grpo_aligns_image_placeholders_to_capped_images(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_placeholder_align_test")
+
+    formatter = mod.make_grpo_formatter(Path("."))
+    row = {
+        "images": ["/tmp/kept_1.png", "/tmp/kept_2.png"],
+        "prompt": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": "review"},
+                    {"type": "image"},
+                    {"type": "image"},
+                ],
+            }
+        ],
+    }
+    out = formatter(row)
+    placeholders = sum(
+        1
+        for msg in out["prompt"]
+        for block in msg.get("content", [])
+        if isinstance(block, dict) and block.get("type") == "image"
+    )
+    assert placeholders == 2

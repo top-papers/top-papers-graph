@@ -614,6 +614,45 @@ def _messages_have_image_block(messages: list[Dict[str, Any]]) -> bool:
                     return True
     return False
 
+def _align_image_placeholders_to_images(messages: list[Dict[str, Any]], image_count: int) -> list[Dict[str, Any]]:
+    """Ensure TRL receives exactly one image placeholder per top-level image."""
+    image_count = max(0, int(image_count or 0))
+    kept_images = 0
+    aligned: list[Dict[str, Any]] = []
+    for msg in messages:
+        role = str(msg.get('role') or 'user')
+        content = msg.get('content')
+        if not isinstance(content, list):
+            aligned.append({'role': role, 'content': content})
+            continue
+        new_content: list[Dict[str, Any]] = []
+        for block in content:
+            if isinstance(block, dict) and block.get('type') == 'image':
+                if kept_images < image_count:
+                    new_content.append({'type': 'image'})
+                    kept_images += 1
+                continue
+            new_content.append(block if isinstance(block, dict) else _text_block(block))
+        if new_content:
+            aligned.append({'role': role, 'content': new_content})
+
+    missing = image_count - kept_images
+    if missing > 0:
+        placeholders = [{'type': 'image'} for _ in range(missing)]
+        for msg in aligned:
+            if msg.get('role') == 'user':
+                content = msg.get('content')
+                if isinstance(content, str):
+                    msg['content'] = placeholders + [{'type': 'text', 'text': content}]
+                elif isinstance(content, list):
+                    msg['content'] = placeholders + content
+                else:
+                    msg['content'] = placeholders
+                break
+        else:
+            aligned.insert(0, {'role': 'user', 'content': placeholders})
+    return aligned
+
 
 def _ensure_image_placeholder(messages: list[Dict[str, Any]], has_images: bool) -> list[Dict[str, Any]]:
     if not has_images or _messages_have_image_block(messages):
@@ -650,7 +689,9 @@ def format_grpo_keys(example, base_dir: Path | None = None):
         if image_ref not in images:
             images.append(image_ref)
     if prompt:
-        example['prompt'] = _flatten_single_text_messages(_ensure_image_placeholder(prompt, bool(images)))
+        prompt = _ensure_image_placeholder(prompt, bool(images))
+        prompt = _align_image_placeholders_to_images(prompt, len(images))
+        example['prompt'] = _flatten_single_text_messages(prompt)
     example['images'] = images
     return example
 
@@ -670,7 +711,8 @@ def make_grpo_formatter(base_dir: Path):
             if image_ref not in images:
                 images.append(image_ref)
         if prompt:
-            example['prompt'] = _ensure_image_placeholder(prompt, bool(images))
+            prompt = _ensure_image_placeholder(prompt, bool(images))
+            example['prompt'] = _align_image_placeholders_to_images(prompt, len(images))
         # Keep a stable list column: VLM rows contain resolved image paths,
         # text-only rows contain [] and can coexist in recent TRL/Transformers.
         example['images'] = images
