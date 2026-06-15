@@ -36,6 +36,13 @@ case "$ACTION" in
     ;;
   hf-smoke-managed)
     need_project
+    # Keep smoke runs small even if the YAML is edited accidentally. DataSphere
+    # env.vars from the config remains the source of truth inside the remote job,
+    # but these exports make the generated manifest/dry-run explicit as well.
+    export OUT_PREFIX="${OUT_PREFIX:-hf_top_papers_qwen3vl_8b_smoke}"
+    export MAX_SFT_SAMPLES="${MAX_SFT_SAMPLES:-96}"
+    export MAX_GRPO_SAMPLES="${MAX_GRPO_SAMPLES:-48}"
+    export MAX_DATASET_SAMPLES="${MAX_DATASET_SAMPLES:-0}"
     python experiments/vlm_finetuning/datasphere/run_full_pipeline.py \
       --project-id "$PROJECT_ID" \
       --config experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_grpo_smoke_g2_2.yaml \

@@ -346,6 +346,73 @@ def _ensure_image_placeholder(messages: list[Dict[str, Any]], has_images: bool) 
     return messages
 
 
+
+def _strict_qwen_safe_messages(messages: Any, row_idx: int | None = None) -> list[Dict[str, Any]]:
+    """Validate and re-sanitize messages immediately before SFTTrainer.
+
+    TRL passes conversational rows to ``processor.apply_chat_template``.  The
+    Qwen3-VL template tests each user/tool content item with expressions like
+    ``content.type == 'image' or 'image' in content``; a raw integer in any
+    content list therefore raises ``TypeError: argument of type 'int' is not
+    iterable``.  This final guard makes the dataset schema deliberately narrow:
+    messages contain only role + either string content or list[{'type': ...}].
+    """
+    safe, _ = _canonicalize_messages(messages, Path('.'))
+    out: list[Dict[str, Any]] = []
+    for msg in safe:
+        role = str(msg.get('role') or 'user')
+        if role not in {'system', 'user', 'assistant', 'tool'}:
+            role = 'user'
+        content = msg.get('content')
+        if isinstance(content, str):
+            out.append({'role': role, 'content': content})
+            continue
+        if not isinstance(content, list):
+            content = [_text_block(content)]
+        blocks: list[Dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                block = _text_block(block)
+            btype = str(block.get('type') or '').lower()
+            if btype == 'image':
+                blocks.append({'type': 'image'})
+            elif btype == 'video':
+                # The current pipeline is image-only; keep video metadata as text.
+                blocks.append(_text_block(block))
+            else:
+                text_value = block.get('text', block)
+                text = _safe_text(text_value)
+                if text.strip():
+                    blocks.append({'type': 'text', 'text': text})
+        if blocks:
+            out.append({'role': role, 'content': blocks})
+    if not out:
+        raise ValueError(f'Row {row_idx}: messages became empty after sanitization')
+    return out
+
+
+def _sanitize_sft_row_for_trl(example: Dict[str, Any], idx: int | None = None) -> Dict[str, Any]:
+    example = dict(example)
+    example['messages'] = _strict_qwen_safe_messages(example.get('messages'), idx)
+    return example
+
+
+def _keep_only_trl_sft_columns(ds, image_column: str):
+    keep = {'messages'}
+    for col in {image_column, 'images', 'image'}:
+        if col and col in ds.column_names:
+            keep.add(col)
+    remove = [col for col in ds.column_names if col not in keep]
+    return ds.remove_columns(remove) if remove else ds
+
+
+def _validate_sft_dataset_for_qwen(ds, split_name: str, limit: int = 256) -> None:
+    n = min(len(ds), limit)
+    for i in range(n):
+        messages = ds[i].get('messages')
+        _strict_qwen_safe_messages(messages, i)
+    print(f'[train_vlm_sft] validated {n}/{len(ds)} {split_name} rows for Qwen3-VL chat template safety.', flush=True)
+
 def _make_label_messages(label_value: Any) -> list[Dict[str, Any]]:
     return [
         {
@@ -491,9 +558,15 @@ def main() -> None:
 
     train_base_dir = Path(train_file_str).parent if train_file_str.endswith(('.json', '.jsonl')) else Path('.')
     train_ds = train_ds.map(lambda example: _normalise_sft_example(example, train_base_dir))
+    train_ds = _keep_only_trl_sft_columns(train_ds, args.image_column)
+    train_ds = train_ds.map(_sanitize_sft_row_for_trl, with_indices=True, desc='Sanitizing train messages for Qwen3-VL')
+    _validate_sft_dataset_for_qwen(train_ds, 'train')
     if eval_ds is not None:
         eval_base_dir = Path(args.eval_file).parent if args.eval_file else train_base_dir
         eval_ds = eval_ds.map(lambda example: _normalise_sft_example(example, eval_base_dir))
+        eval_ds = _keep_only_trl_sft_columns(eval_ds, args.image_column)
+        eval_ds = eval_ds.map(_sanitize_sft_row_for_trl, with_indices=True, desc='Sanitizing eval messages for Qwen3-VL')
+        _validate_sft_dataset_for_qwen(eval_ds, 'eval')
 
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None:

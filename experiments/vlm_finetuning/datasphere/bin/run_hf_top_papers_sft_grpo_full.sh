@@ -42,9 +42,19 @@ BUDGET_SHUTDOWN_MARGIN_SECONDS="${BUDGET_SHUTDOWN_MARGIN_SECONDS:-900}"
 EVAL_RATIO="${EVAL_RATIO:-0.10}"
 MAX_IMAGES_PER_EXAMPLE_SFT="${MAX_IMAGES_PER_EXAMPLE_SFT:-3}"
 MAX_IMAGES_PER_EXAMPLE_GRPO="${MAX_IMAGES_PER_EXAMPLE_GRPO:-2}"
-MAX_SFT_SAMPLES="${MAX_SFT_SAMPLES:-0}"
-MAX_GRPO_SAMPLES="${MAX_GRPO_SAMPLES:-0}"
-MAX_DATASET_SAMPLES="${MAX_DATASET_SAMPLES:-0}"
+# Smoke/debug caps. If the smoke config is accidentally not propagated by an
+# older DataSphere CLI/cache, still keep OUT_PREFIX=*smoke* runs small enough to
+# avoid downloading the whole HF export asset tree.
+if [[ "${OUT_PREFIX:-}" == *smoke* ]]; then
+  MAX_SFT_SAMPLES="${MAX_SFT_SAMPLES:-96}"
+  MAX_GRPO_SAMPLES="${MAX_GRPO_SAMPLES:-48}"
+  MAX_DATASET_SAMPLES="${MAX_DATASET_SAMPLES:-0}"
+else
+  MAX_SFT_SAMPLES="${MAX_SFT_SAMPLES:-0}"
+  MAX_GRPO_SAMPLES="${MAX_GRPO_SAMPLES:-0}"
+  MAX_DATASET_SAMPLES="${MAX_DATASET_SAMPLES:-0}"
+fi
+HF_DOWNLOAD_MAX_WORKERS="${HF_DOWNLOAD_MAX_WORKERS:-2}"
 VLM_MIN_PIXELS="${VLM_MIN_PIXELS:-}"
 VLM_MAX_PIXELS="${VLM_MAX_PIXELS:-1003520}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-auto}"
@@ -123,6 +133,7 @@ plan = {
         "max_sft_samples": int("$MAX_SFT_SAMPLES"),
         "max_grpo_samples": int("$MAX_GRPO_SAMPLES"),
         "max_dataset_samples": int("$MAX_DATASET_SAMPLES"),
+        "hf_download_max_workers": int("$HF_DOWNLOAD_MAX_WORKERS"),
     },
     "vlm_preprocessing": {
         "min_pixels": "$VLM_MIN_PIXELS" or None,
@@ -260,6 +271,7 @@ run_timeout_budgeted "$DATA_TIMEOUT_HOURS" python experiments/vlm_finetuning/scr
   --max-images-per-example-sft "$MAX_IMAGES_PER_EXAMPLE_SFT" \
   --max-images-per-example-grpo "$MAX_IMAGES_PER_EXAMPLE_GRPO" \
   "${DATASET_SAMPLE_ARGS[@]}" \
+  --hf-download-max-workers "$HF_DOWNLOAD_MAX_WORKERS" \
   --seed 42
 
 run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/scripts/train_vlm_sft.py \

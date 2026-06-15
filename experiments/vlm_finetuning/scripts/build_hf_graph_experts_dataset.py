@@ -376,6 +376,7 @@ def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
             repo_type="dataset",
             revision=args.revision,
             allow_patterns=initial_allow_patterns,
+            max_workers=args.hf_download_max_workers,
             local_dir=args.snapshot_dir,
             local_dir_use_symlinks=False if args.snapshot_dir else None,
         )
@@ -410,6 +411,7 @@ def build_from_export(args: argparse.Namespace) -> Dict[str, Any]:
                     repo_type="dataset",
                     revision=args.revision,
                     allow_patterns=[*metadata_patterns, *asset_patterns],
+                    max_workers=args.hf_download_max_workers,
                     local_dir=args.snapshot_dir,
                     local_dir_use_symlinks=False if args.snapshot_dir else None,
                 )
@@ -572,6 +574,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--max-sft-samples", type=int, default=0, help="Optional SFT debug cap. 0 means all rows.")
     ap.add_argument("--max-grpo-samples", type=int, default=0, help="Optional GRPO debug cap. 0 means all rows.")
     ap.add_argument("--max-samples", type=int, default=0, help="Backward-compatible cap applied to both SFT and GRPO if set.")
+    ap.add_argument("--hf-download-max-workers", type=int, default=2, help="Max Hugging Face Hub download workers. Lower values reduce 429 rate-limit pressure.")
     ap.add_argument("--max-images-per-example-sft", type=int, default=3)
     ap.add_argument("--max-images-per-example-grpo", type=int, default=2)
     return ap.parse_args()

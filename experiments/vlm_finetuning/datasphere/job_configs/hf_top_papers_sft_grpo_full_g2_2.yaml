@@ -84,6 +84,7 @@ env:
   - MAX_SFT_SAMPLES: 0
   - MAX_GRPO_SAMPLES: 0
   - MAX_DATASET_SAMPLES: 0
+  - HF_DOWNLOAD_MAX_WORKERS: 2
 inputs:
 - experiments/vlm_finetuning/
 - data/
