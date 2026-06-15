@@ -92,6 +92,23 @@ def is_main_process() -> bool:
     return int(os.environ.get('RANK', '0')) == 0
 
 
+
+def disable_unsupported_vlm_assistant_only_loss(args: argparse.Namespace, actual_mode: str) -> None:
+    """TRL does not support assistant_only_loss for VLM SFT; disable it early.
+
+    Keeping this guard in the training script makes old job configs or manual
+    invocations safe even if they still pass --assistant-only-loss.
+    """
+    if actual_mode == 'vlm' and getattr(args, 'assistant_only_loss', False):
+        if is_main_process():
+            print(
+                '[train_vlm_sft] assistant_only_loss=True is not supported by TRL for '
+                'vision-language models; disabling it for VLM SFT.',
+                flush=True,
+            )
+        args.assistant_only_loss = False
+
+
 def _supports_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Filter config kwargs for compatibility across TRL versions and tests."""
     try:
@@ -571,6 +588,8 @@ def main() -> None:
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None:
         eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
+
+    disable_unsupported_vlm_assistant_only_loss(args, actual_mode)
 
     processor = load_processor(args.model_id, args.trust_remote_code, args.min_pixels, args.max_pixels)
     tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)

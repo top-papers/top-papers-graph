@@ -162,3 +162,19 @@ def test_grpo_training_formatter_converts_raw_non_dict_content_to_text_blocks(mo
         {"type": "text", "text": '{"unexpected": 456}'},
     ]
     assert out["images"] == ["/tmp/page_003.png"]
+
+
+def test_sft_vlm_disables_assistant_only_loss_before_sftconfig(monkeypatch, capsys):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_assistant_only_test")
+
+    args = types.SimpleNamespace(assistant_only_loss=True)
+    mod.disable_unsupported_vlm_assistant_only_loss(args, "vlm")
+
+    assert args.assistant_only_loss is False
+    assert "assistant_only_loss=True is not supported" in capsys.readouterr().out
+
+    text_args = types.SimpleNamespace(assistant_only_loss=True)
+    mod.disable_unsupported_vlm_assistant_only_loss(text_args, "text")
+    assert text_args.assistant_only_loss is True
+

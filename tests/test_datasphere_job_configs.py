@@ -48,3 +48,9 @@ def test_qwen3vl_full_job_uses_export_and_budget_guard() -> None:
     assert float(env["G2_2_RUB_PER_HOUR"]) == 1085.76
     timeout_sum = sum(float(env[key]) for key in ["DATA_TIMEOUT_HOURS", "SFT_TIMEOUT_HOURS", "GRPO_TIMEOUT_HOURS", "HF_UPLOAD_TIMEOUT_HOURS"])
     assert timeout_sum * float(env["G2_2_RUB_PER_HOUR"]) + float(env["BUDGET_RESERVE_RUB"]) <= float(env["BUDGET_RUB"])
+
+
+def test_vlm_sft_wrapper_does_not_pass_assistant_only_loss() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
+    assert "--assistant-only-loss" not in script
+

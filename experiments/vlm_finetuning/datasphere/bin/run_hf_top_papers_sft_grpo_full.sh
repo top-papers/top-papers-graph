@@ -287,7 +287,6 @@ run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/sc
   --gradient-checkpointing \
   --attn-implementation "$ATTN_IMPLEMENTATION" \
   "${PIXEL_ARGS[@]}" \
-  --assistant-only-loss \
   --learning-rate "${SFT_LR:-7e-5}" \
   --warmup-ratio "${SFT_WARMUP_RATIO:-0.05}" \
   --lr-scheduler-type "${SFT_LR_SCHEDULER:-cosine}" \
