@@ -1,9 +1,7 @@
 name: hf-top-papers-qwen3vl-8b-sft-grpo-smoke-g2-2
 desc: Smoke test for Qwen3-VL-8B SFT+GRPO DataSphere pipeline with CUDA/BF16 preflight,
   tiny steps and no Hugging Face upload.
-cmd: 'bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_grpo_full.sh
-
-  '
+cmd: bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_grpo_full.sh
 env:
   python:
     type: manual
@@ -13,6 +11,9 @@ env:
     - experiments/vlm_finetuning/
     - data/
     - examples/
+    pip:
+      extra-index-urls:
+      - https://download.pytorch.org/whl/cu121
   vars:
   - HF_DATASET_ID: top-papers/top-papers-graph-experts-data
   - HF_DATASET_REVISION: main

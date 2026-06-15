@@ -4,9 +4,7 @@ desc: 'Budget-guarded full SFT plus GRPO VLM fine-tuning for Qwen3-VL-8B-Instruc
   g2.2 A100 x2, 1 TB SSD, hard project budget guard below 100000 RUB.
 
   '
-cmd: 'bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_grpo_full.sh
-
-  '
+cmd: bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_grpo_full.sh
 env:
   python:
     type: manual
@@ -16,6 +14,9 @@ env:
     - experiments/vlm_finetuning/
     - data/
     - examples/
+    pip:
+      extra-index-urls:
+      - https://download.pytorch.org/whl/cu121
   vars:
   - HF_DATASET_ID: top-papers/top-papers-graph-experts-data
   - HF_DATASET_REVISION: main

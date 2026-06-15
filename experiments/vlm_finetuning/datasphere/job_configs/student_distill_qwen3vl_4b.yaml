@@ -1,36 +1,30 @@
 name: student-distill-qwen3vl-4b
-
 desc: Student distillation SFT run for Qwen3-VL-4B-Instruct on gold plus silver corpus
-
-cmd: >
-  bash experiments/vlm_finetuning/datasphere/bin/run_student_distill_4b.sh
-
+cmd: bash experiments/vlm_finetuning/datasphere/bin/run_student_distill_4b.sh
 env:
   python:
     type: manual
-    version: "3.10"
+    version: '3.10'
     requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
     local-paths:
-      - experiments/vlm_finetuning/
-      - data/
-      - examples/
-
+    - experiments/vlm_finetuning/
+    - data/
+    - examples/
+    pip:
+      extra-index-urls:
+      - https://download.pytorch.org/whl/cu121
 inputs:
-  - experiments/vlm_finetuning/
-  - data/
-  - examples/
-
+- experiments/vlm_finetuning/
+- data/
+- examples/
 outputs:
-  - outputs/student_distill_qwen3vl_4b.tar.gz
-
+- outputs/student_distill_qwen3vl_4b.tar.gz
 cloud-instance-types:
-  - g2.2
-  - g2.4
-
+- g2.2
+- g2.4
 working-storage:
   type: SSD
   size: 500Gb
-
 graceful-shutdown:
   signal: SIGTERM
   timeout: 3600s

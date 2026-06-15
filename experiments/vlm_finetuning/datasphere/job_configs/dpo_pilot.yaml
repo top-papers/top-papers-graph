@@ -1,38 +1,32 @@
 name: vlm-dpo-pilot-qwen3vl-4b-lora
-
 desc: Pilot DPO run for Qwen3-VL-4B-Instruct plus LoRA
-
-cmd: >
-  bash experiments/vlm_finetuning/datasphere/bin/run_dpo_pilot.sh
-
+cmd: bash experiments/vlm_finetuning/datasphere/bin/run_dpo_pilot.sh
 env:
   python:
     type: manual
-    version: "3.10"
+    version: '3.10'
     requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
     local-paths:
-      - experiments/vlm_finetuning/
-      - data/
-      - examples/
-
+    - experiments/vlm_finetuning/
+    - data/
+    - examples/
+    pip:
+      extra-index-urls:
+      - https://download.pytorch.org/whl/cu121
 inputs:
-  - experiments/vlm_finetuning/
-  - data/
-  - examples/
-
+- experiments/vlm_finetuning/
+- data/
+- examples/
 outputs:
-  - data/derived/training/vlm_dpo_train.jsonl
-  - data/derived/training/vlm_dpo_eval.jsonl
-  - outputs/dpo_pilot_qwen3vl_4b_lora.tar.gz
-
+- data/derived/training/vlm_dpo_train.jsonl
+- data/derived/training/vlm_dpo_eval.jsonl
+- outputs/dpo_pilot_qwen3vl_4b_lora.tar.gz
 cloud-instance-types:
-  - g2.2
-  - g2.4
-
+- g2.2
+- g2.4
 working-storage:
   type: SSD
   size: 500Gb
-
 graceful-shutdown:
   signal: SIGTERM
   timeout: 3600s

@@ -1,36 +1,30 @@
 name: vlm-validate-extraction
-
 desc: Offline validation for predicted versus gold scientific assertions
-
-cmd: >
-  bash experiments/vlm_finetuning/datasphere/bin/run_validate_extraction.sh
-
+cmd: bash experiments/vlm_finetuning/datasphere/bin/run_validate_extraction.sh
 env:
   python:
     type: manual
-    version: "3.10"
+    version: '3.10'
     requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
     local-paths:
-      - experiments/vlm_finetuning/
-      - data/
-      - examples/
-
+    - experiments/vlm_finetuning/
+    - data/
+    - examples/
+    pip:
+      extra-index-urls:
+      - https://download.pytorch.org/whl/cu121
 inputs:
-  - experiments/vlm_finetuning/
-  - data/
-  - examples/
-
+- experiments/vlm_finetuning/
+- data/
+- examples/
 outputs:
-  - reports/validation.tar.gz
-
+- reports/validation.tar.gz
 cloud-instance-types:
-  - c1.4
-  - c1.8
-
+- c1.4
+- c1.8
 working-storage:
   type: SSD
   size: 100Gb
-
 graceful-shutdown:
   signal: SIGTERM
   timeout: 600s

@@ -1,49 +1,43 @@
 name: vlm-build-datasets
-
 desc: Build SFT and DPO datasets plus cost reports for VLM fine-tuning
-
-cmd: >
-  bash experiments/vlm_finetuning/datasphere/bin/run_build_datasets.sh
-
+cmd: bash experiments/vlm_finetuning/datasphere/bin/run_build_datasets.sh
 env:
   python:
     type: manual
-    version: "3.10"
+    version: '3.10'
     requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
     local-paths:
-      - experiments/vlm_finetuning/
-      - data/
-      - examples/
-
+    - experiments/vlm_finetuning/
+    - data/
+    - examples/
+    pip:
+      extra-index-urls:
+      - https://download.pytorch.org/whl/cu121
 inputs:
-  - experiments/vlm_finetuning/
-  - data/
-  - examples/
-
+- experiments/vlm_finetuning/
+- data/
+- examples/
 outputs:
-  - data/derived/training/vlm_sft_train.jsonl
-  - data/derived/training/vlm_sft_eval.jsonl
-  - data/derived/training/vlm_sft.jsonl
-  - data/derived/training/vlm_sft_smoke.jsonl
-  - data/derived/training/vlm_dpo_train.jsonl
-  - data/derived/training/vlm_dpo_eval.jsonl
-  - data/derived/training/vlm_dpo.jsonl
-  - reports/build_summary.txt
-  - reports/dpo_build_summary.txt
-  - reports/datasphere_cost_sft_smoke.txt
-  - reports/datasphere_cost_sft_pilot.txt
-  - reports/datasphere_cost_dpo_pilot.txt
-  - reports/datasphere_cost_teacher_30b_a3b_sft.txt
-  - reports/datasphere_cost_student_distill_4b.txt
-
+- data/derived/training/vlm_sft_train.jsonl
+- data/derived/training/vlm_sft_eval.jsonl
+- data/derived/training/vlm_sft.jsonl
+- data/derived/training/vlm_sft_smoke.jsonl
+- data/derived/training/vlm_dpo_train.jsonl
+- data/derived/training/vlm_dpo_eval.jsonl
+- data/derived/training/vlm_dpo.jsonl
+- reports/build_summary.txt
+- reports/dpo_build_summary.txt
+- reports/datasphere_cost_sft_smoke.txt
+- reports/datasphere_cost_sft_pilot.txt
+- reports/datasphere_cost_dpo_pilot.txt
+- reports/datasphere_cost_teacher_30b_a3b_sft.txt
+- reports/datasphere_cost_student_distill_4b.txt
 cloud-instance-types:
-  - c1.4
-  - c1.8
-
+- c1.4
+- c1.8
 working-storage:
   type: SSD
   size: 100Gb
-
 graceful-shutdown:
   signal: SIGTERM
   timeout: 600s
