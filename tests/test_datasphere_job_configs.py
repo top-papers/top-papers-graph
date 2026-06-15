@@ -60,3 +60,8 @@ def test_vlm_sft_wrapper_does_not_pass_assistant_only_loss() -> None:
 def test_vlm_wrapper_passes_ddp_find_unused_parameters() -> None:
     script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
     assert script.count("--ddp-find-unused-parameters") >= 2
+
+
+def test_datasphere_requirements_pin_trl_below_future_17_surface() -> None:
+    text = (DATASPHERE_DIR / "requirements.txt").read_text(encoding="utf-8")
+    assert "trl>=1.4.0,<1.7" in text

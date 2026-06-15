@@ -39,6 +39,31 @@ try:
     from transformers import Qwen2_5_VLForConditionalGeneration
 except ImportError:  # pragma: no cover - fallback to AutoModelForImageTextToText
     Qwen2_5_VLForConditionalGeneration = None
+
+
+def install_torch_fsdp_module_import_compat() -> bool:
+    """Make newer TRL GRPO imports work with torch 2.5.x.
+
+    Recent TRL versions import ``FSDPModule`` from ``torch.distributed.fsdp``
+    while the DataSphere-compatible torch 2.5.1+cu121 build exposes the legacy
+    ``FullyShardedDataParallel`` symbol instead. This job uses DDP, not FSDP;
+    the alias is only needed so TRL's optional FSDP helpers can be imported.
+    """
+    try:
+        import torch.distributed.fsdp as fsdp
+    except Exception:
+        return False
+    if hasattr(fsdp, "FSDPModule"):
+        return False
+    try:
+        from torch.distributed.fsdp import FullyShardedDataParallel
+    except Exception:
+        return False
+    setattr(fsdp, "FSDPModule", FullyShardedDataParallel)
+    return True
+
+
+install_torch_fsdp_module_import_compat()
 from trl import GRPOConfig, GRPOTrainer
 
 # Parsing and logging

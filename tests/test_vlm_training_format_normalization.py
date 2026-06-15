@@ -363,3 +363,29 @@ def test_grpo_eval_vlm_keeps_empty_images_column_for_text_only_eval(monkeypatch)
     assert mode == "vlm"
     assert "images" in prepared.column_names
     assert prepared[0]["images"] == []
+
+
+def test_grpo_installs_fsdpmodule_alias_for_torch_25_import(monkeypatch):
+    _install_training_stubs(monkeypatch)
+
+    torch_mod = sys.modules["torch"]
+    torch_mod.__path__ = []
+    distributed = types.ModuleType("torch.distributed")
+    fsdp = types.ModuleType("torch.distributed.fsdp")
+
+    class LegacyFullyShardedDataParallel:
+        pass
+
+    fsdp.FullyShardedDataParallel = LegacyFullyShardedDataParallel
+    distributed.fsdp = fsdp
+    torch_mod.distributed = distributed
+    monkeypatch.setitem(sys.modules, "torch.distributed", distributed)
+    monkeypatch.setitem(sys.modules, "torch.distributed.fsdp", fsdp)
+
+    mod = _load_script(
+        "experiments/vlm_finetuning/scripts/train_vlm_grpo.py",
+        "train_vlm_grpo_fsdpmodule_compat_test",
+    )
+
+    assert mod.install_torch_fsdp_module_import_compat() is False
+    assert fsdp.FSDPModule is LegacyFullyShardedDataParallel
