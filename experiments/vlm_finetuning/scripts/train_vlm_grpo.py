@@ -371,6 +371,20 @@ def reward_expert_override_match(prompts, completions, expected_verdict=None, sa
 
 # 3. Dataset and model preparation
 
+def get_world_size() -> int:
+    try:
+        return int(os.environ.get('WORLD_SIZE', '1'))
+    except ValueError:
+        return 1
+
+
+def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
+    requested = getattr(args, 'ddp_find_unused_parameters', None)
+    if requested is not None:
+        return bool(requested)
+    return actual_mode == 'vlm' and get_world_size() > 1
+
+
 def _supports_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Filter config kwargs for compatibility across TRL versions and lightweight tests."""
     try:
@@ -802,6 +816,16 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--weight-decay', type=float, default=0.0)
     ap.add_argument('--max-grad-norm', type=float, default=0.3)
     ap.add_argument('--dataloader-num-workers', type=int, default=2)
+    ap.add_argument(
+        '--ddp-find-unused-parameters',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            'Pass find_unused_parameters to DistributedDataParallel. ' 
+            'Default: auto-enable for distributed VLM GRPO because multimodal/LoRA ' 
+            'branches can have unused parameters on individual ranks.'
+        ),
+    )
     ap.add_argument('--temperature', type=float, default=0.8)
     ap.add_argument('--top-p', type=float, default=0.95)
     ap.add_argument('--top-k', type=int, default=0)
@@ -924,7 +948,7 @@ def main() -> None:
         report_to=[],
         dataloader_num_workers=args.dataloader_num_workers,
         dataloader_pin_memory=True,
-        ddp_find_unused_parameters=False,
+        ddp_find_unused_parameters=resolve_ddp_find_unused_parameters(args, actual_mode),
     )
     grpo_args = GRPOConfig(**_supports_kwargs(GRPOConfig, grpo_kwargs))
 
@@ -932,6 +956,7 @@ def main() -> None:
     run_config['resolved_mode'] = actual_mode
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
+    run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     
     (args.output_dir / 'planned_run_config.json').write_text(
         json.dumps(run_config, ensure_ascii=False, indent=2, default=str), 

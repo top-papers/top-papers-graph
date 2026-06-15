@@ -285,6 +285,7 @@ run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/sc
   --bf16 \
   --tf32 \
   --gradient-checkpointing \
+  --ddp-find-unused-parameters \
   --attn-implementation "$ATTN_IMPLEMENTATION" \
   "${PIXEL_ARGS[@]}" \
   --learning-rate "${SFT_LR:-7e-5}" \
@@ -319,6 +320,7 @@ run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/s
   --bf16 \
   --tf32 \
   --gradient-checkpointing \
+  --ddp-find-unused-parameters \
   --attn-implementation "$ATTN_IMPLEMENTATION" \
   "${PIXEL_ARGS[@]}" \
   --learning-rate "${GRPO_LR:-1e-5}" \

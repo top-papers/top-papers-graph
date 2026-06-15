@@ -78,6 +78,16 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--weight-decay', type=float, default=0.01)
     ap.add_argument('--max-grad-norm', type=float, default=0.3)
     ap.add_argument('--dataloader-num-workers', type=int, default=4)
+    ap.add_argument(
+        '--ddp-find-unused-parameters',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            'Pass find_unused_parameters to DistributedDataParallel. ' 
+            'Default: auto-enable for distributed VLM training because Qwen-VL/LoRA ' 
+            'can have branch-specific unused parameters across ranks.'
+        ),
+    )
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--save-adapter-only', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
@@ -91,6 +101,28 @@ def get_local_rank() -> int:
 def is_main_process() -> bool:
     return int(os.environ.get('RANK', '0')) == 0
 
+
+
+def get_world_size() -> int:
+    try:
+        return int(os.environ.get('WORLD_SIZE', '1'))
+    except ValueError:
+        return 1
+
+
+def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
+    """Return a safe DDP unused-parameter setting for Trainer/SFTConfig.
+
+    Qwen3-VL with LoRA and multimodal batches may activate different branches
+    depending on which examples/images land on a rank. In DDP this can leave
+    some trainable parameters without gradients on a given step. PyTorch's
+    DDP supports that case via find_unused_parameters=True. Keep it automatic
+    for multi-process VLM runs, while preserving an explicit CLI override.
+    """
+    requested = getattr(args, 'ddp_find_unused_parameters', None)
+    if requested is not None:
+        return bool(requested)
+    return actual_mode == 'vlm' and get_world_size() > 1
 
 
 def disable_unsupported_vlm_assistant_only_loss(args: argparse.Namespace, actual_mode: str) -> None:
@@ -733,7 +765,7 @@ def main() -> None:
         'max_grad_norm': args.max_grad_norm,
         'dataloader_num_workers': args.dataloader_num_workers,
         'dataloader_pin_memory': True,
-        'ddp_find_unused_parameters': False,
+        'ddp_find_unused_parameters': resolve_ddp_find_unused_parameters(args, actual_mode),
     }
     sft_args = SFTConfig(**_supports_kwargs(SFTConfig, sft_kwargs))
     if actual_mode == 'vlm' and sft_args.max_length is not None:
@@ -751,6 +783,7 @@ def main() -> None:
     run_config['resolved_mode'] = actual_mode
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
+    run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 
     if args.dry_run:

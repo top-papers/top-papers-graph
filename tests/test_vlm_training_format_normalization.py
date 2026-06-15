@@ -256,3 +256,30 @@ def test_grpo_aligns_image_placeholders_to_capped_images(monkeypatch):
         if isinstance(block, dict) and block.get("type") == "image"
     )
     assert placeholders == 2
+
+
+
+def test_sft_auto_enables_ddp_find_unused_for_distributed_vlm(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_ddp_unused_test")
+
+    args = types.SimpleNamespace(ddp_find_unused_parameters=None)
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
+    assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
+
+    forced = types.SimpleNamespace(ddp_find_unused_parameters=False)
+    assert mod.resolve_ddp_find_unused_parameters(forced, "vlm") is False
+
+
+def test_grpo_auto_enables_ddp_find_unused_for_distributed_vlm(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_ddp_unused_test")
+
+    args = types.SimpleNamespace(ddp_find_unused_parameters=None)
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
+    assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
+
+    forced = types.SimpleNamespace(ddp_find_unused_parameters=False)
+    assert mod.resolve_ddp_find_unused_parameters(forced, "vlm") is False

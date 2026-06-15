@@ -54,3 +54,9 @@ def test_vlm_sft_wrapper_does_not_pass_assistant_only_loss() -> None:
     script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
     assert "--assistant-only-loss" not in script
 
+
+
+
+def test_vlm_wrapper_passes_ddp_find_unused_parameters() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
+    assert script.count("--ddp-find-unused-parameters") >= 2
