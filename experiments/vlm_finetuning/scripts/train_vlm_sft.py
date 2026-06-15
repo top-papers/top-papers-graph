@@ -632,23 +632,59 @@ def _cast_images_column(ds, image_column: str):
     return ds.cast_column(image_column, HFImage())
 
 
+def _ensure_trl_images_column(ds, source_column: str | None = None):
+    """Ensure the VLM dataset exposes the exact top-level `images` column TRL reads.
+
+    Recent TRL VLM collators access ``example["images"]`` during both train and
+    eval.  Evaluation splits may contain text-only rows after smoke sampling, but
+    they still must keep an empty ``images`` list column when the training mode is
+    VLM.  Otherwise evaluation can finish training and then fail with
+    ``KeyError: 'images'`` inside the collator.
+    """
+    if 'images' in ds.column_names:
+        return ds
+    if source_column == 'image' and 'image' in ds.column_names:
+        return ds.map(lambda example: {'images': _normalize_image_list(example.get('image'), Path('.'))})
+    return ds.add_column('images', [[] for _ in range(len(ds))])
+
+
 def maybe_prepare_dataset(ds, image_column: str, requested_mode: str):
     candidate_columns = []
     if image_column:
         candidate_columns.append(image_column)
     candidate_columns.extend(['images', 'image'])
     detected_column = next((col for col in candidate_columns if col in ds.column_names), None)
+
+    if requested_mode == 'text':
+        image_columns = [col for col in ['images', 'image'] if col in ds.column_names]
+        return ds.remove_columns(image_columns) if image_columns else ds, 'text'
+
     if detected_column is None:
+        if requested_mode == 'vlm':
+            ds = _ensure_trl_images_column(ds)
+            return _cast_images_column(ds, 'images'), 'vlm'
         return ds, 'text'
 
     sample = ds[: min(len(ds), 256)]
     non_null = sum(1 for x in sample.get(detected_column, []) if _value_has_image(x))
+
+    if requested_mode == 'vlm':
+        ds = _ensure_trl_images_column(ds, detected_column)
+        image_columns_to_remove = [col for col in ['image'] if col in ds.column_names]
+        if image_columns_to_remove:
+            ds = ds.remove_columns(image_columns_to_remove)
+        return _cast_images_column(ds, 'images'), 'vlm'
+
     image_columns = [col for col in ['images', 'image'] if col in ds.column_names]
     image_columns_to_remove = [col for col in image_columns if col != detected_column]
 
-    if requested_mode == 'text' or non_null == 0:
+    if non_null == 0:
         return ds.remove_columns(image_columns), 'text'
 
+    if detected_column != 'images':
+        ds = _ensure_trl_images_column(ds, detected_column)
+        detected_column = 'images'
+        image_columns_to_remove = [col for col in ['image'] if col in ds.column_names]
     if image_columns_to_remove:
         ds = ds.remove_columns(image_columns_to_remove)
     return _cast_images_column(ds, detected_column), 'vlm'

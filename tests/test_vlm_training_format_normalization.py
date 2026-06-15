@@ -283,3 +283,83 @@ def test_grpo_auto_enables_ddp_find_unused_for_distributed_vlm(monkeypatch):
 
     forced = types.SimpleNamespace(ddp_find_unused_parameters=False)
     assert mod.resolve_ddp_find_unused_parameters(forced, "vlm") is False
+
+
+class _TinyDataset:
+    def __init__(self, rows):
+        self.rows = [dict(row) for row in rows]
+        self.features = {key: object() for row in self.rows for key in row.keys()}
+
+    @property
+    def column_names(self):
+        keys = []
+        for row in self.rows:
+            for key in row.keys():
+                if key not in keys:
+                    keys.append(key)
+        return keys
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            rows = self.rows[idx]
+            return {key: [row.get(key) for row in rows] for key in self.column_names}
+        return self.rows[idx]
+
+    def add_column(self, name, values):
+        assert len(values) == len(self.rows)
+        rows = [dict(row, **{name: value}) for row, value in zip(self.rows, values)]
+        return _TinyDataset(rows)
+
+    def remove_columns(self, columns):
+        drop = set(columns)
+        rows = [{key: value for key, value in row.items() if key not in drop} for row in self.rows]
+        return _TinyDataset(rows)
+
+    def map(self, fn, *args, **kwargs):
+        rows = []
+        for row in self.rows:
+            update = fn(dict(row))
+            merged = dict(row)
+            if update:
+                merged.update(update)
+            rows.append(merged)
+        return _TinyDataset(rows)
+
+    def cast(self, features):
+        self.features = dict(features)
+        return self
+
+    def cast_column(self, column, feature):
+        self.features[column] = feature
+        return self
+
+
+def test_sft_eval_vlm_keeps_empty_images_column_for_text_only_eval(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_eval_images_test")
+
+    ds = _TinyDataset([
+        {"messages": [{"role": "user", "content": [{"type": "text", "text": "text-only eval"}]}]},
+    ])
+    prepared, mode = mod.maybe_prepare_dataset(ds, "images", "vlm")
+
+    assert mode == "vlm"
+    assert "images" in prepared.column_names
+    assert prepared[0]["images"] == []
+
+
+def test_grpo_eval_vlm_keeps_empty_images_column_for_text_only_eval(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_eval_images_test")
+
+    ds = _TinyDataset([
+        {"prompt": [{"role": "user", "content": [{"type": "text", "text": "text-only eval"}]}]},
+    ])
+    prepared, mode = mod.maybe_prepare_dataset(ds, "images", "vlm")
+
+    assert mode == "vlm"
+    assert "images" in prepared.column_names
+    assert prepared[0]["images"] == []
