@@ -49,10 +49,24 @@ if [[ "${OUT_PREFIX:-}" == *smoke* ]]; then
   MAX_SFT_SAMPLES="${MAX_SFT_SAMPLES:-96}"
   MAX_GRPO_SAMPLES="${MAX_GRPO_SAMPLES:-48}"
   MAX_DATASET_SAMPLES="${MAX_DATASET_SAMPLES:-0}"
+  # GRPO computes group-relative advantages, so even smoke runs need at least
+  # two completions per prompt. Stale configs with value 1 fail before training.
+  GRPO_NUM_GENERATIONS="${GRPO_NUM_GENERATIONS:-2}"
+  GRPO_NUM_GENERATIONS_EVAL="${GRPO_NUM_GENERATIONS_EVAL:-2}"
 else
   MAX_SFT_SAMPLES="${MAX_SFT_SAMPLES:-0}"
   MAX_GRPO_SAMPLES="${MAX_GRPO_SAMPLES:-0}"
   MAX_DATASET_SAMPLES="${MAX_DATASET_SAMPLES:-0}"
+  GRPO_NUM_GENERATIONS="${GRPO_NUM_GENERATIONS:-2}"
+  GRPO_NUM_GENERATIONS_EVAL="${GRPO_NUM_GENERATIONS_EVAL:-2}"
+fi
+if [ "${GRPO_NUM_GENERATIONS:-0}" -lt 2 ]; then
+  echo "[datasphere-pipeline] GRPO_NUM_GENERATIONS=${GRPO_NUM_GENERATIONS} is invalid for GRPO; forcing 2." >&2
+  GRPO_NUM_GENERATIONS=2
+fi
+if [ "${GRPO_NUM_GENERATIONS_EVAL:-0}" -lt 2 ]; then
+  echo "[datasphere-pipeline] GRPO_NUM_GENERATIONS_EVAL=${GRPO_NUM_GENERATIONS_EVAL} is invalid for GRPO; forcing 2." >&2
+  GRPO_NUM_GENERATIONS_EVAL=2
 fi
 HF_DOWNLOAD_MAX_WORKERS="${HF_DOWNLOAD_MAX_WORKERS:-2}"
 VLM_MIN_PIXELS="${VLM_MIN_PIXELS:-}"

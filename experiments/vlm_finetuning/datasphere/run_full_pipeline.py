@@ -12,9 +12,11 @@ from typing import List, MutableMapping
 
 DEFAULT_CONFIG = Path("experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_grpo_full_g2_2.yaml")
 JOB_ID_PATTERNS = [
+    # Keep this deliberately narrow. The DataSphere CLI can also print
+    # authentication subject ids such as ``subject-id 'ajes...'`` before the
+    # job is created; generic ``id`` parsing would mistake those for job ids.
     re.compile(r"created job [`'\"]?([a-z][a-z0-9]{10,})[`'\"]?", re.IGNORECASE),
     re.compile(r"/job/([a-z][a-z0-9]{10,})\b", re.IGNORECASE),
-    re.compile(r"(?:job\s*)?(?:id|идентификатор)[\s:=`'\"]+([a-z][a-z0-9]{10,})\b", re.IGNORECASE),
 ]
 
 
@@ -71,8 +73,9 @@ def run(
 def parse_job_id(text: str) -> str | None:
     """Return a real DataSphere job id from CLI output, never a local log path.
 
-    DataSphere CLI also prints local paths like /tmp/datasphere/job_2026-..., so
-    the parser must only accept explicit job creation/id messages or job URLs.
+    DataSphere CLI also prints local paths like /tmp/datasphere/job_2026-...
+    and auth subject ids like subject-id 'ajes...'. The parser must only
+    accept explicit job creation messages or job URLs.
     """
     for pattern in JOB_ID_PATTERNS:
         match = pattern.search(text)

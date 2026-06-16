@@ -410,6 +410,27 @@ def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: st
     return actual_mode == 'vlm' and get_world_size() > 1
 
 
+def enforce_minimum_grpo_generations(args: argparse.Namespace) -> None:
+    """Coerce invalid smoke/debug values before constructing GRPOConfig.
+
+    TRL GRPO estimates an advantage from a group of completions per prompt, so
+    ``num_generations`` must be at least 2. Keeping the guard here makes CLI
+    invocations robust even when an old DataSphere YAML or user override passes 1.
+    """
+    if getattr(args, 'num_generations', 2) < 2:
+        print(
+            f"[train_vlm_grpo] num_generations={args.num_generations} is invalid for GRPO; forcing 2.",
+            flush=True,
+        )
+        args.num_generations = 2
+    if getattr(args, 'num_generations_eval', 2) < 2:
+        print(
+            f"[train_vlm_grpo] num_generations_eval={args.num_generations_eval} is invalid for GRPO; forcing 2.",
+            flush=True,
+        )
+        args.num_generations_eval = 2
+
+
 def _supports_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Filter config kwargs for compatibility across TRL versions and lightweight tests."""
     try:
@@ -896,6 +917,7 @@ def main() -> None:
     args = parse_args()
     set_seed(args.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    enforce_minimum_grpo_generations(args)
     if args.tf32:
         try:
             torch.backends.cuda.matmul.allow_tf32 = True

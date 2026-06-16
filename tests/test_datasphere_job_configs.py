@@ -65,3 +65,30 @@ def test_vlm_wrapper_passes_ddp_find_unused_parameters() -> None:
 def test_datasphere_requirements_pin_trl_below_future_17_surface() -> None:
     text = (DATASPHERE_DIR / "requirements.txt").read_text(encoding="utf-8")
     assert "trl>=1.4.0,<1.7" in text
+
+def test_smoke_config_uses_valid_grpo_generation_count() -> None:
+    path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_smoke_g2_2.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vars_list = cfg.get("env", {}).get("vars", [])
+    env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+    assert int(env["GRPO_NUM_GENERATIONS"]) >= 2
+    assert int(env["GRPO_NUM_GENERATIONS_EVAL"]) >= 2
+
+
+def test_run_full_pipeline_does_not_parse_auth_subject_id_as_job_id() -> None:
+    import importlib.util
+
+    path = DATASPHERE_DIR / "run_full_pipeline.py"
+    spec = importlib.util.spec_from_file_location("run_full_pipeline_for_job_id_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+
+    sample = """
+    You are going to be authenticated via subject-id 'ajesipqgkc5efi6eo4am'.
+    2026-06-16 12:54:04,689 - [INFO] - created job `bt184khn14ilcq93juc6`
+    """
+    assert mod.parse_job_id(sample) == "bt184khn14ilcq93juc6"
+    assert mod.parse_job_id("subject-id 'ajesipqgkc5efi6eo4am'") is None
+

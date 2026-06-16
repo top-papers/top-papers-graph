@@ -389,3 +389,19 @@ def test_grpo_installs_fsdpmodule_alias_for_torch_25_import(monkeypatch):
 
     assert mod.install_torch_fsdp_module_import_compat() is False
     assert fsdp.FSDPModule is LegacyFullyShardedDataParallel
+
+def test_grpo_enforces_minimum_generation_count(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_num_gen_test")
+
+    args = types.SimpleNamespace(num_generations=1, num_generations_eval=1)
+    mod.enforce_minimum_grpo_generations(args)
+
+    assert args.num_generations == 2
+    assert args.num_generations_eval == 2
+
+    args_ok = types.SimpleNamespace(num_generations=3, num_generations_eval=2)
+    mod.enforce_minimum_grpo_generations(args_ok)
+    assert args_ok.num_generations == 3
+    assert args_ok.num_generations_eval == 2
+
