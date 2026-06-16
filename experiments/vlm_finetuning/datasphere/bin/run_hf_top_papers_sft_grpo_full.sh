@@ -384,6 +384,20 @@ run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/sc
 
 tar_adapter_artifact_dir "$SFT_DIR" "outputs/${OUT_PREFIX}_sft_lora.tar.gz"
 
+GRPO_MASK_ARGS=()
+case "${GRPO_MASK_TRUNCATED_COMPLETIONS:-0}" in
+  1|true|TRUE|yes|YES|on|ON)
+    GRPO_MASK_ARGS+=(--mask-truncated-completions)
+    ;;
+  0|false|FALSE|no|NO|off|OFF)
+    echo "[datasphere-pipeline] GRPO_MASK_TRUNCATED_COMPLETIONS=${GRPO_MASK_TRUNCATED_COMPLETIONS}; keeping truncated completions in GRPO loss."
+    ;;
+  *)
+    echo "[datasphere-pipeline] Unsupported GRPO_MASK_TRUNCATED_COMPLETIONS=${GRPO_MASK_TRUNCATED_COMPLETIONS}; expected 0/1/true/false." >&2
+    exit 2
+    ;;
+esac
+
 run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/scripts/train_vlm_grpo.py \
   --model-id "$BASE_MODEL" \
   --sft-adapter-path "$SFT_DIR" \
@@ -409,11 +423,11 @@ run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/s
   --gradient-accumulation-steps "${GRPO_GRAD_ACCUM:-8}" \
   --num-generations "${GRPO_NUM_GENERATIONS:-2}" \
   --num-generations-eval "${GRPO_NUM_GENERATIONS_EVAL:-2}" \
-  --max-completion-length "${GRPO_MAX_COMPLETION_LENGTH:-384}" \
+  --max-completion-length "${GRPO_MAX_COMPLETION_LENGTH:-512}" \
   --temperature "${GRPO_TEMPERATURE:-0.8}" \
   --top-p "${GRPO_TOP_P:-0.95}" \
   --top-k "${GRPO_TOP_K:-0}" \
-  --mask-truncated-completions \
+  "${GRPO_MASK_ARGS[@]}" \
   --importance-sampling-level "${GRPO_IMPORTANCE_SAMPLING_LEVEL:-sequence}" \
   --multi-objective-aggregation "${GRPO_MULTI_OBJECTIVE_AGGREGATION:-normalize_then_sum}" \
   --reward-weights ${GRPO_REWARD_WEIGHTS:-0.0 1.0 0.8 1.2 0.5 1.5} \

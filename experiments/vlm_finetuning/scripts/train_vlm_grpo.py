@@ -206,6 +206,68 @@ def parse_label_candidate(completion: Any) -> str:
     return text.splitlines()[0].strip() if text else ""
 
 
+def expected_schema_keys_for_task(task_family: str) -> tuple[str, ...]:
+    if task_family == "trajectory_reasoning_rl":
+        return ("inference", "next_question", "extracted_assertions")
+    if task_family in {"assertion_review_rl", "mm_review_rl"}:
+        return ("verdict", "rationale") if task_family == "assertion_review_rl" else ("mm_verdict", "mm_rationale")
+    if task_family == "temporal_fix_rl":
+        return ("start_date", "end_date", "valid_from", "valid_to", "time_source")
+    if task_family == "image_label_rl":
+        return ("label",)
+    return ()
+
+
+def partial_json_progress_reward(completion: Any, task_family: str) -> float:
+    """Dense shaping for truncated/near-JSON completions.
+
+    Smoke GRPO runs used a 32-token completion cap. With strict JSON-only rewards
+    every clipped candidate received exactly the same negative reward, so GRPO
+    normalized each generation group to zero advantage and reported loss=0. This
+    helper keeps invalid JSON negative, but gives small deterministic credit for
+    schema progress so groups can have non-zero reward variance during smoke/debug
+    runs.
+    """
+    text = completion_to_text(completion).strip()
+    if not text:
+        return -1.0
+
+    lowered = text.lower()
+    score = -1.0
+    if "{" in text or "[" in text:
+        score += 0.15
+    if "}" in text or "]" in text:
+        score += 0.10
+    if '"' in text or "'" in text:
+        score += 0.05
+    if text.startswith("{") or text.startswith("[") or text.startswith("```"):
+        score += 0.05
+
+    expected_keys = expected_schema_keys_for_task(task_family)
+    if expected_keys:
+        matches = sum(1 for key in expected_keys if key.lower() in lowered)
+        score += min(0.45, 0.15 * matches)
+
+    verdict_words = ("accept", "reject", "revise", "yes", "no", "true", "false")
+    if task_family in {"assertion_review_rl", "mm_review_rl", "temporal_fix_rl"} and any(word in lowered for word in verdict_words):
+        score += 0.10
+
+    # Keep malformed JSON below valid-object rewards.
+    return max(-1.0, min(0.25, score))
+
+
+def partial_field_presence_reward(completion: Any, keys: tuple[str, ...], *, empty_reward: float) -> float:
+    text = completion_to_text(completion).strip().lower()
+    if not text:
+        return empty_reward
+    if not keys:
+        return empty_reward
+    matches = sum(1 for key in keys if key.lower() in text)
+    if matches <= 0:
+        return empty_reward
+    return min(-0.05, empty_reward + 0.15 * matches)
+
+
 def reward_label_exact_match(prompts, completions, reference_label=None, label_text=None, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
     task_family = task_family or [""] * len(completions)
     reference_label = reference_label or label_text or [None] * len(completions)
@@ -242,7 +304,7 @@ def reward_schema_validity(prompts, completions, sample_id=None, domain=None, ta
             rewards.append(0.0)
             continue
         obj = parse_prediction_object(completion)
-        reward = -1.0
+        reward = partial_json_progress_reward(completion, tf)
         if isinstance(obj, dict):
             reward = 0.5
             if tf == "trajectory_reasoning_rl":
@@ -339,7 +401,7 @@ def reward_evidence_presence(prompts, completions, evidence_text=None, sample_id
             continue
         pred_obj = parse_prediction_object(completion)
         if not isinstance(pred_obj, dict):
-            rewards.append(-0.5)
+            rewards.append(partial_field_presence_reward(completion, ("evidence", "rationale", "snippet", "source"), empty_reward=-0.5))
             continue
             
         if tf == "trajectory_reasoning_rl":
@@ -377,7 +439,12 @@ def reward_expert_override_match(prompts, completions, expected_verdict=None, sa
             
         pred_obj = parse_prediction_object(completion)
         if not isinstance(pred_obj, dict):
-            rewards.append(-1.0)
+            text_norm = norm_text(completion_to_text(completion))
+            verdict_norm = norm_text(verdict)
+            if verdict_norm and verdict_norm in text_norm:
+                rewards.append(-0.25)
+            else:
+                rewards.append(partial_field_presence_reward(completion, ("verdict", "mm_verdict"), empty_reward=-1.0))
             continue
             
         if tf == "mm_review_rl":
@@ -909,7 +976,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--gradient-accumulation-steps', type=int, default=8)
     ap.add_argument('--num-generations', type=int, default=2)
     ap.add_argument('--num-generations-eval', type=int, default=2)
-    ap.add_argument('--max-completion-length', type=int, default=384)
+    ap.add_argument('--max-completion-length', type=int, default=512)
     ap.add_argument('--logging-steps', type=int, default=5)
     ap.add_argument('--save-steps', type=int, default=40)
     ap.add_argument('--eval-steps', type=int, default=40)

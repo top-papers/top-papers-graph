@@ -440,3 +440,37 @@ def test_grpo_enforces_minimum_generation_count(monkeypatch):
     assert args_ok.num_generations == 3
     assert args_ok.num_generations_eval == 2
 
+
+
+def test_grpo_schema_reward_gives_dense_signal_for_truncated_json(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_dense_reward_test")
+
+    rewards = mod.reward_schema_validity(
+        prompts=[None, None, None],
+        completions=[
+            "not json at all",
+            '{"verdict": "reject",',
+            '{"verdict": "reject", "rationale": "missing evidence"',
+        ],
+        task_family=["assertion_review_rl", "assertion_review_rl", "assertion_review_rl"],
+    )
+
+    assert len(set(rewards)) > 1
+    assert all(-1.0 <= value < 0.5 for value in rewards)
+    assert rewards[0] < rewards[1] <= rewards[2]
+
+
+def test_grpo_expert_reward_uses_partial_verdict_signal_for_truncated_json(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_partial_verdict_test")
+
+    rewards = mod.reward_expert_override_match(
+        prompts=[None, None],
+        completions=['{"verdict": "reject",', '{"verdict": "accept",'],
+        expected_verdict=["reject", "reject"],
+        task_family=["assertion_review_rl", "assertion_review_rl"],
+    )
+
+    assert rewards[0] > rewards[1]
+    assert rewards[0] < 1.0

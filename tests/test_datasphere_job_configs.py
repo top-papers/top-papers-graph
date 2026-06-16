@@ -108,3 +108,36 @@ def test_run_full_pipeline_does_not_parse_auth_subject_id_as_job_id() -> None:
     assert mod.parse_job_id(sample) == "bt184khn14ilcq93juc6"
     assert mod.parse_job_id("subject-id 'ajesipqgkc5efi6eo4am'") is None
 
+
+
+def test_smoke_config_avoids_all_masked_grpo_completions() -> None:
+    path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_smoke_g2_2.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vars_list = cfg.get("env", {}).get("vars", [])
+    env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+    assert int(env["GRPO_MAX_COMPLETION_LENGTH"]) >= 128
+    assert str(env["GRPO_MASK_TRUNCATED_COMPLETIONS"]).lower() in {"0", "false", "no", "off"}
+
+
+def test_vlm_wrapper_makes_grpo_truncation_mask_configurable() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
+    assert "GRPO_MASK_TRUNCATED_COMPLETIONS" in script
+    assert "GRPO_MASK_ARGS+=(--mask-truncated-completions)" in script
+    assert script.count("--mask-truncated-completions") == 1
+
+
+def test_full_config_avoids_all_masked_grpo_completions() -> None:
+    path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_full_g2_2.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vars_list = cfg.get("env", {}).get("vars", [])
+    env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+    assert int(env["GRPO_MAX_COMPLETION_LENGTH"]) >= 512
+    assert str(env["GRPO_MASK_TRUNCATED_COMPLETIONS"]).lower() in {"0", "false", "no", "off"}
+
+
+def test_full_tutorial_does_not_recommend_grpo_32_token_masking_combo() -> None:
+    text = (DATASPHERE_DIR / "TUTORIAL_FULL_EXPERIMENT_RU.md").read_text(encoding="utf-8")
+    assert "GRPO_MAX_COMPLETION_LENGTH=32" not in text
+    assert "GRPO_MASK_TRUNCATED_COMPLETIONS=0" in text

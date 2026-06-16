@@ -71,6 +71,7 @@ def main() -> None:
         except Exception as exc:
             status["bf16_supported_error"] = f"{type(exc).__name__}: {exc}"
 
+    status["ok"] = bool(status["cuda_available"] and (not args.require_bf16 or status["bf16_supported"]))
     print("[gpu-check] torch/CUDA status:")
     print(json.dumps(status, ensure_ascii=False, indent=2))
     status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -93,8 +94,6 @@ def main() -> None:
             "This Qwen3-VL-8B recipe expects an A100/H100-class GPU or another BF16-capable accelerator."
         )
 
-    status["ok"] = True
-    status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[gpu-check] OK: wrote {status_path}")
 
 

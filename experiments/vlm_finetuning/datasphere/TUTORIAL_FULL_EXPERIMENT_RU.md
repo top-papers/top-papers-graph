@@ -473,10 +473,11 @@ SFT_GRAD_ACCUM=4
 GRPO_PER_DEVICE_BATCH=1
 GRPO_GRAD_ACCUM=4
 GRPO_NUM_GENERATIONS=2
-GRPO_MAX_COMPLETION_LENGTH=32
+GRPO_MAX_COMPLETION_LENGTH=256
+GRPO_MASK_TRUNCATED_COMPLETIONS=0
 ```
 
-Если OOM сохраняется, используйте `Qwen/Qwen2.5-VL-3B-Instruct` или переходите на более крупную GPU-конфигурацию, если она разрешена в вашем community.
+Не уменьшайте `GRPO_MAX_COMPLETION_LENGTH` до 32 вместе с включённым masking truncated completions: такой режим может дать `clipped_ratio=1.0`, `loss=0.0` и нулевой GRPO learning signal. Если OOM сохраняется, используйте `Qwen/Qwen2.5-VL-3B-Instruct` или переходите на более крупную GPU-конфигурацию, если она разрешена в вашем community.
 
 ### `peft.PeftModel is required for --sft-adapter-path`
 
