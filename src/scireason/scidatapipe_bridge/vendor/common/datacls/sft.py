@@ -19,6 +19,7 @@ from scireason.scidatapipe_bridge.vendor.common.datacls.chat import Chat
 
 class SFTMetadata(BaseModel):
     submission_id: str
+    original_submission_id: Optional[str] = None
     step_id: Optional[int] = None
     assertion_id: Optional[str] = None
     cutoff_year: Optional[int] = None

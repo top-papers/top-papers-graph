@@ -26,6 +26,7 @@ class ExpertSignals(BaseModel):
 
 class GRPOMetadata(BaseModel):
     submission_id: str
+    original_submission_id: Optional[str] = None
     assertion_id: str
     importance_score: Optional[float] = None
     expert: ExpertSignals = Field(default_factory=ExpertSignals)

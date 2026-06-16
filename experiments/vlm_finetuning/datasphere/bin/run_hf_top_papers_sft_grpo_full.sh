@@ -201,7 +201,67 @@ run_torchrun_timeout_budgeted() {
   run_timeout_budgeted "$hours" torchrun --standalone --nproc_per_node="$nproc" "$@"
 }
 
+prune_adapter_artifact_dir() {
+  local dir="$1"
+  [ -d "$dir" ] || return 0
+  # GRPO only needs the adapter/config/tokenizer files at the directory root.
+  # Trainer checkpoint folders often contain optimizer states and can make a
+  # smoke-test archive exceed DataSphere's download size limit.
+  find "$dir" -maxdepth 1 -type d -name 'checkpoint-*' -exec rm -rf {} + 2>/dev/null || true
+  find "$dir" -type f \( -name 'optimizer.pt' -o -name 'scheduler.pt' -o -name 'rng_state*.pth' -o -name 'scaler.pt' \) -delete 2>/dev/null || true
+}
+
+tar_adapter_artifact_dir() {
+  local src="$1"
+  local dst="$2"
+  [ -d "$src" ] || return 0
+  prune_adapter_artifact_dir "$src"
+  tar \
+    --exclude='*/checkpoint-*' \
+    --exclude='*/optimizer.pt' \
+    --exclude='*/scheduler.pt' \
+    --exclude='*/rng_state*.pth' \
+    --exclude='*/scaler.pt' \
+    -czf "$dst" "$src"
+}
+
+write_fallback_final_summary() {
+  local exit_status="${1:-0}"
+  [ -s "$REPORT_DIR/final_summary.json" ] && return 0
+  python - <<PY > "$REPORT_DIR/final_summary.json"
+import json
+from pathlib import Path
+summary = {
+    "status": "incomplete_or_failed",
+    "exit_status": int("$exit_status"),
+    "dataset_id": "$DATASET_ID",
+    "dataset_revision": "$DATASET_REVISION",
+    "dataset_source_mode": "$DATASET_SOURCE_MODE",
+    "dataset_export_subdir": "$DATASET_EXPORT_SUBDIR",
+    "base_model": "$BASE_MODEL",
+    "sft_dir": "$SFT_DIR",
+    "grpo_dir": "$GRPO_DIR",
+    "sft_archive": "outputs/${OUT_PREFIX}_sft_lora.tar.gz",
+    "grpo_archive": "outputs/${OUT_PREFIX}_grpo_lora.tar.gz",
+    "report_archive": "reports/${OUT_PREFIX}_datasphere_reports.tar.gz",
+}
+for key, path in {
+    "budget_plan": Path("$REPORT_DIR/budget_plan.json"),
+    "dataset_summary": Path("$DATA_DIR/summary.json"),
+    "sft_run_config": Path("$SFT_DIR/run_config.json"),
+    "grpo_planned_run_config": Path("$GRPO_DIR/planned_run_config.json"),
+}.items():
+    if path.exists():
+        try:
+            summary[key] = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            summary[key] = {"unreadable": str(exc), "path": str(path)}
+print(json.dumps(summary, ensure_ascii=False, indent=2))
+PY
+}
+
 package_artifacts() {
+  local exit_status="${1:-0}"
   local had_errexit=0
   case "$-" in
     *e*) had_errexit=1 ;;
@@ -210,9 +270,10 @@ package_artifacts() {
   mkdir -p "$REPORT_DIR"
   date -u +%Y-%m-%dT%H:%M:%SZ > "$REPORT_DIR/finished_at_utc.txt"
   remaining_budget_seconds > "$REPORT_DIR/remaining_budget_guard_seconds.txt"
+  write_fallback_final_summary "$exit_status"
   find outputs "$DATA_DIR" "$REPORT_DIR" -maxdepth 3 -type f 2>/dev/null | sort > "$REPORT_DIR/artifact_manifest.txt"
-  [ -d "$SFT_DIR" ] && tar -czf "outputs/${OUT_PREFIX}_sft_lora.tar.gz" "$SFT_DIR"
-  [ -d "$GRPO_DIR" ] && tar -czf "outputs/${OUT_PREFIX}_grpo_lora.tar.gz" "$GRPO_DIR"
+  tar_adapter_artifact_dir "$SFT_DIR" "outputs/${OUT_PREFIX}_sft_lora.tar.gz"
+  tar_adapter_artifact_dir "$GRPO_DIR" "outputs/${OUT_PREFIX}_grpo_lora.tar.gz"
   tar --exclude="$REPORT_DIR/hf_upload_bundle" -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" 2>/dev/null
   if [ "$had_errexit" -eq 1 ]; then
     set -e
@@ -247,7 +308,7 @@ upload_to_huggingface() {
     --bundle-dir "$HF_UPLOAD_BUNDLE_DIR"
 }
 
-trap 'status=$?; package_artifacts; exit $status' EXIT
+trap 'status=$?; package_artifacts "$status"; exit $status' EXIT
 
 if [ "${ENABLE_GPU_PREFLIGHT:-1}" != "0" ]; then
   python experiments/vlm_finetuning/datasphere/bin/check_gpu_before_pipeline.py --report-dir "$REPORT_DIR" --require-bf16
@@ -321,7 +382,7 @@ run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/sc
   --dataloader-num-workers "${SFT_DATALOADER_NUM_WORKERS:-4}" \
   --save-adapter-only
 
-tar -czf "outputs/${OUT_PREFIX}_sft_lora.tar.gz" "$SFT_DIR"
+tar_adapter_artifact_dir "$SFT_DIR" "outputs/${OUT_PREFIX}_sft_lora.tar.gz"
 
 run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/scripts/train_vlm_grpo.py \
   --model-id "$BASE_MODEL" \
@@ -362,7 +423,7 @@ run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/s
   --dataloader-num-workers "${GRPO_DATALOADER_NUM_WORKERS:-2}" \
   --log-completions
 
-tar -czf "outputs/${OUT_PREFIX}_grpo_lora.tar.gz" "$GRPO_DIR"
+tar_adapter_artifact_dir "$GRPO_DIR" "outputs/${OUT_PREFIX}_grpo_lora.tar.gz"
 python - <<PY > "$REPORT_DIR/final_summary.json"
 import json
 from pathlib import Path

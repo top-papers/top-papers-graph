@@ -328,6 +328,9 @@ class _TinyDataset:
             rows.append(merged)
         return _TinyDataset(rows)
 
+    def filter(self, fn, *args, **kwargs):
+        return _TinyDataset([row for row in self.rows if fn(dict(row))])
+
     def cast(self, features):
         self.features = dict(features)
         return self
@@ -364,6 +367,38 @@ def test_grpo_eval_vlm_keeps_empty_images_column_for_text_only_eval(monkeypatch)
     assert "images" in prepared.column_names
     assert prepared[0]["images"] == []
 
+
+
+def test_grpo_vlm_filter_drops_text_only_rows_before_qwen_processor(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_filter_text_only_test")
+
+    ds = _TinyDataset([
+        {"prompt": [{"role": "user", "content": [{"type": "text", "text": "text-only"}]}], "images": []},
+        {"prompt": [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "has image"}]}], "images": ["/tmp/page_001.png"]},
+        {"prompt": [{"role": "user", "content": [{"type": "text", "text": "none image"}]}], "images": [None]},
+    ])
+
+    filtered = mod._filter_text_only_vlm_grpo_rows(ds, "train", required=True)
+
+    assert len(filtered) == 1
+    assert filtered[0]["images"] == ["/tmp/page_001.png"]
+
+
+def test_grpo_vlm_filter_fails_fast_when_forced_vlm_has_no_images(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_filter_required_test")
+
+    ds = _TinyDataset([
+        {"prompt": [{"role": "user", "content": [{"type": "text", "text": "text-only"}]}], "images": []},
+    ])
+
+    try:
+        mod._filter_text_only_vlm_grpo_rows(ds, "train", required=True)
+    except ValueError as exc:
+        assert "no rows with images" in str(exc)
+    else:
+        raise AssertionError("expected forced VLM GRPO split without images to fail fast")
 
 def test_grpo_installs_fsdpmodule_alias_for_torch_25_import(monkeypatch):
     _install_training_stubs(monkeypatch)

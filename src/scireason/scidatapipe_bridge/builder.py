@@ -573,6 +573,7 @@ def _trajectory_samples(
                 chat=chat,
                 metadata=SFTMetadata(
                     submission_id=submission_id,
+                    original_submission_id=str(doc.get("original_submission_id") or "") or None,
                     step_id=step.get("step_id"),
                     assertion_id=f"{submission_id}:step{step.get('step_id')}",
                     cutoff_year=doc.get("cutoff_year"),
@@ -649,6 +650,7 @@ def _gold_assertion_samples(
                 chat=chat,
                 metadata=SFTMetadata(
                     submission_id=submission_id,
+                    original_submission_id=str(doc.get("original_submission_id") or "") or None,
                     assertion_id=assertion.get("assertion_id"),
                     graph_kind=assertion.get("graph_kind"),
                     importance_score=assertion.get("importance_score"),
@@ -733,6 +735,7 @@ def _grpo_samples(
                 evidence_text=str(evidence.get("text") or "").strip(),
                 metadata=GRPOMetadata(
                     submission_id=submission_id,
+                    original_submission_id=str(doc.get("original_submission_id") or "") or None,
                     assertion_id=assertion.get("assertion_id"),
                     importance_score=assertion.get("importance_score"),
                     expert=ExpertSignals(

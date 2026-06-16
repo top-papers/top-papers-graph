@@ -773,8 +773,8 @@ def make_grpo_formatter(base_dir: Path):
         if prompt:
             prompt = _ensure_image_placeholder(prompt, bool(images))
             example['prompt'] = _align_image_placeholders_to_images(prompt, len(images))
-        # Keep a stable list column: VLM rows contain resolved image paths,
-        # text-only rows contain [] and can coexist in recent TRL/Transformers.
+        # Keep a stable list column; VLM GRPO filters empty-image rows before
+        # handing the dataset to TRL's Qwen3-VL generation path.
         example['images'] = images
         return example
     return format_grpo
@@ -785,6 +785,52 @@ def _value_has_image(value) -> bool:
     if isinstance(value, list):
         return any(item not in (None, '', []) for item in value)
     return True
+
+
+def _row_has_nonempty_images(example: Dict[str, Any]) -> bool:
+    return _value_has_image(example.get('images')) or _value_has_image(example.get('image'))
+
+
+def _dataset_has_any_images(ds) -> bool:
+    if not any(col in ds.column_names for col in ('images', 'image')):
+        return False
+    sample = ds[: len(ds)]
+    return any(
+        _value_has_image(value)
+        for col in ('images', 'image')
+        for value in sample.get(col, [])
+    )
+
+
+def _filter_text_only_vlm_grpo_rows(ds, split_name: str, *, required: bool = False):
+    """Drop rows that would make TRL pass images=None to Qwen3-VL.
+
+    TRL's multimodal GRPO path batches prompts through the Qwen3-VL processor
+    with an ``images=...`` argument for the whole generation batch. With mixed
+    VLM/text rows, current Transformers raises ``TypeError`` when a row has no
+    image payload. SFT can handle such mixed rows, but GRPO generation cannot;
+    for VLM GRPO we therefore keep only rows with at least one resolved image.
+    """
+    before = len(ds)
+    if before == 0 or not any(col in ds.column_names for col in ('images', 'image')):
+        if required:
+            raise ValueError(f'No image column is available for forced VLM GRPO {split_name} split.')
+        return ds
+
+    if not _dataset_has_any_images(ds):
+        if required:
+            raise ValueError(f'Forced VLM GRPO {split_name} split has no rows with images.')
+        return ds
+
+    filtered = ds.filter(_row_has_nonempty_images)
+    dropped = before - len(filtered)
+    if dropped:
+        print(
+            f'[train_vlm_grpo] dropped {dropped}/{before} {split_name} rows without images; '
+            'current TRL multimodal GRPO calls the Qwen3-VL processor with images=None for text-only VLM rows.',
+            flush=True,
+        )
+    return filtered
 
 
 def _cast_images_column(ds, image_column: str):
@@ -942,6 +988,18 @@ def main() -> None:
     if eval_ds is not None:
         eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
         eval_ds = eval_ds.map(make_grpo_formatter(eval_base_dir))
+
+    if args.train_mode == 'vlm' or (args.train_mode == 'auto' and _dataset_has_any_images(train_ds)):
+        train_ds = _filter_text_only_vlm_grpo_rows(train_ds, 'train', required=args.train_mode == 'vlm')
+        if eval_ds is not None:
+            eval_before = len(eval_ds)
+            eval_ds = _filter_text_only_vlm_grpo_rows(eval_ds, 'eval', required=False)
+            if eval_before and len(eval_ds) == 0:
+                print(
+                    '[train_vlm_grpo] disabled eval split because no eval rows with images remain for VLM GRPO.',
+                    flush=True,
+                )
+                eval_ds = None
 
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None: 
