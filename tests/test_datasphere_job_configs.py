@@ -62,9 +62,25 @@ def test_vlm_wrapper_passes_ddp_find_unused_parameters() -> None:
     assert script.count("--ddp-find-unused-parameters") >= 2
 
 
-def test_datasphere_requirements_pin_trl_below_future_17_surface() -> None:
+def test_datasphere_requirements_are_datasphere_cli_parseable() -> None:
+    from packaging.requirements import Requirement
+
+    lines = (DATASPHERE_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    assert lines, "requirements.txt must not be empty"
+    for line in lines:
+        assert line.strip() == line, line
+        assert line and not line.startswith("#") and not line.startswith("--"), line
+        Requirement(line)
+
+
+def test_datasphere_requirements_pin_runtime_surface_for_env_resolution() -> None:
     text = (DATASPHERE_DIR / "requirements.txt").read_text(encoding="utf-8")
+    assert "datasets>=4.7.0,<5" in text
+    assert "huggingface_hub>=0.34.0,<1.0" in text
+    assert "transformers>=4.57.0,<4.58" in text
     assert "trl>=1.4.0,<1.7" in text
+    assert "peft>=0.17.0,<0.20" in text
+    assert "bitsandbytes==0.48.1" in text
 
 def test_smoke_config_uses_valid_grpo_generation_count() -> None:
     path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_smoke_g2_2.yaml"
