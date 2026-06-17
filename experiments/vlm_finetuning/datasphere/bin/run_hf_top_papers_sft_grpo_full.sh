@@ -11,6 +11,18 @@ if [ -z "${HUGGING_FACE_HUB_TOKEN:-}" ] && [ -n "${HF_TOKEN:-}" ]; then
   export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
 fi
 
+# Managed DataSphere images can start jobs with an ASCII default locale. TRL's
+# optional model-card generation and Hugging Face Hub templates contain UTF-8
+# characters, so force a UTF-8 process locale before Python imports anything.
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export PYTHONUTF8="${PYTHONUTF8:-1}"
+export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+# The pipeline writes explicit run_config/final_summary metadata. Disable TRL's
+# optional README/model-card side effect by default; it can fail on locale quirks
+# and is not needed for checkpoints or adapter archives.
+export DISABLE_TRL_MODEL_CARD="${DISABLE_TRL_MODEL_CARD:-1}"
+
 DATASET_ID="${HF_DATASET_ID:-top-papers/top-papers-graph-experts-data}"
 DATASET_SPLIT="${HF_DATASET_SPLIT:-validation}"
 DATASET_REVISION="${HF_DATASET_REVISION:-main}"
@@ -214,15 +226,21 @@ prune_adapter_artifact_dir() {
 tar_adapter_artifact_dir() {
   local src="$1"
   local dst="$2"
-  [ -d "$src" ] || return 0
+  mkdir -p "$(dirname "$dst")"
+  if [ ! -d "$src" ]; then
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    mkdir -p "$tmpdir/placeholder"
+    cat > "$tmpdir/placeholder/README.txt" <<PLACEHOLDER_EOF
+This placeholder archive was created because $src did not exist when the DataSphere job packaged artifacts.
+The training phase likely failed before this artifact was produced; see reports/${OUT_PREFIX}_datasphere/final_summary.json and job logs.
+PLACEHOLDER_EOF
+    tar -czf "$dst" -C "$tmpdir" placeholder
+    rm -rf "$tmpdir"
+    return 0
+  fi
   prune_adapter_artifact_dir "$src"
-  tar \
-    --exclude='*/checkpoint-*' \
-    --exclude='*/optimizer.pt' \
-    --exclude='*/scheduler.pt' \
-    --exclude='*/rng_state*.pth' \
-    --exclude='*/scaler.pt' \
-    -czf "$dst" "$src"
+  tar     --exclude='*/checkpoint-*'     --exclude='*/optimizer.pt'     --exclude='*/scheduler.pt'     --exclude='*/rng_state*.pth'     --exclude='*/scaler.pt'     -czf "$dst" "$src"
 }
 
 write_fallback_final_summary() {
@@ -271,6 +289,27 @@ package_artifacts() {
   date -u +%Y-%m-%dT%H:%M:%SZ > "$REPORT_DIR/finished_at_utc.txt"
   remaining_budget_seconds > "$REPORT_DIR/remaining_budget_guard_seconds.txt"
   write_fallback_final_summary "$exit_status"
+  if [ ! -s "$REPORT_DIR/hf_upload_summary.json" ]; then
+    python - <<HF_UPLOAD_SUMMARY_PY > "$REPORT_DIR/hf_upload_summary.json"
+import json
+print(json.dumps({
+    "status": "not_run_or_incomplete",
+    "exit_status": int("$exit_status"),
+    "reason": "pipeline packaged artifacts before Hugging Face upload completed",
+}, ensure_ascii=False, indent=2))
+HF_UPLOAD_SUMMARY_PY
+  fi
+  mkdir -p "$HF_UPLOAD_BUNDLE_DIR/artifacts/reports"
+  if [ ! -s "$HF_UPLOAD_BUNDLE_DIR/artifacts/reports/hf_upload_manifest.json" ]; then
+    python - <<HF_UPLOAD_MANIFEST_PY > "$HF_UPLOAD_BUNDLE_DIR/artifacts/reports/hf_upload_manifest.json"
+import json
+print(json.dumps({
+    "status": "not_run_or_incomplete",
+    "exit_status": int("$exit_status"),
+    "reason": "pipeline packaged artifacts before Hugging Face upload completed",
+}, ensure_ascii=False, indent=2))
+HF_UPLOAD_MANIFEST_PY
+  fi
   find outputs "$DATA_DIR" "$REPORT_DIR" -maxdepth 3 -type f 2>/dev/null | sort > "$REPORT_DIR/artifact_manifest.txt"
   tar_adapter_artifact_dir "$SFT_DIR" "outputs/${OUT_PREFIX}_sft_lora.tar.gz"
   tar_adapter_artifact_dir "$GRPO_DIR" "outputs/${OUT_PREFIX}_grpo_lora.tar.gz"

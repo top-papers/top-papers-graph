@@ -537,6 +537,29 @@ def load_processor(model_id: str, min_pixels: int | None, max_pixels: int | None
         return AutoProcessor.from_pretrained(model_id, **kwargs)
 
 
+
+def disable_trl_model_card_creation(trainer: Any, reason: str) -> None:
+    """Disable TRL's optional model-card side effect in managed jobs.
+
+    TRL may create a README/model card during checkpoint saves. In DataSphere
+    jobs the locale can be ASCII, while TRL/Hugging Face templates are UTF-8;
+    letting this optional side effect run can abort an otherwise valid training
+    step with UnicodeDecodeError. The pipeline creates its own UTF-8 metadata.
+    """
+    if os.environ.get('DISABLE_TRL_MODEL_CARD', '1').lower() in {'0', 'false', 'no', 'off'}:
+        return
+
+    def _skip_model_card(*args: Any, **kwargs: Any) -> None:
+        if is_main_process():
+            print(f'[train_vlm_grpo] skipping TRL model card creation: {reason}', flush=True)
+        return None
+
+    try:
+        trainer.create_model_card = _skip_model_card  # type: ignore[attr-defined, method-assign]
+    except Exception as exc:
+        if is_main_process():
+            print(f'[train_vlm_grpo] warning: could not disable TRL model card creation: {exc}', flush=True)
+
 def get_local_rank() -> int:
     return int(os.environ.get('LOCAL_RANK', '0'))
 
@@ -1183,6 +1206,10 @@ def main() -> None:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         processing_class=processor if actual_mode == 'vlm' else tokenizer,
+    )
+    disable_trl_model_card_creation(
+        trainer,
+        'DataSphere may expose an ASCII locale; TRL/huggingface_hub model-card templates are UTF-8.',
     )
 
     train_result = trainer.train()

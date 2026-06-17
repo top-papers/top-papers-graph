@@ -141,3 +141,35 @@ def test_full_tutorial_does_not_recommend_grpo_32_token_masking_combo() -> None:
     text = (DATASPHERE_DIR / "TUTORIAL_FULL_EXPERIMENT_RU.md").read_text(encoding="utf-8")
     assert "GRPO_MAX_COMPLETION_LENGTH=32" not in text
     assert "GRPO_MASK_TRUNCATED_COMPLETIONS=0" in text
+
+
+def test_datasphere_vlm_jobs_force_utf8_locale_and_disable_trl_model_card() -> None:
+    for name in ["hf_top_papers_sft_grpo_full_g2_2.yaml", "hf_top_papers_sft_grpo_smoke_g2_2.yaml"]:
+        path = DATASPHERE_DIR / "job_configs" / name
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+        vars_list = cfg.get("env", {}).get("vars", [])
+        env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+        assert env["LANG"] == "C.UTF-8"
+        assert env["LC_ALL"] == "C.UTF-8"
+        assert str(env["PYTHONUTF8"]) == "1"
+        assert str(env["PYTHONIOENCODING"]).lower() == "utf-8"
+        assert str(env["DISABLE_TRL_MODEL_CARD"]) == "1"
+
+
+def test_vlm_trainers_disable_optional_trl_model_card_creation_by_default() -> None:
+    for rel in [
+        "experiments/vlm_finetuning/scripts/train_vlm_sft.py",
+        "experiments/vlm_finetuning/scripts/train_vlm_grpo.py",
+    ]:
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "def disable_trl_model_card_creation" in text
+        assert "DISABLE_TRL_MODEL_CARD", rel
+        assert "trainer.create_model_card" in text
+
+
+def test_vlm_pipeline_creates_placeholder_declared_outputs_after_early_failure() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
+    assert "This placeholder archive was created because" in script
+    assert "hf_upload_summary.json" in script
+    assert "hf_upload_manifest.json" in script
+    assert "not_run_or_incomplete" in script

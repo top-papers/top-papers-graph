@@ -83,6 +83,11 @@ env:
   - MAX_GRPO_SAMPLES: 48
   - MAX_DATASET_SAMPLES: 0
   - HF_DOWNLOAD_MAX_WORKERS: 1
+  - LANG: C.UTF-8
+  - LC_ALL: C.UTF-8
+  - PYTHONUTF8: '1'
+  - PYTHONIOENCODING: utf-8
+  - DISABLE_TRL_MODEL_CARD: '1'
 inputs:
 - experiments/vlm_finetuning/
 - data/
