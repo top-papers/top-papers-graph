@@ -79,6 +79,22 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--max-grad-norm', type=float, default=0.3)
     ap.add_argument('--dataloader-num-workers', type=int, default=4)
     ap.add_argument(
+        '--max-text-chars',
+        type=int,
+        default=0,
+        help=(
+            'Drop SFT rows whose normalized conversation text exceeds this many '
+            'characters. 0 disables filtering. This guard prevents rare huge VLM '
+            'examples from making one DDP rank run for longer than the NCCL watchdog.'
+        ),
+    )
+    ap.add_argument(
+        '--ddp-timeout-seconds',
+        type=int,
+        default=1800,
+        help='DistributedDataParallel process-group timeout in seconds.',
+    )
+    ap.add_argument(
         '--ddp-find-unused-parameters',
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -411,6 +427,72 @@ def _count_image_placeholders(messages: list[Dict[str, Any]]) -> int:
         if isinstance(content, list):
             count += sum(1 for block in content if isinstance(block, dict) and block.get('type') == 'image')
     return count
+
+
+def _text_chars_in_content(content: Any) -> int:
+    if content in (None, ''):
+        return 0
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        total = 0
+        for item in content:
+            if item in (None, ''):
+                continue
+            if isinstance(item, str):
+                total += len(item)
+            elif isinstance(item, dict):
+                if item.get('type') == 'text':
+                    total += len(str(item.get('text') or ''))
+                elif 'text' in item:
+                    total += len(str(item.get('text') or ''))
+            else:
+                total += len(str(item))
+        return total
+    if isinstance(content, dict):
+        if content.get('type') == 'text' or 'text' in content:
+            return len(str(content.get('text') or ''))
+        return len(json.dumps(content, ensure_ascii=False, sort_keys=True))
+    return len(str(content))
+
+
+def _row_text_chars(row: Dict[str, Any]) -> int:
+    messages = row.get('messages') or row.get('prompt') or []
+    if not isinstance(messages, list):
+        return _text_chars_in_content(messages)
+    return sum(_text_chars_in_content(msg.get('content')) for msg in messages if isinstance(msg, dict))
+
+
+def filter_dataset_by_text_chars(ds, max_text_chars: int, split_name: str, *, allow_empty: bool = False):
+    """Drop pathological long VLM rows before DDP training.
+
+    The full DataSphere run failed when one rank spent more than the 30 minute
+    NCCL watchdog interval on a single SFT step while its peer waited in a tiny
+    scalar all-gather.  Qwen3-VL SFT intentionally keeps max_length=None to avoid
+    cutting image tokens, so the safe place to bound worst-case step time is the
+    normalized text surface before TRL's multimodal collator.
+    """
+    if max_text_chars is None or int(max_text_chars) <= 0:
+        return ds, 0
+    max_text_chars = int(max_text_chars)
+    before = len(ds)
+    filtered = ds.filter(
+        lambda example: _row_text_chars(example) <= max_text_chars,
+        desc=f'Filtering {split_name} rows longer than {max_text_chars} text chars',
+    )
+    dropped = before - len(filtered)
+    if dropped and is_main_process():
+        print(
+            f'[train_vlm_sft] dropped {dropped}/{before} {split_name} rows with '
+            f'normalized text longer than {max_text_chars} chars to avoid DDP/NCCL stragglers.',
+            flush=True,
+        )
+    if len(filtered) == 0 and not allow_empty:
+        raise ValueError(
+            f'All {split_name} rows were filtered by --max-text-chars={max_text_chars}; '
+            'increase the limit or disable the guard with 0.'
+        )
+    return filtered, dropped
 
 
 def _align_image_placeholders_to_images(messages: list[Dict[str, Any]], image_count: int) -> list[Dict[str, Any]]:
@@ -756,6 +838,17 @@ def main() -> None:
         eval_ds = eval_ds.map(_sanitize_sft_row_for_trl, with_indices=True, desc='Sanitizing eval messages for Qwen3-VL')
         _validate_sft_dataset_for_qwen(eval_ds, 'eval')
 
+    train_ds, dropped_long_train_rows = filter_dataset_by_text_chars(train_ds, args.max_text_chars, 'train')
+    dropped_long_eval_rows = 0
+    if eval_ds is not None:
+        eval_ds, dropped_long_eval_rows = filter_dataset_by_text_chars(
+            eval_ds, args.max_text_chars, 'eval', allow_empty=True
+        )
+        if len(eval_ds) == 0:
+            if is_main_process():
+                print('[train_vlm_sft] eval split became empty after max-text-chars filtering; disabling eval.', flush=True)
+            eval_ds = None
+
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None:
         eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
@@ -826,6 +919,7 @@ def main() -> None:
         'max_grad_norm': args.max_grad_norm,
         'dataloader_num_workers': args.dataloader_num_workers,
         'dataloader_pin_memory': True,
+        'ddp_timeout': args.ddp_timeout_seconds,
         'ddp_find_unused_parameters': resolve_ddp_find_unused_parameters(args, actual_mode),
     }
     sft_args = SFTConfig(**_supports_kwargs(SFTConfig, sft_kwargs))
@@ -848,6 +942,8 @@ def main() -> None:
     run_config['resolved_mode'] = actual_mode
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
+    run_config['dropped_long_train_rows'] = dropped_long_train_rows
+    run_config['dropped_long_eval_rows'] = dropped_long_eval_rows
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 

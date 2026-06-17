@@ -165,6 +165,8 @@ plan = {
         "min_pixels": "$VLM_MIN_PIXELS" or None,
         "max_pixels": "$VLM_MAX_PIXELS" or None,
         "attn_implementation": "$ATTN_IMPLEMENTATION",
+        "sft_max_text_chars": int("${SFT_MAX_TEXT_CHARS:-0}"),
+        "sft_ddp_timeout_seconds": int("${SFT_DDP_TIMEOUT_SECONDS:-7200}"),
     },
     "huggingface_upload": {
         "enabled": "$HF_UPLOAD_AFTER_TRAINING" not in {"0", "false", "False", "no", "NO"},
@@ -407,6 +409,8 @@ run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/sc
   --lr-scheduler-type "${SFT_LR_SCHEDULER:-cosine}" \
   --weight-decay "${SFT_WEIGHT_DECAY:-0.01}" \
   --max-grad-norm "${SFT_MAX_GRAD_NORM:-0.3}" \
+  --max-text-chars "${SFT_MAX_TEXT_CHARS:-0}" \
+  --ddp-timeout-seconds "${SFT_DDP_TIMEOUT_SECONDS:-7200}" \
   --lora-r "${SFT_LORA_R:-32}" \
   --lora-alpha "${SFT_LORA_ALPHA:-64}" \
   --lora-dropout "${SFT_LORA_DROPOUT:-0.05}" \

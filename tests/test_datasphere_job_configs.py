@@ -173,3 +173,30 @@ def test_vlm_pipeline_creates_placeholder_declared_outputs_after_early_failure()
     assert "hf_upload_summary.json" in script
     assert "hf_upload_manifest.json" in script
     assert "not_run_or_incomplete" in script
+
+
+def test_full_sft_config_has_ddp_straggler_guards() -> None:
+    path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_full_g2_2.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vars_list = cfg.get("env", {}).get("vars", [])
+    env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+    assert int(env["SFT_MAX_TEXT_CHARS"]) >= 8000
+    assert int(env["SFT_MAX_TEXT_CHARS"]) <= 20000
+    assert int(env["SFT_DDP_TIMEOUT_SECONDS"]) >= 7200
+    assert int(env["SFT_DATALOADER_NUM_WORKERS"]) <= 1
+
+
+def test_sft_wrapper_passes_ddp_straggler_guard_args() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
+    assert "--max-text-chars" in script
+    assert "SFT_MAX_TEXT_CHARS" in script
+    assert "--ddp-timeout-seconds" in script
+    assert "SFT_DDP_TIMEOUT_SECONDS" in script
+
+
+def test_sft_trainer_config_accepts_ddp_timeout() -> None:
+    text = (REPO_ROOT / "experiments/vlm_finetuning/scripts/train_vlm_sft.py").read_text(encoding="utf-8")
+    assert "--ddp-timeout-seconds" in text
+    assert "'ddp_timeout': args.ddp_timeout_seconds" in text
+    assert "filter_dataset_by_text_chars" in text

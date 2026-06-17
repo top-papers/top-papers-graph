@@ -474,3 +474,38 @@ def test_grpo_expert_reward_uses_partial_verdict_signal_for_truncated_json(monke
 
     assert rewards[0] > rewards[1]
     assert rewards[0] < 1.0
+
+
+def test_sft_text_char_guard_drops_pathological_rows(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_text_guard_test")
+
+    class FakeDataset(list):
+        def filter(self, fn, desc=None):
+            return FakeDataset([row for row in self if fn(row)])
+
+    ds = FakeDataset([
+        {"messages": [{"role": "user", "content": [{"type": "text", "text": "short"}]}]},
+        {"messages": [{"role": "user", "content": [{"type": "text", "text": "x" * 50}]}]},
+    ])
+
+    filtered, dropped = mod.filter_dataset_by_text_chars(ds, 10, "train")
+
+    assert dropped == 1
+    assert len(filtered) == 1
+    assert mod._row_text_chars(filtered[0]) == 5
+
+
+def test_sft_text_char_guard_can_be_disabled(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_text_guard_disabled_test")
+
+    class FakeDataset(list):
+        def filter(self, fn, desc=None):
+            raise AssertionError("filter should not be called when the guard is disabled")
+
+    ds = FakeDataset([{"messages": [{"role": "user", "content": "x" * 1000}]}])
+    filtered, dropped = mod.filter_dataset_by_text_chars(ds, 0, "train")
+
+    assert filtered is ds
+    assert dropped == 0
