@@ -65,14 +65,14 @@ def test_vlm_wrapper_keeps_ddp_find_unused_configurable_not_forced() -> None:
     assert 'append_optional_bool_flag GRPO_DDP_FIND_UNUSED_PARAMETERS --ddp-find-unused-parameters --no-ddp-find-unused-parameters' in script
 
 
-def test_full_config_uses_fast_ddp_default_and_larger_grpo_groups() -> None:
+def test_full_config_uses_safe_ddp_unused_detection_and_larger_grpo_groups() -> None:
     path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_full_g2_2.yaml"
     cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
     vars_list = cfg.get("env", {}).get("vars", [])
     env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
 
-    assert str(env["SFT_DDP_FIND_UNUSED_PARAMETERS"]) == "0"
-    assert str(env["GRPO_DDP_FIND_UNUSED_PARAMETERS"]) == "0"
+    assert str(env["SFT_DDP_FIND_UNUSED_PARAMETERS"]) == "1"
+    assert str(env["GRPO_DDP_FIND_UNUSED_PARAMETERS"]) == "1"
     assert int(env["GRPO_NUM_GENERATIONS"]) >= 4
     assert int(env["MAX_GRPO_STEPS"]) <= 120
 

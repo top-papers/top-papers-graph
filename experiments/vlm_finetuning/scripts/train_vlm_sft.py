@@ -154,14 +154,15 @@ def get_world_size() -> int:
 def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
     """Return the DDP unused-parameter setting for Trainer/SFTConfig.
 
-    Leave ``find_unused_parameters`` off by default for throughput. The flag is
-    still exposed as an explicit compatibility escape hatch for models or LoRA
-    target sets that really do leave trainable parameters unused on some ranks.
+    VLM + LoRA fine-tuning can leave different trainable branches unused on
+    different ranks for a given step. In multi-process VLM runs, enable DDP's
+    unused-parameter detection unless the caller explicitly overrides it. Keep
+    text-only and single-process runs on the faster default path.
     """
     requested = getattr(args, 'ddp_find_unused_parameters', None)
     if requested is not None:
         return bool(requested)
-    return False
+    return actual_mode == 'vlm' and get_world_size() > 1
 
 
 def disable_unsupported_vlm_assistant_only_loss(args: argparse.Namespace, actual_mode: str) -> None:

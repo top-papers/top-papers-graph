@@ -259,14 +259,18 @@ def test_grpo_aligns_image_placeholders_to_capped_images(monkeypatch):
 
 
 
-def test_sft_keeps_ddp_find_unused_off_by_default(monkeypatch):
+def test_sft_enables_ddp_find_unused_for_distributed_vlm_by_default(monkeypatch):
     _install_training_stubs(monkeypatch)
     monkeypatch.setenv("WORLD_SIZE", "2")
     mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_ddp_unused_test")
 
     args = types.SimpleNamespace(ddp_find_unused_parameters=None)
-    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
     assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
+
+    monkeypatch.setenv("WORLD_SIZE", "1")
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
+    monkeypatch.setenv("WORLD_SIZE", "2")
 
     forced_on = types.SimpleNamespace(ddp_find_unused_parameters=True)
     assert mod.resolve_ddp_find_unused_parameters(forced_on, "vlm") is True
@@ -274,14 +278,18 @@ def test_sft_keeps_ddp_find_unused_off_by_default(monkeypatch):
     assert mod.resolve_ddp_find_unused_parameters(forced_off, "vlm") is False
 
 
-def test_grpo_keeps_ddp_find_unused_off_by_default(monkeypatch):
+def test_grpo_enables_ddp_find_unused_for_distributed_vlm_by_default(monkeypatch):
     _install_training_stubs(monkeypatch)
     monkeypatch.setenv("WORLD_SIZE", "2")
     mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_ddp_unused_test")
 
     args = types.SimpleNamespace(ddp_find_unused_parameters=None)
-    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
     assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
+
+    monkeypatch.setenv("WORLD_SIZE", "1")
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
+    monkeypatch.setenv("WORLD_SIZE", "2")
 
     forced_on = types.SimpleNamespace(ddp_find_unused_parameters=True)
     assert mod.resolve_ddp_find_unused_parameters(forced_on, "vlm") is True
