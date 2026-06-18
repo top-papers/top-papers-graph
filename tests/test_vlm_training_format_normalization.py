@@ -259,30 +259,34 @@ def test_grpo_aligns_image_placeholders_to_capped_images(monkeypatch):
 
 
 
-def test_sft_auto_enables_ddp_find_unused_for_distributed_vlm(monkeypatch):
+def test_sft_keeps_ddp_find_unused_off_by_default(monkeypatch):
     _install_training_stubs(monkeypatch)
     monkeypatch.setenv("WORLD_SIZE", "2")
     mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_ddp_unused_test")
 
     args = types.SimpleNamespace(ddp_find_unused_parameters=None)
-    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
     assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
 
-    forced = types.SimpleNamespace(ddp_find_unused_parameters=False)
-    assert mod.resolve_ddp_find_unused_parameters(forced, "vlm") is False
+    forced_on = types.SimpleNamespace(ddp_find_unused_parameters=True)
+    assert mod.resolve_ddp_find_unused_parameters(forced_on, "vlm") is True
+    forced_off = types.SimpleNamespace(ddp_find_unused_parameters=False)
+    assert mod.resolve_ddp_find_unused_parameters(forced_off, "vlm") is False
 
 
-def test_grpo_auto_enables_ddp_find_unused_for_distributed_vlm(monkeypatch):
+def test_grpo_keeps_ddp_find_unused_off_by_default(monkeypatch):
     _install_training_stubs(monkeypatch)
     monkeypatch.setenv("WORLD_SIZE", "2")
     mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_ddp_unused_test")
 
     args = types.SimpleNamespace(ddp_find_unused_parameters=None)
-    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
+    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
     assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
 
-    forced = types.SimpleNamespace(ddp_find_unused_parameters=False)
-    assert mod.resolve_ddp_find_unused_parameters(forced, "vlm") is False
+    forced_on = types.SimpleNamespace(ddp_find_unused_parameters=True)
+    assert mod.resolve_ddp_find_unused_parameters(forced_on, "vlm") is True
+    forced_off = types.SimpleNamespace(ddp_find_unused_parameters=False)
+    assert mod.resolve_ddp_find_unused_parameters(forced_off, "vlm") is False
 
 
 class _TinyDataset:
@@ -425,6 +429,16 @@ def test_grpo_installs_fsdpmodule_alias_for_torch_25_import(monkeypatch):
     assert mod.install_torch_fsdp_module_import_compat() is False
     assert fsdp.FSDPModule is LegacyFullyShardedDataParallel
 
+def test_grpo_defines_main_process_helper_for_checkpoint_hooks(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    monkeypatch.setenv("RANK", "0")
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_main_process_test")
+
+    assert mod.is_main_process() is True
+    monkeypatch.setenv("RANK", "1")
+    assert mod.is_main_process() is False
+
+
 def test_grpo_enforces_minimum_generation_count(monkeypatch):
     _install_training_stubs(monkeypatch)
     mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_num_gen_test")
@@ -459,6 +473,38 @@ def test_grpo_schema_reward_gives_dense_signal_for_truncated_json(monkeypatch):
     assert len(set(rewards)) > 1
     assert all(-1.0 <= value < 0.5 for value in rewards)
     assert rewards[0] < rewards[1] <= rewards[2]
+
+
+def test_grpo_graph_reward_is_neutral_for_review_without_predicted_graph(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_review_graph_neutral_test")
+
+    rewards = mod.reward_graph_consistency(
+        prompts=[None],
+        completions=['{"verdict": "reject", "rationale": "not supported"}'],
+        reference_assertions_json=['[{"subject":"A","predicate":"causes","object":"B"}]'],
+        task_family=["assertion_review_rl"],
+    )
+
+    assert rewards == [0.0]
+
+
+def test_grpo_expert_reward_distinguishes_wrong_valid_verdict_from_missing(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_dense_dict_verdict_test")
+
+    rewards = mod.reward_expert_override_match(
+        prompts=[None, None, None],
+        completions=[
+            '{"verdict": "reject", "rationale": "ok"}',
+            '{"verdict": "accept", "rationale": "ok"}',
+            '{"rationale": "ok"}',
+        ],
+        expected_verdict=["reject", "reject", "reject"],
+        task_family=["assertion_review_rl", "assertion_review_rl", "assertion_review_rl"],
+    )
+
+    assert rewards == [1.0, -0.75, -1.0]
 
 
 def test_grpo_expert_reward_uses_partial_verdict_signal_for_truncated_json(monkeypatch):

@@ -85,6 +85,36 @@ VLM_MIN_PIXELS="${VLM_MIN_PIXELS:-}"
 VLM_MAX_PIXELS="${VLM_MAX_PIXELS:-1003520}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-auto}"
 
+append_optional_bool_flag() {
+  local var_name="$1"
+  local flag="$2"
+  local no_flag="$3"
+  local value="${!var_name:-}"
+  case "$value" in
+    1|true|TRUE|yes|YES|on|ON)
+      printf '%s\n' "$flag"
+      ;;
+    0|false|FALSE|no|NO|off|OFF|'')
+      if [ -n "$no_flag" ] && [ -n "$value" ]; then
+        printf '%s\n' "$no_flag"
+      fi
+      ;;
+    *)
+      echo "[datasphere-pipeline] Unsupported boolean $var_name=$value; expected 0/1/true/false." >&2
+      exit 2
+      ;;
+  esac
+}
+
+SFT_DDP_ARGS=()
+while IFS= read -r flag; do
+  [ -n "$flag" ] && SFT_DDP_ARGS+=("$flag")
+done < <(append_optional_bool_flag SFT_DDP_FIND_UNUSED_PARAMETERS --ddp-find-unused-parameters --no-ddp-find-unused-parameters)
+GRPO_DDP_ARGS=()
+while IFS= read -r flag; do
+  [ -n "$flag" ] && GRPO_DDP_ARGS+=("$flag")
+done < <(append_optional_bool_flag GRPO_DDP_FIND_UNUSED_PARAMETERS --ddp-find-unused-parameters --no-ddp-find-unused-parameters)
+
 mkdir -p "$REPORT_DIR" outputs data/derived
 PIPELINE_STARTED_EPOCH="$(date +%s)"
 
@@ -401,7 +431,7 @@ run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/sc
   --bf16 \
   --tf32 \
   --gradient-checkpointing \
-  --ddp-find-unused-parameters \
+  "${SFT_DDP_ARGS[@]}" \
   --attn-implementation "$ATTN_IMPLEMENTATION" \
   "${PIXEL_ARGS[@]}" \
   --learning-rate "${SFT_LR:-7e-5}" \
@@ -452,7 +482,7 @@ run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/s
   --bf16 \
   --tf32 \
   --gradient-checkpointing \
-  --ddp-find-unused-parameters \
+  "${GRPO_DDP_ARGS[@]}" \
   --attn-implementation "$ATTN_IMPLEMENTATION" \
   "${PIXEL_ARGS[@]}" \
   --learning-rate "${GRPO_LR:-1e-5}" \

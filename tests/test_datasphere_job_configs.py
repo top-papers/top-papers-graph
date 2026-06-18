@@ -57,9 +57,24 @@ def test_vlm_sft_wrapper_does_not_pass_assistant_only_loss() -> None:
 
 
 
-def test_vlm_wrapper_passes_ddp_find_unused_parameters() -> None:
+def test_vlm_wrapper_keeps_ddp_find_unused_configurable_not_forced() -> None:
     script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
-    assert script.count("--ddp-find-unused-parameters") >= 2
+    assert "SFT_DDP_FIND_UNUSED_PARAMETERS" in script
+    assert "GRPO_DDP_FIND_UNUSED_PARAMETERS" in script
+    assert 'append_optional_bool_flag SFT_DDP_FIND_UNUSED_PARAMETERS --ddp-find-unused-parameters --no-ddp-find-unused-parameters' in script
+    assert 'append_optional_bool_flag GRPO_DDP_FIND_UNUSED_PARAMETERS --ddp-find-unused-parameters --no-ddp-find-unused-parameters' in script
+
+
+def test_full_config_uses_fast_ddp_default_and_larger_grpo_groups() -> None:
+    path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_full_g2_2.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vars_list = cfg.get("env", {}).get("vars", [])
+    env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+    assert str(env["SFT_DDP_FIND_UNUSED_PARAMETERS"]) == "0"
+    assert str(env["GRPO_DDP_FIND_UNUSED_PARAMETERS"]) == "0"
+    assert int(env["GRPO_NUM_GENERATIONS"]) >= 4
+    assert int(env["MAX_GRPO_STEPS"]) <= 120
 
 
 def test_datasphere_requirements_are_datasphere_cli_parseable() -> None:

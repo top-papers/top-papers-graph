@@ -341,10 +341,18 @@ def reward_graph_consistency(prompts, completions, reference_assertions_json=Non
             ref_assertions = []
         ref_keys = {triple_key(x) for x in ref_assertions if isinstance(x, dict)}
         
-        if not pred_keys and not ref_keys:
-            rewards.append(0.0)
+        if not pred_keys:
+            # Review-style RL examples usually ask for a verdict/rationale, not
+            # for reconstructing the full assertion graph. Penalize missing graph
+            # output for trajectory reconstruction, but keep assertion review
+            # neutral unless the model actually proposes assertions to compare.
+            rewards.append(0.0 if tf == "assertion_review_rl" else (-1.0 if ref_keys else 0.0))
             continue
-            
+
+        if not ref_keys:
+            rewards.append(-0.25)
+            continue
+
         tp = len(pred_keys & ref_keys)
         fp, fn = len(pred_keys - ref_keys), len(ref_keys - pred_keys)
         precision = tp / (tp + fp) if tp + fp else 0.0
@@ -455,7 +463,18 @@ def reward_expert_override_match(prompts, completions, expected_verdict=None, sa
         if not verdict:
             rewards.append(0.0)
         else:
-            rewards.append(1.0 if norm_text(pred_verdict) == norm_text(verdict) else -1.0)
+            pred_norm = norm_text(pred_verdict)
+            verdict_norm = norm_text(verdict)
+            if pred_norm == verdict_norm:
+                rewards.append(1.0)
+            elif not pred_norm:
+                rewards.append(-1.0)
+            elif verdict_norm and verdict_norm in norm_text(completion_to_text(completion)):
+                rewards.append(-0.25)
+            elif pred_norm in {"accept", "accepted", "reject", "rejected", "revise", "needs revision", "needs_revision", "unknown"}:
+                rewards.append(-0.75)
+            else:
+                rewards.append(-1.0)
             
     REWARD_LOGGER.append("expert_override_match", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
@@ -471,10 +490,16 @@ def get_world_size() -> int:
 
 
 def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
+    """Return the DDP unused-parameter setting for GRPOConfig.
+
+    Keep the default fast path off. Enable explicitly with
+    ``--ddp-find-unused-parameters`` only if the current model/adapter setup
+    really needs DDP unused-parameter detection.
+    """
     requested = getattr(args, 'ddp_find_unused_parameters', None)
     if requested is not None:
         return bool(requested)
-    return actual_mode == 'vlm' and get_world_size() > 1
+    return False
 
 
 def enforce_minimum_grpo_generations(args: argparse.Namespace) -> None:
@@ -562,6 +587,11 @@ def disable_trl_model_card_creation(trainer: Any, reason: str) -> None:
 
 def get_local_rank() -> int:
     return int(os.environ.get('LOCAL_RANK', '0'))
+
+
+def is_main_process() -> bool:
+    return int(os.environ.get('RANK', '0')) == 0
+
 
 def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, attn_impl: str, trust_remote_code: bool = False):
     torch_dtype = torch.bfloat16 if bf16 else torch.float16 if fp16 else None
@@ -1033,9 +1063,9 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=None,
         help=(
-            'Pass find_unused_parameters to DistributedDataParallel. ' 
-            'Default: auto-enable for distributed VLM GRPO because multimodal/LoRA ' 
-            'branches can have unused parameters on individual ranks.'
+            'Pass find_unused_parameters to DistributedDataParallel. '
+            'Default: False. Enable only when a DDP run fails with unused-parameter '
+            'errors; this flag adds autograd graph traversal overhead.'
         ),
     )
     ap.add_argument('--temperature', type=float, default=0.8)

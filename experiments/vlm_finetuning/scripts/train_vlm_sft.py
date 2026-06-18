@@ -99,9 +99,9 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=None,
         help=(
-            'Pass find_unused_parameters to DistributedDataParallel. ' 
-            'Default: auto-enable for distributed VLM training because Qwen-VL/LoRA ' 
-            'can have branch-specific unused parameters across ranks.'
+            'Pass find_unused_parameters to DistributedDataParallel. '
+            'Default: False. Enable only when a DDP run fails with unused-parameter '
+            'errors; PyTorch traverses the autograd graph when this flag is on.'
         ),
     )
     ap.add_argument('--resume-from-checkpoint', default=None)
@@ -152,18 +152,16 @@ def get_world_size() -> int:
 
 
 def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
-    """Return a safe DDP unused-parameter setting for Trainer/SFTConfig.
+    """Return the DDP unused-parameter setting for Trainer/SFTConfig.
 
-    Qwen3-VL with LoRA and multimodal batches may activate different branches
-    depending on which examples/images land on a rank. In DDP this can leave
-    some trainable parameters without gradients on a given step. PyTorch's
-    DDP supports that case via find_unused_parameters=True. Keep it automatic
-    for multi-process VLM runs, while preserving an explicit CLI override.
+    Leave ``find_unused_parameters`` off by default for throughput. The flag is
+    still exposed as an explicit compatibility escape hatch for models or LoRA
+    target sets that really do leave trainable parameters unused on some ranks.
     """
     requested = getattr(args, 'ddp_find_unused_parameters', None)
     if requested is not None:
         return bool(requested)
-    return actual_mode == 'vlm' and get_world_size() > 1
+    return False
 
 
 def disable_unsupported_vlm_assistant_only_loss(args: argparse.Namespace, actual_mode: str) -> None:
