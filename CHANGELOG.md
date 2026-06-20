@@ -1,3 +1,12 @@
+
+## 2026-06-19 — SciReason fine-tuning v2 pipeline
+
+- Added export-only `build_scireason_alignment_datasets.py` for leakage-safe SFT/DPO/GRPO dataset preparation.
+- Disabled dangerous `imagefolder` source mode by default unless `--allow-imagefolder-fallback` is explicitly provided.
+- Added text-SFT -> VLM-SFT -> DPO -> optional-GRPO DataSphere pipeline and configs.
+- Added `--init-adapter-path` to `train_vlm_sft.py` to continue multimodal SFT from the text-SFT adapter.
+- Added v2 tests for leakage-safe splits, relevance-based image selection, and DPO row construction.
+
 # Changelog
 
 ## 0.4.1 — Optional GNN mode (PyTorch Geometric)

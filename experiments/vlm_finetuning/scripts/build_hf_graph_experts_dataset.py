@@ -565,6 +565,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--revision", default="main")
     ap.add_argument("--split", default="validation", help="Imagefolder fallback split.")
     ap.add_argument("--source-mode", choices=["export", "imagefolder"], default="export")
+    ap.add_argument("--allow-imagefolder-fallback", action="store_true", help="Dangerous legacy mode: build the HF viewer image classification dataset instead of the export instruction dataset.")
     ap.add_argument("--export-subdir", default=DEFAULT_EXPORT_SUBDIR)
     ap.add_argument("--snapshot-dir", type=Path, default=None, help="Optional local snapshot directory. Default uses HF cache.")
     ap.add_argument("--out-dir", type=Path, default=Path("data/derived/hf_top_papers_graph_experts"))
@@ -593,6 +594,11 @@ def main() -> None:
     if args.source_mode == "export":
         summary = build_from_export(args)
     else:
+        if not args.allow_imagefolder_fallback:
+            raise SystemExit(
+                "source-mode=imagefolder is disabled by default because the HF viewer split is an image-classification view, "
+                "not the SciReason instruction/reasoning export. Re-run with --allow-imagefolder-fallback only for legacy debugging."
+            )
         summary = build_from_imagefolder(args)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

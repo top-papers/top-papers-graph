@@ -23,6 +23,7 @@ def _install_training_stubs(monkeypatch):
 
     peft = types.ModuleType("peft")
     peft.LoraConfig = _Dummy
+    peft.PeftModel = _Dummy
     peft.get_peft_model = lambda model, config: model
     peft.prepare_model_for_kbit_training = lambda model: model
 

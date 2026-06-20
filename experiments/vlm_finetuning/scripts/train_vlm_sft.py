@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoProcessor,
     AutoTokenizer,
@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--train-file', type=str, required=True)
     ap.add_argument('--eval-file', type=str, default=None)
     ap.add_argument('--output-dir', type=Path, required=True)
+    ap.add_argument('--init-adapter-path', type=Path, default=None, help='Optional PEFT adapter to continue training from before creating a new LoRA adapter.')
     ap.add_argument('--report-to', default='none')
     ap.add_argument('--learning-rate', type=float, default=7e-5)
     ap.add_argument('--num-train-epochs', type=float, default=3.0)
@@ -106,6 +107,9 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--save-adapter-only', action='store_true')
+    ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Load the checkpoint with the best eval metric before final save when eval is enabled.')
+    ap.add_argument('--metric-for-best-model', default='eval_loss')
+    ap.add_argument('--greater-is-better', action=argparse.BooleanOptionalAction, default=False)
     ap.add_argument('--dry-run', action='store_true')
     return ap.parse_args()
 
@@ -869,7 +873,11 @@ def main() -> None:
             pass
     if args.qlora:
         model = prepare_model_for_kbit_training(model)
-    if args.use_lora or args.qlora:
+    if args.init_adapter_path:
+        if is_main_process():
+            print(f'[train_vlm_sft] loading trainable PEFT adapter from {args.init_adapter_path}', flush=True)
+        model = PeftModel.from_pretrained(model, str(args.init_adapter_path), is_trainable=True)
+    elif args.use_lora or args.qlora:
         model = get_peft_model(
             model,
             LoraConfig(
@@ -881,10 +889,10 @@ def main() -> None:
                 task_type='CAUSAL_LM',
             ),
         )
-        if args.gradient_checkpointing and hasattr(model, 'enable_input_require_grads'):
-            model.enable_input_require_grads()
-        if is_main_process():
-            model.print_trainable_parameters()
+    if (args.use_lora or args.qlora or args.init_adapter_path) and args.gradient_checkpointing and hasattr(model, 'enable_input_require_grads'):
+        model.enable_input_require_grads()
+    if (args.use_lora or args.qlora or args.init_adapter_path) and is_main_process() and hasattr(model, 'print_trainable_parameters'):
+        model.print_trainable_parameters()
 
     sft_kwargs = {
         'output_dir': str(args.output_dir),
@@ -920,6 +928,9 @@ def main() -> None:
         'dataloader_pin_memory': True,
         'ddp_timeout': args.ddp_timeout_seconds,
         'ddp_find_unused_parameters': resolve_ddp_find_unused_parameters(args, actual_mode),
+        'load_best_model_at_end': bool(args.load_best_model_at_end and eval_ds is not None),
+        'metric_for_best_model': args.metric_for_best_model,
+        'greater_is_better': args.greater_is_better,
     }
     sft_args = SFTConfig(**_supports_kwargs(SFTConfig, sft_kwargs))
     if actual_mode == 'vlm' and sft_args.max_length is not None:
@@ -944,6 +955,7 @@ def main() -> None:
     run_config['dropped_long_train_rows'] = dropped_long_train_rows
     run_config['dropped_long_eval_rows'] = dropped_long_eval_rows
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
+    run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
     (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 
     if args.dry_run:

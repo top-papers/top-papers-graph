@@ -1,0 +1,111 @@
+name: hf-top-papers-qwen3vl-8b-sft-dpo-grpo-v2-g2-2
+desc: >-
+  Recommended v2 SciReason fine-tuning pipeline for Qwen3-VL-8B-Instruct:
+  export-only leakage-safe dataset build, text-only SFT with assistant-only loss,
+  multimodal SFT on evidence images, DPO as the main alignment stage, and optional
+  short GRPO polish gated by ENABLE_GRPO_POLISH.
+cmd: bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_dpo_grpo_v2.sh
+env:
+  python:
+    type: manual
+    version: '3.10'
+    requirements-file: experiments/vlm_finetuning/datasphere/requirements.txt
+    local-paths:
+    - experiments/vlm_finetuning/
+    - data/
+    - examples/
+    pip:
+      extra-index-urls:
+      - https://download.pytorch.org/whl/cu121
+  vars:
+  - HF_DATASET_ID: top-papers/top-papers-graph-experts-data
+  - HF_DATASET_REVISION: main
+  - HF_DATASET_EXPORT_SUBDIR: exports/colab-run-001
+  - EVAL_RATIO: '0.10'
+  - MAX_IMAGES_PER_EXAMPLE_SFT: 0
+  - MAX_IMAGES_PER_EXAMPLE_GRPO: 0
+  - BASE_MODEL: Qwen/Qwen3-VL-8B-Instruct
+  - OUT_PREFIX: hf_top_papers_qwen3vl_8b_v2
+  - TEXT_SFT_MAX_STEPS: -1
+  - TEXT_SFT_EPOCHS: 3
+  - TEXT_SFT_LR: 5e-5
+  - VLM_SFT_MAX_STEPS: -1
+  - VLM_SFT_EPOCHS: 2
+  - VLM_SFT_LR: 3e-5
+  - DPO_EPOCHS: 1
+  - DPO_LR: 7e-6
+  - DPO_BETA: '0.08'
+  - ENABLE_GRPO_POLISH: '0'
+  - GRPO_MAX_STEPS: -1
+  - GRPO_LR: 5e-6
+  - GRPO_BETA: '0.02'
+  - GRPO_NUM_GENERATIONS: 4
+  - GRPO_NUM_GENERATIONS_EVAL: 2
+  - GRPO_MAX_COMPLETION_LENGTH: 768
+  - GRPO_REWARD_WEIGHTS: 0.0 0.5 0.8 1.6 1.2 1.5
+  - LORA_R: 32
+  - LORA_ALPHA: 64
+  - LORA_DROPOUT: '0.05'
+  - SFT_PER_DEVICE_BATCH: 1
+  - SFT_GRAD_ACCUM: 8
+  - DPO_PER_DEVICE_BATCH: 1
+  - DPO_GRAD_ACCUM: 8
+  - GRPO_PER_DEVICE_BATCH: 1
+  - GRPO_GRAD_ACCUM: 8
+  - SFT_SAVE_STEPS: 60
+  - SFT_EVAL_STEPS: 60
+  - DPO_SAVE_STEPS: 60
+  - DPO_EVAL_STEPS: 60
+  - SFT_DATALOADER_NUM_WORKERS: 0
+  - ATTN_IMPLEMENTATION: auto
+  - VLM_MAX_PIXELS: 1003520
+  - SFT_MAX_TEXT_CHARS: '12000'
+  - MAX_SFT_SAMPLES: 0
+  - MAX_GRPO_SAMPLES: 0
+  - HF_DOWNLOAD_MAX_WORKERS: 2
+  - QUALITY_GATE_STRICT: '1'
+  - FULL_DATA_STRICT: '1'
+  - REQUIRE_ALL_IMAGES: '1'
+  - MIN_DPO_TRAIN_ROWS: 100
+  - MIN_SFT_VLM_TRAIN_ROWS: 100
+  - MIN_GRPO_VERIFIED_ROWS: 50
+  - TOKENIZERS_PARALLELISM: 'false'
+  - PYTHONUNBUFFERED: '1'
+  - LANG: C.UTF-8
+  - LC_ALL: C.UTF-8
+  - PYTHONUTF8: '1'
+  - PYTHONIOENCODING: utf-8
+  - DISABLE_TRL_MODEL_CARD: '1'
+inputs:
+- experiments/vlm_finetuning/
+- data/
+- examples/
+outputs:
+- data/derived/hf_top_papers_scireason_v2/summary.json
+- data/derived/hf_top_papers_scireason_v2/leakage_report.json
+- data/derived/hf_top_papers_scireason_v2/image_resolution_report.json
+- data/derived/hf_top_papers_scireason_v2/reward_audit_by_task_family.json
+- data/derived/hf_top_papers_scireason_v2/alignment_readiness_report.json
+- data/derived/hf_top_papers_scireason_v2/full_data_usage_report.json
+- data/derived/hf_top_papers_scireason_v2/sft_text_train.jsonl
+- data/derived/hf_top_papers_scireason_v2/sft_text_eval.jsonl
+- data/derived/hf_top_papers_scireason_v2/sft_vlm_train.jsonl
+- data/derived/hf_top_papers_scireason_v2/sft_vlm_eval.jsonl
+- data/derived/hf_top_papers_scireason_v2/dpo_train.jsonl
+- data/derived/hf_top_papers_scireason_v2/dpo_eval.jsonl
+- data/derived/hf_top_papers_scireason_v2/grpo_train_verified.jsonl
+- data/derived/hf_top_papers_scireason_v2/grpo_eval_verified.jsonl
+- outputs/hf_top_papers_qwen3vl_8b_v2_text_sft_lora.tar.gz
+- outputs/hf_top_papers_qwen3vl_8b_v2_vlm_sft_lora.tar.gz
+- outputs/hf_top_papers_qwen3vl_8b_v2_dpo_lora.tar.gz
+- outputs/hf_top_papers_qwen3vl_8b_v2_grpo_lora.tar.gz
+- reports/hf_top_papers_qwen3vl_8b_v2_datasphere_reports.tar.gz
+- reports/hf_top_papers_qwen3vl_8b_v2_datasphere/final_summary.json
+cloud-instance-types:
+- g2.2
+working-storage:
+  type: SSD
+  size: 1024Gb
+graceful-shutdown:
+  signal: SIGTERM
+  timeout: 3600s

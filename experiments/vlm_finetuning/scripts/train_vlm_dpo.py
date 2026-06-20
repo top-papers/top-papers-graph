@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 from pathlib import Path
@@ -57,9 +58,41 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--image-column', default='images')
     ap.add_argument('--max-length', type=int, default=None)
     ap.add_argument('--resume-from-checkpoint', default=None)
+    ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Load the best eval checkpoint before final save when eval is enabled.')
+    ap.add_argument('--metric-for-best-model', default='eval_loss')
+    ap.add_argument('--greater-is-better', action=argparse.BooleanOptionalAction, default=False)
     ap.add_argument('--dry-run', action='store_true')
     return ap.parse_args()
 
+
+
+
+def _supports_kwargs(callable_obj, kwargs):
+    try:
+        sig = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return kwargs
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        return kwargs
+    return {k: v for k, v in kwargs.items() if k in sig.parameters}
+
+
+def is_main_process() -> bool:
+    return int(os.environ.get('RANK', '0')) == 0
+
+
+def disable_trl_model_card_creation(trainer, reason: str) -> None:
+    if os.environ.get('DISABLE_TRL_MODEL_CARD', '1').lower() in {'0', 'false', 'no', 'off'}:
+        return
+    def _skip_model_card(*args, **kwargs):
+        if is_main_process():
+            print(f'[train_vlm_dpo] skipping TRL model card creation: {reason}', flush=True)
+        return None
+    try:
+        trainer.create_model_card = _skip_model_card
+    except Exception as exc:
+        if is_main_process():
+            print(f'[train_vlm_dpo] warning: could not disable TRL model card creation: {exc}', flush=True)
 
 def get_local_rank() -> int:
     return int(os.environ.get('LOCAL_RANK', '0'))
@@ -221,7 +254,7 @@ def main() -> None:
             ),
         )
 
-    dpo_args = DPOConfig(
+    dpo_kwargs = dict(
         output_dir=str(args.output_dir),
         learning_rate=args.learning_rate,
         num_train_epochs=args.num_train_epochs,
@@ -245,7 +278,11 @@ def main() -> None:
         logging_strategy='steps',
         beta=args.beta,
         loss_type=args.loss_type,
+        load_best_model_at_end=bool(args.load_best_model_at_end and eval_ds is not None),
+        metric_for_best_model=args.metric_for_best_model,
+        greater_is_better=args.greater_is_better,
     )
+    dpo_args = DPOConfig(**_supports_kwargs(DPOConfig, dpo_kwargs))
     if actual_mode == 'vlm' and dpo_args.max_length is not None:
         raise ValueError('For VLM DPO use max_length=None to avoid truncating image tokens.')
 
@@ -258,10 +295,16 @@ def main() -> None:
         processing_class=processor if actual_mode == 'vlm' else tokenizer,
     )
 
+    disable_trl_model_card_creation(
+        trainer,
+        'DataSphere may expose an ASCII locale; TRL/huggingface_hub model-card templates are UTF-8.',
+    )
+
     run_config = vars(args).copy()
     run_config['resolved_mode'] = actual_mode
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
+    run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
     (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2), encoding='utf-8')
 
     if args.dry_run:

@@ -1,0 +1,94 @@
+name: sft_dpo_grpo_v2_qwen3vl_8b_lora
+stage: text_sft_then_vlm_sft_then_dpo_optional_grpo
+model_id: Qwen/Qwen3-VL-8B-Instruct
+training_method: lora
+train_type: peft
+precision: bf16
+attn_implementation: auto
+pipeline:
+  dataset_id: top-papers/top-papers-graph-experts-data
+  dataset_revision: main
+  dataset_source_mode: export_only_scireason_v2
+  dataset_export_subdir: exports/colab-run-001
+  build_script: experiments/vlm_finetuning/scripts/build_scireason_alignment_datasets.py
+  datasphere_entrypoint: experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_dpo_grpo_v2.sh
+  datasphere_job_config: experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml
+  eval_ratio: 0.10
+  output_prefix: hf_top_papers_qwen3vl_8b_v2
+vlm_preprocessing:
+  image_column: images
+  image_selection_policy: all_available_refs
+  max_images_per_example_sft: 0
+  max_images_per_example_grpo: 0
+  max_pixels: 1003520
+text_sft:
+  max_steps: -1
+  num_train_epochs: 3
+  learning_rate: 5.0e-5
+  assistant_only_loss: true
+  warmup_ratio: 0.05
+  lr_scheduler_type: cosine
+  weight_decay: 0.01
+  max_grad_norm: 0.3
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  save_steps: 60
+  eval_steps: 60
+vlm_sft:
+  init_adapter_path: outputs/hf_top_papers_qwen3vl_8b_v2_text_sft_lora
+  max_steps: -1
+  num_train_epochs: 2
+  learning_rate: 3.0e-5
+  assistant_only_loss: false
+  warmup_ratio: 0.05
+  lr_scheduler_type: cosine
+  weight_decay: 0.01
+  max_grad_norm: 0.3
+  max_text_chars: 12000
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  save_steps: 60
+  eval_steps: 60
+dpo:
+  init_adapter_path: outputs/hf_top_papers_qwen3vl_8b_v2_vlm_sft_lora
+  learning_rate: 7.0e-6
+  beta: 0.08
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  save_steps: 60
+  eval_steps: 60
+grpo:
+  enabled_by_default: false
+  gate: run only after reward_audit_by_task_family.json shows positive coverage and non-trivial reward variance
+  init_adapter_path: outputs/hf_top_papers_qwen3vl_8b_v2_dpo_lora
+  max_steps: -1
+  learning_rate: 5.0e-6
+  num_generations: 4
+  num_generations_eval: 2
+  max_completion_length: 768
+  mask_truncated_completions: true
+  reward_weights:
+    label_format: 0.0
+    schema_json: 0.5
+    temporal_fields: 0.8
+    graph_fields: 1.6
+    evidence_grounding: 1.2
+    verdict_exact_match: 1.5
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: all-linear
+quality_gates:
+  full_data_usage: required
+  imagefolder_fallback: disabled
+  leakage_safe_split: required
+  publish_best_not_last: required
+  blind_ab_before_main_upload: required
+  grpo_reward_audit_before_use: required
+notes:
+  - Text-only SFT exists so assistant_only_loss can be applied safely.
+  - Multimodal SFT continues from the text SFT adapter and uses only evidence-bearing rows.
+  - DPO is the main alignment stage; GRPO is optional and short.
+  - Full-data mode keeps all SFT/GRPO export rows and all image refs by default.

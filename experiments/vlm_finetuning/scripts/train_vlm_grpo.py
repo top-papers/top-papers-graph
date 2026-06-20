@@ -97,6 +97,69 @@ class RewardTraceLogger:
 # Global logger
 REWARD_LOGGER = RewardTraceLogger(None)
 
+
+def _mean_std(values: list[float]) -> tuple[float, float]:
+    if not values:
+        return 0.0, 0.0
+    mean = sum(values) / len(values)
+    var = sum((x - mean) ** 2 for x in values) / len(values)
+    return mean, var ** 0.5
+
+
+def audit_reward_trace_file(path: Path, *, min_reward_std: float, max_zero_std_frac: float) -> dict[str, Any]:
+    """Summarize component reward variance after a GRPO run.
+
+    The previous audit showed `eval_frac_reward_zero_std ~= 0.988`, which makes
+    group-relative advantages collapse.  This lightweight post-run audit catches
+    the same failure mode even when TRL's metric names change.
+    """
+    if not path.exists():
+        return {"status": "missing", "path": str(path), "weak_reward": True, "reason": "reward trace file was not created"}
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            reward = obj.get("reward")
+            if isinstance(reward, (int, float)):
+                rows.append(obj)
+    by_component: dict[str, list[float]] = {}
+    by_group: dict[tuple[Any, str, str], list[float]] = {}
+    for obj in rows:
+        component = str(obj.get("component") or "unknown")
+        reward = float(obj["reward"])
+        by_component.setdefault(component, []).append(reward)
+        by_group.setdefault((obj.get("global_step"), component, str(obj.get("sample_id") or "")), []).append(reward)
+    component_stats = {}
+    weak_components = []
+    for component, values in sorted(by_component.items()):
+        mean, std = _mean_std(values)
+        component_stats[component] = {"count": len(values), "mean": round(mean, 6), "std": round(std, 6), "min": min(values), "max": max(values)}
+        if len(values) >= 8 and std < min_reward_std and component not in {"label_exact_match"}:
+            weak_components.append(component)
+    group_stds = []
+    for values in by_group.values():
+        if len(values) > 1:
+            group_stds.append(_mean_std(values)[1])
+    zero_std_frac = (sum(1 for x in group_stds if x < 1e-9) / len(group_stds)) if group_stds else 1.0
+    weak_reward = bool(weak_components) or zero_std_frac > max_zero_std_frac
+    return {
+        "status": "ok",
+        "path": str(path),
+        "rows": len(rows),
+        "component_stats": component_stats,
+        "weak_components": weak_components,
+        "group_count": len(group_stds),
+        "group_zero_std_fraction": round(zero_std_frac, 6),
+        "thresholds": {"min_reward_std": min_reward_std, "max_zero_std_frac": max_zero_std_frac},
+        "weak_reward": weak_reward,
+    }
+
 def norm_text(value: Any) -> str:
     return " ".join(str(value).strip().lower().split()) if value is not None else ""
 
@@ -1054,6 +1117,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--min-pixels', type=int, default=None)
     ap.add_argument('--max-pixels', type=int, default=None)
     ap.add_argument('--warmup-ratio', type=float, default=0.08)
+    ap.add_argument('--beta', type=float, default=0.02, help='KL coefficient for GRPO. Set 0 only for memory-constrained smoke runs.')
     ap.add_argument('--optim', default='adamw_torch_fused')
     ap.add_argument('--lr-scheduler-type', default='cosine')
     ap.add_argument('--weight-decay', type=float, default=0.0)
@@ -1077,6 +1141,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--multi-objective-aggregation', default='normalize_then_sum', choices=['sum_then_normalize', 'normalize_then_sum'])
     ap.add_argument('--reward-weights', type=float, nargs='+', default=[0.0, 1.0, 0.8, 1.2, 0.5, 1.5], help="Weights for: label, schema, temporal, graph, evidence, verdict")
     ap.add_argument('--log-completions', action='store_true')
+    ap.add_argument('--min-reward-std', type=float, default=0.02, help='Warn/fail if post-run reward std is below this threshold for active components.')
+    ap.add_argument('--max-zero-std-frac', type=float, default=0.7, help='Warn/fail if grouped reward zero-std fraction exceeds this threshold.')
+    ap.add_argument('--fail-on-weak-reward', action=argparse.BooleanOptionalAction, default=False, help='Exit non-zero after training if reward trace audit indicates degenerate GRPO signal.')
     ap.add_argument('--dry-run', action='store_true')
     return ap.parse_args()
 
@@ -1173,6 +1240,7 @@ def main() -> None:
         per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         warmup_ratio=args.warmup_ratio,
+        beta=args.beta,
         optim=args.optim,
         lr_scheduler_type=args.lr_scheduler_type,
         weight_decay=args.weight_decay,
@@ -1213,6 +1281,7 @@ def main() -> None:
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
+    run_config['kl_beta'] = args.beta
     
     (args.output_dir / 'planned_run_config.json').write_text(
         json.dumps(run_config, ensure_ascii=False, indent=2, default=str), 
@@ -1253,6 +1322,20 @@ def main() -> None:
         trainer.save_metrics('eval', eval_metrics)
     
     trainer.save_model(args.output_dir)
+
+    reward_audit = audit_reward_trace_file(
+        args.output_dir / 'grpo_reward_trace.jsonl',
+        min_reward_std=args.min_reward_std,
+        max_zero_std_frac=args.max_zero_std_frac,
+    )
+    (args.output_dir / 'post_run_reward_audit.json').write_text(
+        json.dumps(reward_audit, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
+    if reward_audit.get('weak_reward'):
+        print('[train_vlm_grpo] weak reward signal detected; see post_run_reward_audit.json', flush=True)
+        if args.fail_on_weak_reward:
+            raise SystemExit(2)
     processor.save_pretrained(args.output_dir)
 
 if __name__ == '__main__':
