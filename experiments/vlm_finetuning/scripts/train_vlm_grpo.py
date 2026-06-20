@@ -1017,6 +1017,57 @@ def _filter_text_only_vlm_grpo_rows(ds, split_name: str, *, required: bool = Fal
     return filtered
 
 
+
+def cap_grpo_images_for_memory(ds, max_images_per_example: int, split_name: str):
+    if max_images_per_example is None or int(max_images_per_example) <= 0:
+        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    max_images_per_example = int(max_images_per_example)
+    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0}
+    for row in ds:
+        images = []
+        images.extend(_normalize_image_list(row.get('images'), Path('.')))
+        images.extend(_normalize_image_list(row.get('image'), Path('.')))
+        # de-duplicate while preserving order
+        deduped = []
+        for image in images:
+            if image not in deduped:
+                deduped.append(image)
+        extra = max(0, len(deduped) - max_images_per_example)
+        if extra:
+            stats["truncated_rows"] += 1
+            stats["dropped_image_refs"] += extra
+
+    if stats["truncated_rows"] == 0:
+        return ds, stats
+
+    def _cap(example: Dict[str, Any]) -> Dict[str, Any]:
+        example = dict(example)
+        images = []
+        images.extend(_normalize_image_list(example.get('images'), Path('.')))
+        images.extend(_normalize_image_list(example.get('image'), Path('.')))
+        deduped = []
+        for image in images:
+            if image not in deduped:
+                deduped.append(image)
+        kept = deduped[:max_images_per_example]
+        example['images'] = kept
+        if kept:
+            example['image'] = kept[0]
+        elif 'image' in example:
+            example['image'] = None
+        if isinstance(example.get('prompt'), list):
+            example['prompt'] = _align_image_placeholders_to_images(example['prompt'], len(kept))
+        return example
+
+    capped = ds.map(_cap, desc=f'Capping {split_name} GRPO rows to {max_images_per_example} images for GPU memory')
+    print(
+        f'[train_vlm_grpo] training memory guard capped {stats["truncated_rows"]}/{len(ds)} '
+        f'{split_name} rows to at most {max_images_per_example} images '
+        f'({stats["dropped_image_refs"]} image refs omitted from training projection only).',
+        flush=True,
+    )
+    return capped, stats
+
 def _cast_images_column(ds, image_column: str):
     if image_column == 'images':
         features = ds.features.copy()
@@ -1116,6 +1167,12 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--image-column', default='images')
     ap.add_argument('--min-pixels', type=int, default=None)
     ap.add_argument('--max-pixels', type=int, default=None)
+    ap.add_argument(
+        '--max-images-per-example',
+        type=int,
+        default=0,
+        help='Training-time VLM memory guard: keep at most this many images per prompt. 0 disables the projection.',
+    )
     ap.add_argument('--warmup-ratio', type=float, default=0.08)
     ap.add_argument('--beta', type=float, default=0.02, help='KL coefficient for GRPO. Set 0 only for memory-constrained smoke runs.')
     ap.add_argument('--optim', default='adamw_torch_fused')
@@ -1173,9 +1230,15 @@ def main() -> None:
 
     format_grpo = make_grpo_formatter(args.train_file.parent)
     train_ds = train_ds.map(format_grpo)
+    train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    if args.max_images_per_example and int(args.max_images_per_example) > 0:
+        train_ds, train_image_cap_stats = cap_grpo_images_for_memory(train_ds, args.max_images_per_example, 'train')
     if eval_ds is not None:
         eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
         eval_ds = eval_ds.map(make_grpo_formatter(eval_base_dir))
+        if args.max_images_per_example and int(args.max_images_per_example) > 0:
+            eval_ds, eval_image_cap_stats = cap_grpo_images_for_memory(eval_ds, args.max_images_per_example, 'eval')
 
     if args.train_mode == 'vlm' or (args.train_mode == 'auto' and _dataset_has_any_images(train_ds)):
         train_ds = _filter_text_only_vlm_grpo_rows(train_ds, 'train', required=args.train_mode == 'vlm')
@@ -1282,6 +1345,8 @@ def main() -> None:
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     run_config['kl_beta'] = args.beta
+    run_config['train_image_cap_stats'] = train_image_cap_stats
+    run_config['eval_image_cap_stats'] = eval_image_cap_stats
     
     (args.output_dir / 'planned_run_config.json').write_text(
         json.dumps(run_config, ensure_ascii=False, indent=2, default=str), 

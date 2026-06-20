@@ -91,6 +91,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     ap.add_argument(
+        '--max-images-per-example',
+        type=int,
+        default=0,
+        help=(
+            'Training-time multimodal memory guard: keep at most this many images per row. '
+            '0 disables this projection. Dataset build artifacts can still retain all image refs.'
+        ),
+    )
+    ap.add_argument(
         '--ddp-timeout-seconds',
         type=int,
         default=1800,
@@ -622,6 +631,58 @@ def filter_dataset_by_text_chars(ds, max_text_chars: int, split_name: str, *, al
     return filtered, dropped
 
 
+
+def cap_dataset_images_for_memory(ds, max_images_per_example: int, split_name: str):
+    """Apply a training-only image-count cap after full-data export/audit.
+
+    The HF export and derived `*_all.jsonl` files should preserve every image
+    reference for reproducibility.  Qwen3-VL training on g2.2 can still OOM when
+    a single row contains many high-resolution evidence images, so this function
+    creates a memory-safe training projection by keeping the first N images and
+    realigning Qwen image placeholders.  It does not change the raw dataset
+    artifacts created by the builder.
+    """
+    if max_images_per_example is None or int(max_images_per_example) <= 0:
+        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    max_images_per_example = int(max_images_per_example)
+    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0}
+    for row in ds:
+        images = _row_images_for_placeholder_alignment(row)
+        extra = max(0, len(images) - max_images_per_example)
+        if extra:
+            stats["truncated_rows"] += 1
+            stats["dropped_image_refs"] += extra
+
+    if stats["truncated_rows"] == 0:
+        return ds, stats
+
+    def _cap(example: Dict[str, Any]) -> Dict[str, Any]:
+        example = dict(example)
+        images = _row_images_for_placeholder_alignment(example)
+        kept = images[:max_images_per_example]
+        example['images'] = kept
+        if kept:
+            example['image'] = kept[0]
+        elif 'image' in example:
+            example['image'] = None
+        try:
+            messages = _strict_qwen_safe_messages(example.get('messages'))
+            example['messages'] = _align_image_placeholders_to_images(messages, len(kept))
+        except Exception:
+            # Keep the later sanitizer/validator as the single source of truth.
+            pass
+        return example
+
+    capped = ds.map(_cap, desc=f'Capping {split_name} rows to {max_images_per_example} images for GPU memory')
+    if is_main_process():
+        print(
+            f'[train_vlm_sft] training memory guard capped {stats["truncated_rows"]}/{len(ds)} '
+            f'{split_name} rows to at most {max_images_per_example} images '
+            f'({stats["dropped_image_refs"]} image refs omitted from training projection only).',
+            flush=True,
+        )
+    return capped, stats
+
 def _align_image_placeholders_to_images(messages: list[Dict[str, Any]], image_count: int) -> list[Dict[str, Any]]:
     """Make TRL's image placeholders match the top-level images column exactly.
 
@@ -956,12 +1017,15 @@ def main() -> None:
     train_base_dir = Path(train_file_str).parent if train_file_str.endswith(('.json', '.jsonl')) else Path('.')
     train_ds = train_ds.map(lambda example: _normalise_sft_example(example, train_base_dir))
     train_ds = _keep_only_trl_sft_columns(train_ds, args.image_column)
+    train_ds, train_image_cap_stats = cap_dataset_images_for_memory(train_ds, args.max_images_per_example, 'train')
     train_ds = train_ds.map(_sanitize_sft_row_for_trl, with_indices=True, desc='Sanitizing train messages for Qwen3-VL')
     _validate_sft_dataset_for_qwen(train_ds, 'train')
+    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
     if eval_ds is not None:
         eval_base_dir = Path(args.eval_file).parent if args.eval_file else train_base_dir
         eval_ds = eval_ds.map(lambda example: _normalise_sft_example(example, eval_base_dir))
         eval_ds = _keep_only_trl_sft_columns(eval_ds, args.image_column)
+        eval_ds, eval_image_cap_stats = cap_dataset_images_for_memory(eval_ds, args.max_images_per_example, 'eval')
         eval_ds = eval_ds.map(_sanitize_sft_row_for_trl, with_indices=True, desc='Sanitizing eval messages for Qwen3-VL')
         _validate_sft_dataset_for_qwen(eval_ds, 'eval')
 
@@ -1079,6 +1143,8 @@ def main() -> None:
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['dropped_long_train_rows'] = dropped_long_train_rows
     run_config['dropped_long_eval_rows'] = dropped_long_eval_rows
+    run_config['train_image_cap_stats'] = train_image_cap_stats
+    run_config['eval_image_cap_stats'] = eval_image_cap_stats
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
     run_config['native_best_checkpoint_reload_enabled'] = native_best_reload_enabled

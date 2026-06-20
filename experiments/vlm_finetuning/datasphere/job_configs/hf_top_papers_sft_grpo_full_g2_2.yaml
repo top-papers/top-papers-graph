@@ -83,6 +83,8 @@ env:
   - GRPO_DATALOADER_NUM_WORKERS: 2
   - ATTN_IMPLEMENTATION: auto
   - VLM_MAX_PIXELS: 1003520
+  - SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE: '3'
+  - GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE: '2'
   - TOKENIZERS_PARALLELISM: 'false'
   - PYTHONUNBUFFERED: '1'
   - ENABLE_GPU_PREFLIGHT: '1'
@@ -100,6 +102,8 @@ env:
   - HF_HUB_ETAG_TIMEOUT: '1'
   - HF_HUB_DOWNLOAD_TIMEOUT: '120'
   - HF_HUB_DISABLE_TELEMETRY: '1'
+  - PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  - PYTORCH_ALLOC_CONF: expandable_segments:True
 inputs:
 - experiments/vlm_finetuning/
 - data/

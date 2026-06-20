@@ -58,7 +58,15 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--trust-remote-code', action='store_true')
     ap.add_argument('--train-mode', choices=['auto', 'text', 'vlm'], default='auto')
     ap.add_argument('--image-column', default='images')
+    ap.add_argument('--min-pixels', type=int, default=None)
+    ap.add_argument('--max-pixels', type=int, default=None)
     ap.add_argument('--max-length', type=int, default=None)
+    ap.add_argument(
+        '--max-images-per-example',
+        type=int,
+        default=0,
+        help='Training-time VLM memory guard: keep at most this many images per preference row. 0 disables the projection.',
+    )
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Select the best eval checkpoint before final save when eval is enabled.')
     ap.add_argument('--native-load-best-model-at-end', action=argparse.BooleanOptionalAction, default=False, help='Use Transformers native best-checkpoint reload. Default is false for PEFT adapter runs because some PEFT/Transformers combinations fail while reloading LoRA adapters in DDP.')
@@ -273,6 +281,54 @@ def _value_has_image(value) -> bool:
     return True
 
 
+
+def cap_dpo_images_for_memory(ds, max_images_per_example: int, split_name: str):
+    if max_images_per_example is None or int(max_images_per_example) <= 0:
+        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    max_images_per_example = int(max_images_per_example)
+    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0}
+    for row in ds:
+        images = []
+        images.extend(_normalize_image_list(row.get('images'), Path('.')))
+        images.extend(_normalize_image_list(row.get('image'), Path('.')))
+        deduped = []
+        for image in images:
+            if image not in deduped:
+                deduped.append(image)
+        extra = max(0, len(deduped) - max_images_per_example)
+        if extra:
+            stats["truncated_rows"] += 1
+            stats["dropped_image_refs"] += extra
+    if stats["truncated_rows"] == 0:
+        return ds, stats
+
+    def _cap(example):
+        example = dict(example)
+        images = []
+        images.extend(_normalize_image_list(example.get('images'), Path('.')))
+        images.extend(_normalize_image_list(example.get('image'), Path('.')))
+        deduped = []
+        for image in images:
+            if image not in deduped:
+                deduped.append(image)
+        kept = deduped[:max_images_per_example]
+        example['images'] = kept
+        if kept:
+            example['image'] = kept[0]
+        elif 'image' in example:
+            example['image'] = None
+        return example
+
+    capped = ds.map(_cap, desc=f'Capping {split_name} DPO rows to {max_images_per_example} images for GPU memory')
+    if is_main_process():
+        print(
+            f'[train_vlm_dpo] training memory guard capped {stats["truncated_rows"]}/{len(ds)} '
+            f'{split_name} rows to at most {max_images_per_example} images '
+            f'({stats["dropped_image_refs"]} image refs omitted from training projection only).',
+            flush=True,
+        )
+    return capped, stats
+
 def _cast_images_column(ds, image_column: str):
     if image_column == 'images':
         features = ds.features.copy()
@@ -315,15 +371,31 @@ def main() -> None:
     eval_ds = ds.get('eval')
 
     train_ds = train_ds.map(make_dpo_formatter(args.train_file.parent))
+    train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    if args.max_images_per_example and int(args.max_images_per_example) > 0:
+        train_ds, train_image_cap_stats = cap_dpo_images_for_memory(train_ds, args.max_images_per_example, 'train')
     if eval_ds is not None:
         eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
         eval_ds = eval_ds.map(make_dpo_formatter(eval_base_dir))
+        if args.max_images_per_example and int(args.max_images_per_example) > 0:
+            eval_ds, eval_image_cap_stats = cap_dpo_images_for_memory(eval_ds, args.max_images_per_example, 'eval')
 
     train_ds, actual_mode = maybe_prepare_dataset(train_ds, args.image_column, args.train_mode)
     if eval_ds is not None:
         eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
 
-    processor = AutoProcessor.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
+    processor_kwargs = {'trust_remote_code': args.trust_remote_code}
+    if args.min_pixels is not None:
+        processor_kwargs['min_pixels'] = args.min_pixels
+    if args.max_pixels is not None:
+        processor_kwargs['max_pixels'] = args.max_pixels
+    try:
+        processor = AutoProcessor.from_pretrained(args.model_id, **processor_kwargs)
+    except TypeError:
+        processor_kwargs.pop('min_pixels', None)
+        processor_kwargs.pop('max_pixels', None)
+        processor = AutoProcessor.from_pretrained(args.model_id, **processor_kwargs)
     tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -400,6 +472,8 @@ def main() -> None:
     run_config['resolved_mode'] = actual_mode
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
+    run_config['train_image_cap_stats'] = train_image_cap_stats
+    run_config['eval_image_cap_stats'] = eval_image_cap_stats
     run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
     run_config['native_best_checkpoint_reload_enabled'] = native_best_reload_enabled
     run_config['best_checkpoint_selection_mode'] = 'native_load' if native_best_reload_enabled else ('safe_checkpoint_file_copy' if args.load_best_model_at_end and eval_ds is not None else 'disabled')

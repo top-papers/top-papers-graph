@@ -22,6 +22,12 @@ export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
 # optional README/model-card side effect by default; it can fail on locale quirks
 # and is not needed for checkpoints or adapter archives.
 export DISABLE_TRL_MODEL_CARD="${DISABLE_TRL_MODEL_CARD:-1}"
+# The full-data VLM rows have variable image counts and image sizes. PyTorch's
+# CUDA allocator can fragment memory on such workloads; expandable segments are
+# recommended for changing allocation sizes and match the OOM hint emitted by
+# the failed DataSphere run.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-$PYTORCH_CUDA_ALLOC_CONF}"
 
 DATASET_ID="${HF_DATASET_ID:-top-papers/top-papers-graph-experts-data}"
 DATASET_SPLIT="${HF_DATASET_SPLIT:-validation}"
@@ -83,6 +89,11 @@ fi
 HF_DOWNLOAD_MAX_WORKERS="${HF_DOWNLOAD_MAX_WORKERS:-2}"
 VLM_MIN_PIXELS="${VLM_MIN_PIXELS:-}"
 VLM_MAX_PIXELS="${VLM_MAX_PIXELS:-1003520}"
+# Keep full raw/export data, but use a g2.2-safe training projection.  The
+# previous full-fidelity attempt kept all images in every row and OOMed on the
+# first SFT step.  Set these to 0 only on larger-memory configs.
+SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE="${SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
+GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-2}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-auto}"
 
 prefetch_base_model_and_enable_offline_hub() {
@@ -463,6 +474,7 @@ run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/sc
   --weight-decay "${SFT_WEIGHT_DECAY:-0.01}" \
   --max-grad-norm "${SFT_MAX_GRAD_NORM:-0.3}" \
   --max-text-chars "${SFT_MAX_TEXT_CHARS:-0}" \
+  --max-images-per-example "$SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
   --ddp-timeout-seconds "${SFT_DDP_TIMEOUT_SECONDS:-7200}" \
   --lora-r "${SFT_LORA_R:-32}" \
   --lora-alpha "${SFT_LORA_ALPHA:-64}" \
@@ -508,6 +520,7 @@ run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/s
   "${GRPO_DDP_ARGS[@]}" \
   --attn-implementation "$ATTN_IMPLEMENTATION" \
   "${PIXEL_ARGS[@]}" \
+  --max-images-per-example "$GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
   --learning-rate "${GRPO_LR:-1e-5}" \
   --warmup-ratio "${GRPO_WARMUP_RATIO:-0.08}" \
   --lr-scheduler-type "${GRPO_LR_SCHEDULER:-cosine}" \

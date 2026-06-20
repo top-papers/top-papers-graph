@@ -10,6 +10,8 @@ export LC_ALL="${LC_ALL:-C.UTF-8}"
 export PYTHONUTF8="${PYTHONUTF8:-1}"
 export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
 export DISABLE_TRL_MODEL_CARD="${DISABLE_TRL_MODEL_CARD:-1}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-$PYTORCH_CUDA_ALLOC_CONF}"
 
 DATASET_ID="${HF_DATASET_ID:-top-papers/top-papers-graph-experts-data}"
 DATASET_REVISION="${HF_DATASET_REVISION:-main}"
@@ -23,6 +25,11 @@ DPO_DIR="outputs/${OUT_PREFIX}_dpo_lora"
 GRPO_DIR="outputs/${OUT_PREFIX}_grpo_lora"
 REPORT_DIR="reports/${OUT_PREFIX}_datasphere"
 mkdir -p "$REPORT_DIR" outputs data/derived
+# G2.2 memory-safe training projection. Raw data/audit files still preserve all
+# rows and all image refs when MAX_IMAGES_PER_EXAMPLE_*=0.
+SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE="${SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
+DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
+GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-2}"
 
 prefetch_base_model_and_enable_offline_hub() {
   if [ "${PREFETCH_BASE_MODEL:-1}" = "1" ]; then
@@ -180,6 +187,7 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_sft.py \
   --weight-decay "${VLM_SFT_WEIGHT_DECAY:-0.01}" \
   --max-grad-norm "${VLM_SFT_MAX_GRAD_NORM:-0.3}" \
   --max-text-chars "${SFT_MAX_TEXT_CHARS:-12000}" \
+  --max-images-per-example "$SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
   --max-steps "${VLM_SFT_MAX_STEPS:--1}" \
   --num-train-epochs "${VLM_SFT_EPOCHS:-2}" \
   --per-device-train-batch-size "${SFT_PER_DEVICE_BATCH:-1}" \
@@ -202,6 +210,8 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --output-dir "$DPO_DIR" \
   --train-mode vlm \
   --image-column images \
+  --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
+  --max-images-per-example "$DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
   --bf16 --gradient-checkpointing \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --learning-rate "${DPO_LR:-7e-6}" \
@@ -230,6 +240,7 @@ if [ "${ENABLE_GRPO_POLISH:-0}" = "1" ]; then
     --bf16 --tf32 --gradient-checkpointing \
     --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
     --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
+    --max-images-per-example "$GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
     --learning-rate "${GRPO_LR:-5e-6}" \
     --warmup-ratio "${GRPO_WARMUP_RATIO:-0.05}" \
     --beta "${GRPO_BETA:-0.02}" \
