@@ -44,7 +44,7 @@ HF_UPLOAD_BUNDLE_DIR="${HF_UPLOAD_BUNDLE_DIR:-$REPORT_DIR/hf_upload_bundle}"
 BUDGET_RUB="${BUDGET_RUB:-100000}"
 BUDGET_RESERVE_RUB="${BUDGET_RESERVE_RUB:-5000}"
 G2_2_RUB_PER_HOUR="${G2_2_RUB_PER_HOUR:-1085.76}"
-MAX_SFT_STEPS="${MAX_SFT_STEPS:-480}"
+MAX_SFT_STEPS="${MAX_SFT_STEPS:--1}"
 MAX_GRPO_STEPS="${MAX_GRPO_STEPS:-160}"
 SFT_TIMEOUT_HOURS="${SFT_TIMEOUT_HOURS:-48}"
 GRPO_TIMEOUT_HOURS="${GRPO_TIMEOUT_HOURS:-35}"
@@ -52,8 +52,8 @@ DATA_TIMEOUT_HOURS="${DATA_TIMEOUT_HOURS:-3}"
 HF_UPLOAD_TIMEOUT_HOURS="${HF_UPLOAD_TIMEOUT_HOURS:-1}"
 BUDGET_SHUTDOWN_MARGIN_SECONDS="${BUDGET_SHUTDOWN_MARGIN_SECONDS:-900}"
 EVAL_RATIO="${EVAL_RATIO:-0.10}"
-MAX_IMAGES_PER_EXAMPLE_SFT="${MAX_IMAGES_PER_EXAMPLE_SFT:-3}"
-MAX_IMAGES_PER_EXAMPLE_GRPO="${MAX_IMAGES_PER_EXAMPLE_GRPO:-2}"
+MAX_IMAGES_PER_EXAMPLE_SFT="${MAX_IMAGES_PER_EXAMPLE_SFT:-0}"
+MAX_IMAGES_PER_EXAMPLE_GRPO="${MAX_IMAGES_PER_EXAMPLE_GRPO:-0}"
 # Smoke/debug caps. If the smoke config is accidentally not propagated by an
 # older DataSphere CLI/cache, still keep OUT_PREFIX=*smoke* runs small enough to
 # avoid downloading the whole HF export asset tree.
@@ -84,6 +84,26 @@ HF_DOWNLOAD_MAX_WORKERS="${HF_DOWNLOAD_MAX_WORKERS:-2}"
 VLM_MIN_PIXELS="${VLM_MIN_PIXELS:-}"
 VLM_MAX_PIXELS="${VLM_MAX_PIXELS:-1003520}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-auto}"
+
+prefetch_base_model_and_enable_offline_hub() {
+  if [ "${PREFETCH_BASE_MODEL:-1}" = "1" ]; then
+    echo "[datasphere-pipeline] prefetching base model into HF cache before offline training: $BASE_MODEL"
+    BASE_MODEL="$BASE_MODEL" BASE_MODEL_REVISION="${BASE_MODEL_REVISION:-main}" python - <<'MODEL_PREFETCH_PY'
+import os
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id=os.environ["BASE_MODEL"],
+    repo_type="model",
+    revision=os.environ.get("BASE_MODEL_REVISION") or None,
+)
+MODEL_PREFETCH_PY
+  fi
+  if [ "${ENABLE_TRAINING_HF_OFFLINE:-1}" = "1" ]; then
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    echo "[datasphere-pipeline] enabled HF_HUB_OFFLINE=1 for training stages after prefetch."
+  fi
+}
 
 append_optional_bool_flag() {
   local var_name="$1"
@@ -363,6 +383,7 @@ upload_to_huggingface() {
     echo "[datasphere-pipeline] Hugging Face upload disabled: HF_UPLOAD_AFTER_TRAINING=$HF_UPLOAD_AFTER_TRAINING"
     return 0
   fi
+  unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE
   echo "[datasphere-pipeline] uploading fine-tuned model and artifacts to Hugging Face: $HF_REPO_ID"
   run_timeout_budgeted "$HF_UPLOAD_TIMEOUT_HOURS" python experiments/vlm_finetuning/scripts/upload_hf_finetuned_artifacts.py \
     --repo-id "$HF_REPO_ID" \
@@ -419,6 +440,8 @@ run_timeout_budgeted "$DATA_TIMEOUT_HOURS" python experiments/vlm_finetuning/scr
   "${DATASET_SAMPLE_ARGS[@]}" \
   --hf-download-max-workers "$HF_DOWNLOAD_MAX_WORKERS" \
   --seed 42
+
+prefetch_base_model_and_enable_offline_hub
 
 run_torchrun_timeout_budgeted "$SFT_TIMEOUT_HOURS" experiments/vlm_finetuning/scripts/train_vlm_sft.py \
   --model-id "$BASE_MODEL" \

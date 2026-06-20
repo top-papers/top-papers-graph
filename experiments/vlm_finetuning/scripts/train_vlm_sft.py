@@ -6,6 +6,7 @@ import inspect
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict
 
@@ -107,7 +108,8 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--save-adapter-only', action='store_true')
-    ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Load the checkpoint with the best eval metric before final save when eval is enabled.')
+    ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Select the checkpoint with the best eval metric before final save when eval is enabled.')
+    ap.add_argument('--native-load-best-model-at-end', action=argparse.BooleanOptionalAction, default=False, help='Use Transformers native best-checkpoint reload. Default is false for PEFT adapter runs because some PEFT/Transformers combinations fail while reloading LoRA adapters in DDP.')
     ap.add_argument('--metric-for-best-model', default='eval_loss')
     ap.add_argument('--greater-is-better', action=argparse.BooleanOptionalAction, default=False)
     ap.add_argument('--dry-run', action='store_true')
@@ -145,6 +147,128 @@ def get_local_rank() -> int:
 
 def is_main_process() -> bool:
     return int(os.environ.get('RANK', '0')) == 0
+
+
+def _truthy_env(name: str, default: str = '0') -> bool:
+    return os.environ.get(name, default).lower() in {'1', 'true', 'yes', 'on'}
+
+
+def is_peft_adapter_model(model: Any) -> bool:
+    return hasattr(model, 'peft_config') or model.__class__.__name__.lower().startswith('peft')
+
+
+def should_native_load_best_model(args: argparse.Namespace, eval_ds: Any, model: Any) -> bool:
+    """Avoid PEFT/Transformers DDP best-checkpoint reload incompatibilities.
+
+    In DataSphere logs, native Trainer._load_best_model() crashed at the end of
+    an otherwise healthy LoRA SFT run because PEFT tried to import
+    `EmbeddingParallel` from the installed Transformers tensor_parallel module.
+    We therefore keep best-checkpoint selection enabled, but default to a safe
+    post-train file copy for PEFT adapters instead of native model.load_adapter().
+    """
+    if not (bool(args.load_best_model_at_end) and eval_ds is not None):
+        return False
+    if bool(getattr(args, 'native_load_best_model_at_end', False)):
+        return True
+    if _truthy_env('USE_NATIVE_PEFT_BEST_MODEL_RELOAD', '0'):
+        return True
+    return not is_peft_adapter_model(model)
+
+
+def copy_checkpoint_artifacts(checkpoint_dir: str | Path, output_dir: str | Path, *, prefix: str) -> dict[str, Any]:
+    """Copy a best checkpoint's lightweight reload artifacts to output_dir.
+
+    This intentionally avoids calling PeftModel.load_adapter(), which can hit a
+    PEFT/Transformers tensor-parallel import mismatch on some managed runtimes.
+    It copies adapter/config/tokenizer-style files from the best checkpoint and
+    skips large optimizer/scheduler/RNG state files.
+    """
+    src = Path(checkpoint_dir)
+    dst = Path(output_dir)
+    manifest: dict[str, Any] = {
+        'source_checkpoint': str(src),
+        'output_dir': str(dst),
+        'copied_files': [],
+        'skipped_files': [],
+        'status': 'not_started',
+        'mode': 'safe_checkpoint_file_copy',
+    }
+    if not src.exists() or not src.is_dir():
+        manifest['status'] = 'missing_checkpoint'
+        return manifest
+    dst.mkdir(parents=True, exist_ok=True)
+    skip_exact = {
+        'optimizer.pt',
+        'scheduler.pt',
+        'scaler.pt',
+        'trainer_state.json',
+        'training_args.bin',
+    }
+    skip_prefixes = ('rng_state',)
+    for item in sorted(src.iterdir()):
+        name = item.name
+        if name in skip_exact or any(name.startswith(prefix) for prefix in skip_prefixes):
+            manifest['skipped_files'].append(name)
+            continue
+        if item.is_file():
+            shutil.copy2(item, dst / name)
+            manifest['copied_files'].append(name)
+        elif item.is_dir() and name in {'tokenizer', 'processor'}:
+            target = dst / name
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(item, target)
+            manifest['copied_files'].append(name + '/')
+        else:
+            manifest['skipped_files'].append(name + ('/' if item.is_dir() else ''))
+    manifest['status'] = 'copied' if manifest['copied_files'] else 'no_reload_artifacts_found'
+    (dst / f'{prefix}_best_checkpoint_manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+        encoding='utf-8',
+    )
+    return manifest
+
+
+def save_best_or_current_model(
+    trainer: Any,
+    model: Any,
+    processor: Any,
+    output_dir: Path,
+    *,
+    save_adapter_only: bool,
+    native_best_reload_enabled: bool,
+    prefix: str,
+) -> dict[str, Any]:
+    """Save final artifacts without relying on PEFT's native best reload path."""
+    best_checkpoint = getattr(getattr(trainer, 'state', None), 'best_model_checkpoint', None)
+    manifest: dict[str, Any] = {
+        'best_model_checkpoint': best_checkpoint,
+        'native_best_reload_enabled': native_best_reload_enabled,
+        'save_adapter_only': save_adapter_only,
+        'status': 'not_started',
+    }
+    if best_checkpoint and not native_best_reload_enabled:
+        manifest.update(copy_checkpoint_artifacts(best_checkpoint, output_dir, prefix=prefix))
+        try:
+            processor.save_pretrained(output_dir)
+        except Exception as exc:
+            manifest['processor_save_error'] = str(exc)
+        if manifest.get('status') == 'copied':
+            return manifest
+
+    if save_adapter_only and hasattr(model, 'save_pretrained'):
+        model.save_pretrained(output_dir)
+        processor.save_pretrained(output_dir)
+        manifest['status'] = 'saved_current_adapter'
+    else:
+        trainer.save_model(output_dir)
+        processor.save_pretrained(output_dir)
+        manifest['status'] = 'trainer_save_model'
+    (output_dir / f'{prefix}_best_checkpoint_manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+        encoding='utf-8',
+    )
+    return manifest
 
 
 
@@ -928,10 +1052,11 @@ def main() -> None:
         'dataloader_pin_memory': True,
         'ddp_timeout': args.ddp_timeout_seconds,
         'ddp_find_unused_parameters': resolve_ddp_find_unused_parameters(args, actual_mode),
-        'load_best_model_at_end': bool(args.load_best_model_at_end and eval_ds is not None),
+        'load_best_model_at_end': should_native_load_best_model(args, eval_ds, model),
         'metric_for_best_model': args.metric_for_best_model,
         'greater_is_better': args.greater_is_better,
     }
+    native_best_reload_enabled = bool(sft_kwargs['load_best_model_at_end'])
     sft_args = SFTConfig(**_supports_kwargs(SFTConfig, sft_kwargs))
     if actual_mode == 'vlm' and sft_args.max_length is not None:
         raise ValueError('For VLM training use max_length=None to avoid truncating image tokens.')
@@ -956,6 +1081,8 @@ def main() -> None:
     run_config['dropped_long_eval_rows'] = dropped_long_eval_rows
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
+    run_config['native_best_checkpoint_reload_enabled'] = native_best_reload_enabled
+    run_config['best_checkpoint_selection_mode'] = 'native_load' if native_best_reload_enabled else ('safe_checkpoint_file_copy' if args.load_best_model_at_end and eval_ds is not None else 'disabled')
     (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 
     if args.dry_run:
@@ -969,12 +1096,17 @@ def main() -> None:
         eval_metrics = trainer.evaluate()
         eval_metrics['eval_examples'] = len(eval_ds)
         trainer.save_metrics('eval', eval_metrics)
-    if args.save_adapter_only and hasattr(model, 'save_pretrained'):
-        model.save_pretrained(args.output_dir)
-        processor.save_pretrained(args.output_dir)
-    else:
-        trainer.save_model(args.output_dir)
-        processor.save_pretrained(args.output_dir)
+    save_manifest = save_best_or_current_model(
+        trainer,
+        model,
+        processor,
+        args.output_dir,
+        save_adapter_only=bool(args.save_adapter_only and hasattr(model, 'save_pretrained')),
+        native_best_reload_enabled=native_best_reload_enabled,
+        prefix='sft',
+    )
+    if is_main_process():
+        print(f'[train_vlm_sft] final save status: {save_manifest.get("status")}; best checkpoint: {save_manifest.get("best_model_checkpoint")}', flush=True)
 
 
 if __name__ == '__main__':

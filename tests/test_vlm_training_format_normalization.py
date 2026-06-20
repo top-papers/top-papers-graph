@@ -564,3 +564,26 @@ def test_sft_text_char_guard_can_be_disabled(monkeypatch):
 
     assert filtered is ds
     assert dropped == 0
+
+
+def test_sft_peft_best_checkpoint_uses_safe_copy_by_default(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_best_checkpoint_test")
+
+    args = types.SimpleNamespace(load_best_model_at_end=True, native_load_best_model_at_end=False)
+    model = types.SimpleNamespace(peft_config={"default": object()})
+
+    assert mod.should_native_load_best_model(args, object(), model) is False
+
+
+def test_dpo_peft_best_checkpoint_uses_safe_copy_by_default(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    trl = sys.modules["trl"]
+    trl.DPOConfig = _Dummy
+    trl.DPOTrainer = _Dummy
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_dpo.py", "train_vlm_dpo_best_checkpoint_test")
+
+    args = types.SimpleNamespace(load_best_model_at_end=True, native_load_best_model_at_end=False)
+    model = types.SimpleNamespace(peft_config={"default": object()})
+
+    assert mod.should_native_load_best_model(args, object(), model) is False

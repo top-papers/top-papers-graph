@@ -5,7 +5,9 @@ import argparse
 import inspect
 import json
 import os
+import shutil
 from pathlib import Path
+from typing import Any
 
 from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
@@ -58,7 +60,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--image-column', default='images')
     ap.add_argument('--max-length', type=int, default=None)
     ap.add_argument('--resume-from-checkpoint', default=None)
-    ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Load the best eval checkpoint before final save when eval is enabled.')
+    ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Select the best eval checkpoint before final save when eval is enabled.')
+    ap.add_argument('--native-load-best-model-at-end', action=argparse.BooleanOptionalAction, default=False, help='Use Transformers native best-checkpoint reload. Default is false for PEFT adapter runs because some PEFT/Transformers combinations fail while reloading LoRA adapters in DDP.')
     ap.add_argument('--metric-for-best-model', default='eval_loss')
     ap.add_argument('--greater-is-better', action=argparse.BooleanOptionalAction, default=False)
     ap.add_argument('--dry-run', action='store_true')
@@ -79,6 +82,98 @@ def _supports_kwargs(callable_obj, kwargs):
 
 def is_main_process() -> bool:
     return int(os.environ.get('RANK', '0')) == 0
+
+
+def _truthy_env(name: str, default: str = '0') -> bool:
+    return os.environ.get(name, default).lower() in {'1', 'true', 'yes', 'on'}
+
+
+def is_peft_adapter_model(model: Any) -> bool:
+    return hasattr(model, 'peft_config') or model.__class__.__name__.lower().startswith('peft')
+
+
+def should_native_load_best_model(args: argparse.Namespace, eval_ds: Any, model: Any) -> bool:
+    if not (bool(args.load_best_model_at_end) and eval_ds is not None):
+        return False
+    if bool(getattr(args, 'native_load_best_model_at_end', False)):
+        return True
+    if _truthy_env('USE_NATIVE_PEFT_BEST_MODEL_RELOAD', '0'):
+        return True
+    return not is_peft_adapter_model(model)
+
+
+def copy_checkpoint_artifacts(checkpoint_dir: str | Path, output_dir: str | Path, *, prefix: str) -> dict[str, Any]:
+    src = Path(checkpoint_dir)
+    dst = Path(output_dir)
+    manifest: dict[str, Any] = {
+        'source_checkpoint': str(src),
+        'output_dir': str(dst),
+        'copied_files': [],
+        'skipped_files': [],
+        'status': 'not_started',
+        'mode': 'safe_checkpoint_file_copy',
+    }
+    if not src.exists() or not src.is_dir():
+        manifest['status'] = 'missing_checkpoint'
+        return manifest
+    dst.mkdir(parents=True, exist_ok=True)
+    skip_exact = {'optimizer.pt', 'scheduler.pt', 'scaler.pt', 'trainer_state.json', 'training_args.bin'}
+    skip_prefixes = ('rng_state',)
+    for item in sorted(src.iterdir()):
+        name = item.name
+        if name in skip_exact or any(name.startswith(prefix) for prefix in skip_prefixes):
+            manifest['skipped_files'].append(name)
+            continue
+        if item.is_file():
+            shutil.copy2(item, dst / name)
+            manifest['copied_files'].append(name)
+        elif item.is_dir() and name in {'tokenizer', 'processor'}:
+            target = dst / name
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(item, target)
+            manifest['copied_files'].append(name + '/')
+        else:
+            manifest['skipped_files'].append(name + ('/' if item.is_dir() else ''))
+    manifest['status'] = 'copied' if manifest['copied_files'] else 'no_reload_artifacts_found'
+    (dst / f'{prefix}_best_checkpoint_manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+        encoding='utf-8',
+    )
+    return manifest
+
+
+def save_best_or_current_model(
+    trainer: Any,
+    model: Any,
+    processor: Any,
+    output_dir: Path,
+    *,
+    native_best_reload_enabled: bool,
+    prefix: str,
+) -> dict[str, Any]:
+    best_checkpoint = getattr(getattr(trainer, 'state', None), 'best_model_checkpoint', None)
+    manifest: dict[str, Any] = {
+        'best_model_checkpoint': best_checkpoint,
+        'native_best_reload_enabled': native_best_reload_enabled,
+        'status': 'not_started',
+    }
+    if best_checkpoint and not native_best_reload_enabled:
+        manifest.update(copy_checkpoint_artifacts(best_checkpoint, output_dir, prefix=prefix))
+        try:
+            processor.save_pretrained(output_dir)
+        except Exception as exc:
+            manifest['processor_save_error'] = str(exc)
+        if manifest.get('status') == 'copied':
+            return manifest
+    trainer.save_model(output_dir)
+    processor.save_pretrained(output_dir)
+    manifest['status'] = 'trainer_save_model'
+    (output_dir / f'{prefix}_best_checkpoint_manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+        encoding='utf-8',
+    )
+    return manifest
 
 
 def disable_trl_model_card_creation(trainer, reason: str) -> None:
@@ -278,10 +373,11 @@ def main() -> None:
         logging_strategy='steps',
         beta=args.beta,
         loss_type=args.loss_type,
-        load_best_model_at_end=bool(args.load_best_model_at_end and eval_ds is not None),
+        load_best_model_at_end=should_native_load_best_model(args, eval_ds, model),
         metric_for_best_model=args.metric_for_best_model,
         greater_is_better=args.greater_is_better,
     )
+    native_best_reload_enabled = bool(dpo_kwargs['load_best_model_at_end'])
     dpo_args = DPOConfig(**_supports_kwargs(DPOConfig, dpo_kwargs))
     if actual_mode == 'vlm' and dpo_args.max_length is not None:
         raise ValueError('For VLM DPO use max_length=None to avoid truncating image tokens.')
@@ -305,6 +401,8 @@ def main() -> None:
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
+    run_config['native_best_checkpoint_reload_enabled'] = native_best_reload_enabled
+    run_config['best_checkpoint_selection_mode'] = 'native_load' if native_best_reload_enabled else ('safe_checkpoint_file_copy' if args.load_best_model_at_end and eval_ds is not None else 'disabled')
     (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2), encoding='utf-8')
 
     if args.dry_run:
@@ -318,8 +416,16 @@ def main() -> None:
         eval_metrics = trainer.evaluate()
         eval_metrics['eval_examples'] = len(eval_ds)
         trainer.save_metrics('eval', eval_metrics)
-    trainer.save_model(args.output_dir)
-    processor.save_pretrained(args.output_dir)
+    save_manifest = save_best_or_current_model(
+        trainer,
+        model,
+        processor,
+        args.output_dir,
+        native_best_reload_enabled=native_best_reload_enabled,
+        prefix='dpo',
+    )
+    if is_main_process():
+        print(f'[train_vlm_dpo] final save status: {save_manifest.get("status")}; best checkpoint: {save_manifest.get("best_model_checkpoint")}', flush=True)
 
 
 if __name__ == '__main__':

@@ -171,6 +171,19 @@ def test_datasphere_vlm_jobs_force_utf8_locale_and_disable_trl_model_card() -> N
         assert str(env["DISABLE_TRL_MODEL_CARD"]) == "1"
 
 
+def test_v2_config_prefetches_model_and_disables_training_hub_calls() -> None:
+    path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vars_list = cfg.get("env", {}).get("vars", [])
+    env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+    assert str(env["PREFETCH_BASE_MODEL"]) == "1"
+    assert str(env["ENABLE_TRAINING_HF_OFFLINE"]) == "1"
+    assert int(env["MAX_IMAGES_PER_EXAMPLE_SFT"]) == 0
+    assert int(env["MAX_IMAGES_PER_EXAMPLE_GRPO"]) == 0
+    assert int(env["SFT_MAX_TEXT_CHARS"]) == 0
+
+
 def test_vlm_trainers_disable_optional_trl_model_card_creation_by_default() -> None:
     for rel in [
         "experiments/vlm_finetuning/scripts/train_vlm_sft.py",
@@ -190,14 +203,16 @@ def test_vlm_pipeline_creates_placeholder_declared_outputs_after_early_failure()
     assert "not_run_or_incomplete" in script
 
 
-def test_full_sft_config_has_ddp_straggler_guards() -> None:
+def test_full_sft_config_has_full_data_and_ddp_straggler_settings() -> None:
     path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_grpo_full_g2_2.yaml"
     cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
     vars_list = cfg.get("env", {}).get("vars", [])
     env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
 
-    assert int(env["SFT_MAX_TEXT_CHARS"]) >= 8000
-    assert int(env["SFT_MAX_TEXT_CHARS"]) <= 20000
+    assert int(env["SFT_MAX_TEXT_CHARS"]) == 0
+    assert int(env["MAX_IMAGES_PER_EXAMPLE_SFT"]) == 0
+    assert int(env["MAX_IMAGES_PER_EXAMPLE_GRPO"]) == 0
+    assert int(env["MAX_SFT_STEPS"]) == -1
     assert int(env["SFT_DDP_TIMEOUT_SECONDS"]) >= 7200
     assert int(env["SFT_DATALOADER_NUM_WORKERS"]) <= 1
 

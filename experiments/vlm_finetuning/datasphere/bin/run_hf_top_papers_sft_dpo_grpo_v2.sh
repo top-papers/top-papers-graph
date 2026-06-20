@@ -24,6 +24,26 @@ GRPO_DIR="outputs/${OUT_PREFIX}_grpo_lora"
 REPORT_DIR="reports/${OUT_PREFIX}_datasphere"
 mkdir -p "$REPORT_DIR" outputs data/derived
 
+prefetch_base_model_and_enable_offline_hub() {
+  if [ "${PREFETCH_BASE_MODEL:-1}" = "1" ]; then
+    echo "[datasphere-pipeline] prefetching base model into HF cache before offline training: $BASE_MODEL"
+    BASE_MODEL="$BASE_MODEL" BASE_MODEL_REVISION="${BASE_MODEL_REVISION:-main}" python - <<'MODEL_PREFETCH_PY'
+import os
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id=os.environ["BASE_MODEL"],
+    repo_type="model",
+    revision=os.environ.get("BASE_MODEL_REVISION") or None,
+)
+MODEL_PREFETCH_PY
+  fi
+  if [ "${ENABLE_TRAINING_HF_OFFLINE:-1}" = "1" ]; then
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    echo "[datasphere-pipeline] enabled HF_HUB_OFFLINE=1 for training stages after prefetch."
+  fi
+}
+
 NPROC="$(python_gpu_count)"
 if [ -z "$NPROC" ] || [ "$NPROC" -lt 1 ]; then NPROC=1; fi
 
@@ -107,6 +127,8 @@ python experiments/vlm_finetuning/scripts/audit_full_data_usage.py \
   --data-dir "$DATA_DIR" \
   --out "$DATA_DIR/full_data_usage_report.json" \
   "${FULL_DATA_AUDIT_ARGS[@]}"
+
+prefetch_base_model_and_enable_offline_hub
 
 # 1) Text-only SFT: this is the stage where assistant_only_loss is effective.
 torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_sft.py \
