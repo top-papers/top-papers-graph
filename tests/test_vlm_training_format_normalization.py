@@ -617,3 +617,28 @@ def test_grpo_canonical_verdict_accepts_common_aliases(monkeypatch):
     )
 
     assert rewards == [1.0, 1.0]
+
+
+def test_grpo_task_aware_reward_processing_imports_math_for_group_norm(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script(
+        "experiments/vlm_finetuning/scripts/train_vlm_grpo.py",
+        "train_vlm_grpo_math_import_regression_test",
+    )
+
+    rewards = mod.apply_task_aware_reward_processing(
+        "schema_validity",
+        [0.0, 1.0, 0.5, 0.5],
+        sample_id=["same", "same", "other", "other"],
+        task_family=[
+            "assertion_review_rl",
+            "assertion_review_rl",
+            "assertion_review_rl",
+            "assertion_review_rl",
+        ],
+        normalize=True,
+    )
+
+    assert len(rewards) == 4
+    assert rewards[0] < rewards[1]
+    assert all(-1.0 <= value <= 1.0 for value in rewards)
