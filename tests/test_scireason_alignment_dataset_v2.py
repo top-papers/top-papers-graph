@@ -39,7 +39,8 @@ def test_relevance_image_selection_prefers_evidence_figure(monkeypatch):
     raw = ["assets/page_001.png", "assets/figure_7_panel.png", "assets/table_2.png"]
     chosen, meta = mod.select_relevant_images(raw, row, max_images=1)
     assert chosen == ["assets/figure_7_panel.png"]
-    assert meta["policy"] == "relevance_top_k_then_original_order"
+    assert meta["policy"] == "dynamic_relevance_top_k_then_original_order"
+    assert meta["dynamic_cap"] == 1
 
 
 def test_dpo_rows_are_built_from_assistant_messages(monkeypatch):
@@ -55,9 +56,10 @@ def test_dpo_rows_are_built_from_assistant_messages(monkeypatch):
         }
     ]
     dpo = mod.make_dpo_rows_from_sft(rows, synthetic_negatives=True)
-    assert len(dpo) == 1
+    assert len(dpo) >= 2
     assert dpo[0]["chosen"] == '{"verdict":"reject"}'
-    assert dpo[0]["metadata"]["synthetic_negative"] is True
+    assert {row["metadata"]["pair_type"] for row in dpo}.issuperset({"verdict_flip", "evidence_drop"})
+    assert all("pair_hardness" in row["metadata"] for row in dpo)
 
 
 def test_dpo_rows_include_grpo_reward_target_bootstrap(monkeypatch):

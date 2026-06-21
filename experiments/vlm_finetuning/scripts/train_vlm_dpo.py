@@ -44,9 +44,15 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--eval-steps', type=int, default=100)
     ap.add_argument('--save-total-limit', type=int, default=2)
     ap.add_argument('--seed', type=int, default=42)
-    ap.add_argument('--beta', type=float, default=0.1)
-    ap.add_argument('--loss-type', default='sigmoid')
-    ap.add_argument('--label-smoothing', type=float, default=0.0, help='DPO noisy-preference smoothing for robust/cDPO-style losses when supported by installed TRL.')
+    ap.add_argument('--beta', type=float, default=0.06)
+    ap.add_argument('--loss-type', nargs='+', default=['robust'], help='One or more DPO loss types, e.g. robust sft for mixed preference+SFT training.')
+    ap.add_argument('--loss-weights', type=float, nargs='+', default=None, help='Weights for multi-loss DPO; length must match --loss-type when provided.')
+    ap.add_argument('--label-smoothing', type=float, default=0.05, help='DPO noisy-preference smoothing for robust/cDPO-style losses when supported by installed TRL.')
+    ap.add_argument('--use-weighting', action=argparse.BooleanOptionalAction, default=True, help='Enable WPO-style pair weighting when supported by installed TRL.')
+    ap.add_argument('--precompute-ref-log-probs', action='store_true', help='Precompute reference log-probs when supported; incompatible with some IterableDataset/Liger setups.')
+    ap.add_argument('--precompute-ref-batch-size', type=int, default=None)
+    ap.add_argument('--padding-free', action='store_true', help='Use TRL padding-free mode when supported.')
+    ap.add_argument('--activation-offloading', action='store_true', help='Use TRL activation offloading when supported.')
     ap.add_argument('--use-lora', action='store_true')
     ap.add_argument('--qlora', action='store_true')
     ap.add_argument('--lora-r', type=int, default=16)
@@ -97,6 +103,14 @@ def is_main_process() -> bool:
 def _truthy_env(name: str, default: str = '0') -> bool:
     return os.environ.get(name, default).lower() in {'1', 'true', 'yes', 'on'}
 
+
+
+
+def offline_pretrained_kwargs() -> dict[str, Any]:
+    """Force local cache usage after DataSphere/Kaggle switches HF into offline mode."""
+    if os.environ.get('HF_HUB_OFFLINE') == '1' or os.environ.get('TRANSFORMERS_OFFLINE') == '1':
+        return {'local_files_only': True}
+    return {}
 
 def is_peft_adapter_model(model: Any) -> bool:
     return hasattr(model, 'peft_config') or model.__class__.__name__.lower().startswith('peft')
@@ -217,7 +231,7 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
             bnb_4bit_compute_dtype=torch.bfloat16 if bf16 else torch.float16,
         )
         device_map = {'': get_local_rank()} if torch.cuda.is_available() else None
-    kwargs = {'trust_remote_code': trust_remote_code, 'attn_implementation': attn_impl}
+    kwargs = {'trust_remote_code': trust_remote_code, 'attn_implementation': attn_impl, **offline_pretrained_kwargs()}
     if torch_dtype is not None:
         kwargs['torch_dtype'] = torch_dtype
     if quant_config is not None:
@@ -424,6 +438,8 @@ def main() -> None:
     args = parse_args()
     set_seed(args.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    if args.loss_weights is not None and len(args.loss_weights) != len(args.loss_type):
+        raise ValueError('--loss-weights length must match --loss-type length')
 
     data_files = {'train': str(args.train_file)}
     if args.eval_file:
@@ -453,12 +469,12 @@ def main() -> None:
     if args.max_pixels is not None:
         processor_kwargs['max_pixels'] = args.max_pixels
     try:
-        processor = AutoProcessor.from_pretrained(args.model_id, **processor_kwargs)
+        processor = AutoProcessor.from_pretrained(args.model_id, **processor_kwargs, **offline_pretrained_kwargs())
     except TypeError:
         processor_kwargs.pop('min_pixels', None)
         processor_kwargs.pop('max_pixels', None)
-        processor = AutoProcessor.from_pretrained(args.model_id, **processor_kwargs)
-    tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
+        processor = AutoProcessor.from_pretrained(args.model_id, **processor_kwargs, **offline_pretrained_kwargs())
+    tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code, **offline_pretrained_kwargs())
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     if hasattr(processor, 'tokenizer') and getattr(processor.tokenizer, 'pad_token', None) is None:
@@ -469,7 +485,7 @@ def main() -> None:
         model = prepare_model_for_kbit_training(model)
 
     if args.sft_adapter_path:
-        model = PeftModel.from_pretrained(model, str(args.sft_adapter_path), is_trainable=True)
+        model = PeftModel.from_pretrained(model, str(args.sft_adapter_path), is_trainable=True, **offline_pretrained_kwargs())
     elif args.use_lora or args.qlora:
         model = get_peft_model(
             model,
@@ -482,6 +498,9 @@ def main() -> None:
                 task_type='CAUSAL_LM',
             ),
         )
+
+    effective_loss_type = args.loss_type if len(args.loss_type) > 1 else args.loss_type[0]
+    effective_loss_weights = args.loss_weights
 
     dpo_kwargs = dict(
         output_dir=str(args.output_dir),
@@ -506,8 +525,14 @@ def main() -> None:
         eval_strategy='steps' if eval_ds is not None else 'no',
         logging_strategy='steps',
         beta=args.beta,
-        loss_type=args.loss_type,
+        loss_type=effective_loss_type,
+        loss_weights=effective_loss_weights,
         label_smoothing=args.label_smoothing,
+        use_weighting=args.use_weighting,
+        precompute_ref_log_probs=args.precompute_ref_log_probs,
+        precompute_ref_batch_size=args.precompute_ref_batch_size,
+        padding_free=args.padding_free,
+        activation_offloading=args.activation_offloading,
         load_best_model_at_end=should_native_load_best_model(args, eval_ds, model),
         metric_for_best_model=args.metric_for_best_model,
         greater_is_better=args.greater_is_better,
@@ -540,6 +565,8 @@ def main() -> None:
     run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
     run_config['native_best_checkpoint_reload_enabled'] = native_best_reload_enabled
     run_config['best_checkpoint_selection_mode'] = 'native_load' if native_best_reload_enabled else ('safe_checkpoint_file_copy' if args.load_best_model_at_end and eval_ds is not None else 'disabled')
+    run_config['effective_loss_type'] = effective_loss_type
+    run_config['effective_loss_weights'] = effective_loss_weights
     (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2), encoding='utf-8')
 
     if args.dry_run:

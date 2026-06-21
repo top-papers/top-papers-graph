@@ -110,6 +110,45 @@ def tokenize(value: Any) -> set[str]:
     return {m.group(0).lower() for m in TOKEN_RE.finditer(stable_json(value))}
 
 
+
+def count_evidence_locators(row: Mapping[str, Any]) -> int:
+    """Estimate how many page/figure/table anchors a row needs to preserve.
+
+    The raw export can contain many images per paper.  A fixed top-k cap either
+    drops useful evidence for dense rows or wastes memory for sparse rows.  This
+    lightweight estimator makes k dynamic while keeping the global cap explicit.
+    """
+    text = stable_json({
+        "evidence": row.get("evidence"),
+        "evidence_text": row.get("evidence_text"),
+        "metadata": row.get("metadata"),
+        "reference_assertions_json": row.get("reference_assertions_json"),
+        "reference_temporal_json": row.get("reference_temporal_json"),
+        "prompt": row.get("prompt"),
+        "messages": row.get("messages"),
+    }).lower()
+    patterns = [
+        r"\bfig(?:ure)?\s*[_:-]?\s*\d+[a-z]?\b",
+        r"\btable\s*[_:-]?\s*\d+[a-z]?\b",
+        r"\bpage\s*[_:-]?\s*\d+\b",
+        r"\bp\s*[_:-]?\s*\d+\b",
+    ]
+    hits: set[str] = set()
+    for pattern in patterns:
+        hits.update(re.findall(pattern, text))
+    return len(hits)
+
+
+def dynamic_image_cap_for_row(row: Mapping[str, Any], global_cap: int) -> int:
+    if global_cap <= 0:
+        return 0
+    locators = count_evidence_locators(row)
+    has_table = "table" in stable_json(row).lower()
+    has_figure = "figure" in stable_json(row).lower() or "fig" in stable_json(row).lower()
+    desired = 1 + math.ceil(0.6 * locators) + int(has_table) + int(has_figure)
+    return max(1, min(int(global_cap), desired))
+
+
 def first_nonempty(*values: Any, default: Any = None) -> Any:
     for value in values:
         if value not in (None, "", [], {}):
@@ -252,29 +291,40 @@ def image_relevance_score(image_ref: Any, row: Mapping[str, Any], raw_index: int
     evidence_tokens = tokenize(first_nonempty(row.get("evidence"), row.get("evidence_json"), row.get("metadata"), default={}))
     score = 0.0
     basename_tokens = tokenize(Path(str(image_text)).name)
-    score += 3.0 * len(basename_tokens.intersection(evidence_tokens))
-    score += 0.75 * len(basename_tokens.intersection(row_tokens))
+    locator_tokens = tokenize({
+        "evidence": row.get("evidence"),
+        "evidence_text": row.get("evidence_text"),
+        "metadata": row.get("metadata"),
+    })
+    score += 4.0 * len(basename_tokens.intersection(locator_tokens))
+    score += 1.5 * len(basename_tokens.intersection(evidence_tokens))
+    score += 1.0 * len(basename_tokens.intersection(row_tokens))
     if "figure" in image_text or "fig" in image_text:
         score += 1.0
     if "table" in image_text:
         score += 1.0
     if "page" in image_text or re.search(r"p(?:age)?[_-]?\d+", image_text):
-        score += 0.4
+        score += 0.3
     # Stable tiny tie-breaker keeps original order when scores are equal.
     return score - raw_index * 1e-6
 
 
 def select_relevant_images(raw_images: List[Any], row: Mapping[str, Any], max_images: int) -> Tuple[List[Any], Dict[str, Any]]:
-    if max_images <= 0 or len(raw_images) <= max_images:
-        return list(raw_images), {"policy": "all", "truncated": False, "before": len(raw_images), "after": len(raw_images)}
+    if max_images <= 0:
+        return list(raw_images), {"policy": "all", "truncated": False, "before": len(raw_images), "after": len(raw_images), "dynamic_cap": 0}
+    row_cap = dynamic_image_cap_for_row(row, max_images)
+    if len(raw_images) <= row_cap:
+        return list(raw_images), {"policy": "dynamic_all_within_cap", "truncated": False, "before": len(raw_images), "after": len(raw_images), "dynamic_cap": row_cap}
     scored = [(image_relevance_score(img, row, idx), idx, img) for idx, img in enumerate(raw_images)]
-    chosen = sorted(scored, key=lambda x: (-x[0], x[1]))[:max_images]
+    chosen = sorted(scored, key=lambda x: (-x[0], x[1]))[:row_cap]
     chosen_sorted = [img for _, _, img in sorted(chosen, key=lambda x: x[1])]
     return chosen_sorted, {
-        "policy": "relevance_top_k_then_original_order",
+        "policy": "dynamic_relevance_top_k_then_original_order",
         "truncated": True,
         "before": len(raw_images),
         "after": len(chosen_sorted),
+        "dynamic_cap": row_cap,
+        "locator_count": count_evidence_locators(row),
         "score_preview": [round(x[0], 4) for x in sorted(chosen, key=lambda x: x[1])],
     }
 
@@ -393,46 +443,115 @@ def is_multimodal(row: Mapping[str, Any]) -> bool:
 
 
 def task_hard_negative(task_family: str) -> str:
-    if task_family == "trajectory_reasoning":
+    if task_family in {"trajectory_reasoning", "trajectory_reasoning_rl"}:
         return json.dumps({"inference": "unsupported", "next_question": "unknown", "extracted_assertions": []}, ensure_ascii=False)
     if task_family == "assertion_reconstruction":
         return json.dumps({"subject": "unknown", "predicate": "unknown", "object": "unknown", "evidence": []}, ensure_ascii=False)
-    if task_family in {"assertion_review", "assertion_review_rl"}:
-        return json.dumps({"verdict": "accept", "rationale": "No issues found."}, ensure_ascii=False)
+    if task_family in {"assertion_review", "assertion_review_rl", "mm_review", "mm_review_rl"}:
+        return json.dumps({"verdict": "accept", "rationale": "The claim appears plausible, but the evidence references are omitted."}, ensure_ascii=False)
     if task_family in {"temporal_fix", "temporal_fix_rl"}:
         return json.dumps({"start_date": "unknown", "end_date": "unknown", "time_source": "missing"}, ensure_ascii=False)
+    if task_family in {"image_label", "image_label_rl"}:
+        return json.dumps({"label": "unknown"}, ensure_ascii=False)
     return json.dumps({"answer": "I do not know.", "evidence": []}, ensure_ascii=False)
 
 
-def make_dpo_rows_from_sft(rows: Sequence[Dict[str, Any]], synthetic_negatives: bool) -> List[Dict[str, Any]]:
+def estimate_pair_hardness(chosen: Any, rejected: Any) -> float:
+    chosen_tokens = tokenize(chosen)
+    rejected_tokens = tokenize(rejected)
+    if not chosen_tokens or not rejected_tokens:
+        return 0.0
+    jaccard = len(chosen_tokens & rejected_tokens) / max(1, len(chosen_tokens | rejected_tokens))
+    length_ratio = min(len(rejected_tokens), len(chosen_tokens)) / max(1, max(len(rejected_tokens), len(chosen_tokens)))
+    return round(0.7 * jaccard + 0.3 * length_ratio, 4)
+
+
+def make_verdict_flip_negative(row: Mapping[str, Any], chosen_text: str) -> str | None:
+    tf = str(row.get("task_family") or "")
+    if tf not in {"assertion_review", "assertion_review_rl", "mm_review", "mm_review_rl"}:
+        return None
+    verdict = "reject" if "accept" in normalize_token_text(chosen_text) else "accept"
+    key = "mm_verdict" if "mm" in tf else "verdict"
+    rationale_key = "mm_rationale" if "mm" in tf else "rationale"
+    return json.dumps({key: verdict, rationale_key: "Plausible-looking but contradicts the expert preference target."}, ensure_ascii=False)
+
+
+def make_evidence_drop_negative(row: Mapping[str, Any], chosen_text: str) -> str | None:
+    if not chosen_text:
+        return None
+    obj = None
+    try:
+        obj = json.loads(chosen_text)
+    except Exception:
+        obj = None
+    if isinstance(obj, dict):
+        obj = dict(obj)
+        for key in ["evidence", "source", "locator", "page", "figure", "table"]:
+            obj.pop(key, None)
+        if "rationale" in obj:
+            obj["rationale"] = "Reasoning given without concrete evidence locators."
+        if "mm_rationale" in obj:
+            obj["mm_rationale"] = "Reasoning given without concrete evidence locators."
+        return json.dumps(obj, ensure_ascii=False)
+    return json.dumps({"answer": chosen_text[:256], "evidence": []}, ensure_ascii=False)
+
+
+def mine_hard_negatives(row: Mapping[str, Any], chosen_text: str, *, explicit_rejected: Any = None) -> list[tuple[str, str]]:
+    negatives: list[tuple[str, str]] = []
+    if explicit_rejected not in (None, "", [], {}):
+        negatives.append((ensure_text_response(explicit_rejected), "explicit"))
+    for candidate, kind in [
+        (make_verdict_flip_negative(row, chosen_text), "verdict_flip"),
+        (make_evidence_drop_negative(row, chosen_text), "evidence_drop"),
+        (task_hard_negative(str(row.get("task_family") or "unknown")), "task_hard_synthetic"),
+        (first_nonempty(row.get("policy_negative"), row.get("model_negative"), default=None), "policy_negative"),
+    ]:
+        if candidate not in (None, "", [], {}):
+            negatives.append((ensure_text_response(candidate), kind))
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    chosen_norm = normalize_token_text(chosen_text)
+    for negative, kind in negatives:
+        key = normalize_token_text(negative)
+        if not key or key == chosen_norm or key in seen:
+            continue
+        seen.add(key)
+        out.append((negative, kind))
+    out.sort(key=lambda item: estimate_pair_hardness(chosen_text, item[0]), reverse=True)
+    return out
+
+def make_dpo_rows_from_sft(rows: Sequence[Dict[str, Any]], synthetic_negatives: bool, max_pairs_per_row: int = 3) -> List[Dict[str, Any]]:
     dpo_rows: List[Dict[str, Any]] = []
     for row in rows:
         chosen = first_nonempty(row.get("chosen"), row.get("preferred"), row.get("reference_response"), assistant_text_from_messages(row.get("messages")))
-        rejected = first_nonempty(row.get("rejected"), row.get("dispreferred"), row.get("negative_response"))
+        explicit_rejected = first_nonempty(row.get("rejected"), row.get("dispreferred"), row.get("negative_response"))
         if not chosen:
             continue
-        if not rejected and synthetic_negatives:
-            rejected = task_hard_negative(str(row.get("task_family") or "unknown"))
-        if not rejected or normalize_token_text(chosen) == normalize_token_text(rejected):
-            continue
-        rec = {
-            "id": f"dpo:{row.get('id')}",
-            "task_family": str(row.get("task_family") or "unknown"),
-            "domain": row.get("domain"),
-            "prompt": prompt_messages_without_answer(row),
-            "chosen": chosen if isinstance(chosen, str) else stable_json(chosen),
-            "rejected": rejected if isinstance(rejected, str) else stable_json(rejected),
-            "metadata": {
-                "source_id": row.get("id"),
-                "leakage_group": row.get("leakage_group"),
-                "synthetic_negative": not bool(first_nonempty(row.get("rejected"), row.get("dispreferred"), row.get("negative_response"))),
-            },
-        }
-        if is_multimodal(row):
-            rec["images"] = row.get("images") or as_list(row.get("image"))
-            if rec["images"]:
-                rec["image"] = rec["images"][0]
-        dpo_rows.append(rec)
+        chosen_text = ensure_text_response(chosen)
+        negatives = mine_hard_negatives(row, chosen_text, explicit_rejected=explicit_rejected if synthetic_negatives or explicit_rejected else None)
+        if not synthetic_negatives and explicit_rejected in (None, "", [], {}):
+            negatives = []
+        for neg_idx, (rejected, pair_type) in enumerate(negatives[:max(1, int(max_pairs_per_row))]):
+            rec = {
+                "id": f"dpo:{row.get('id')}:{neg_idx}",
+                "task_family": str(row.get("task_family") or "unknown"),
+                "domain": row.get("domain"),
+                "prompt": prompt_messages_without_answer(row),
+                "chosen": chosen_text,
+                "rejected": rejected,
+                "metadata": {
+                    "source_id": row.get("id"),
+                    "leakage_group": row.get("leakage_group"),
+                    "synthetic_negative": pair_type != "explicit",
+                    "pair_type": pair_type,
+                    "pair_hardness": estimate_pair_hardness(chosen_text, rejected),
+                },
+            }
+            if is_multimodal(row):
+                rec["images"] = row.get("images") or as_list(row.get("image"))
+                if rec["images"]:
+                    rec["image"] = rec["images"][0]
+            dpo_rows.append(rec)
     return dpo_rows
 
 
@@ -557,6 +676,8 @@ def make_dpo_rows_from_grpo(rows: Sequence[Dict[str, Any]], synthetic_negatives:
                 "leakage_group": row.get("leakage_group"),
                 "synthetic_negative": not bool(first_nonempty(row.get("rejected"), row.get("dispreferred"), row.get("negative_response"))),
                 "preference_source": "grpo_target_bootstrap",
+                "pair_type": "target_bootstrap_hard_negative",
+                "pair_hardness": estimate_pair_hardness(chosen, rejected),
             },
         }
         if is_multimodal(row):
@@ -680,6 +801,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--hf-download-max-workers", type=int, default=2)
     ap.add_argument("--metadata-only", action="store_true", help="Do not download assets; useful for fast CI smoke checks.")
     ap.add_argument("--no-synthetic-dpo-negatives", action="store_true", help="Only emit DPO rows that already contain explicit rejected answers.")
+    ap.add_argument("--max-dpo-pairs-per-row", type=int, default=3, help="Maximum DPO negative pairs mined per source row.")
     return ap.parse_args()
 
 
@@ -697,7 +819,7 @@ def main() -> None:
     sft_train, sft_eval, sft_leakage = deterministic_group_split(sft_rows, args.eval_ratio, args.seed)
     grpo_train_all, grpo_eval_all, grpo_leakage = deterministic_group_split(grpo_rows, args.eval_ratio, args.seed + 31)
 
-    dpo_from_sft = make_dpo_rows_from_sft(sft_rows, synthetic_negatives=not args.no_synthetic_dpo_negatives)
+    dpo_from_sft = make_dpo_rows_from_sft(sft_rows, synthetic_negatives=not args.no_synthetic_dpo_negatives, max_pairs_per_row=args.max_dpo_pairs_per_row)
     dpo_from_grpo = make_dpo_rows_from_grpo(grpo_rows, synthetic_negatives=not args.no_synthetic_dpo_negatives)
     dpo_all = dedupe_dpo_rows(dpo_from_sft + dpo_from_grpo)
     dpo_train, dpo_eval, dpo_leakage = deterministic_group_split(dpo_all, args.eval_ratio, args.seed + 61)
@@ -741,6 +863,7 @@ def main() -> None:
         "max_grpo_samples": args.max_grpo_samples,
         "max_images_per_example_sft": args.max_images_per_example_sft,
         "max_images_per_example_grpo": args.max_images_per_example_grpo,
+        "max_dpo_pairs_per_row": args.max_dpo_pairs_per_row,
         "row_sampling_limited": bool(args.max_sft_samples or args.max_grpo_samples),
         "image_selection_limited": bool(args.max_images_per_example_sft > 0 or args.max_images_per_example_grpo > 0),
         "full_data_policy": "all_rows_and_all_image_refs" if not (args.max_sft_samples or args.max_grpo_samples or args.max_images_per_example_sft > 0 or args.max_images_per_example_grpo > 0) else "limited_by_cli_arguments",
@@ -771,9 +894,9 @@ def main() -> None:
         "quality_gates": {
             "imagefolder_fallback": "disabled",
             "split": "leakage_safe_group_split",
-            "image_selection": "all_available_refs" if not (args.max_images_per_example_sft > 0 or args.max_images_per_example_grpo > 0) else "relevance_top_k_then_original_order",
+            "image_selection": "all_available_refs" if not (args.max_images_per_example_sft > 0 or args.max_images_per_example_grpo > 0) else "dynamic_relevance_top_k_then_original_order",
             "full_data_usage_audit": "recommended",
-            "dpo_negatives": "synthetic_bootstrap_enabled" if not args.no_synthetic_dpo_negatives else "explicit_pairs_only",
+            "dpo_negatives": "hard_negative_mining_enabled" if not args.no_synthetic_dpo_negatives else "explicit_pairs_only",
             "dpo_sources": {"sft_rows": len(dpo_from_sft), "grpo_reward_targets": len(dpo_from_grpo)},
             "grpo": "verified_reward_target_rows_only",
         },

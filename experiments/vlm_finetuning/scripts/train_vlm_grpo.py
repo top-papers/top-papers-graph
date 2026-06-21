@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import re
+import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -98,6 +99,93 @@ class RewardTraceLogger:
 REWARD_LOGGER = RewardTraceLogger(None)
 
 
+# Task-aware reward routing.  Components that are not semantically active for a
+# task family are audit-only and do not contribute to the GRPO objective.  When
+# TRL supplies duplicated sample_id values for a generation group, active
+# components are robustly normalized within that group so cheap saturated
+# features do not dominate the group advantage.
+ACTIVE_REWARD_COMPONENTS_BY_TASK: Dict[str, set[str]] = {
+    "assertion_review_rl": {"schema", "evidence", "verdict", "temporal"},
+    "mm_review_rl": {"schema", "evidence", "verdict"},
+    "trajectory_reasoning_rl": {"schema", "evidence", "graph"},
+    "image_label_rl": {"schema", "label"},
+    "temporal_fix_rl": {"schema", "temporal", "verdict"},
+}
+COMPONENT_ROUTING_KEY: Dict[str, str] = {
+    "label_exact_match": "label",
+    "schema_validity": "schema",
+    "temporal_consistency": "temporal",
+    "graph_consistency": "graph",
+    "evidence_presence": "evidence",
+    "expert_override_match": "verdict",
+}
+
+
+def _mad(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    med = statistics.median(values)
+    return statistics.median([abs(v - med) for v in values])
+
+
+def _has_repeated_sample_id(sample_ids: list[str]) -> bool:
+    seen: set[str] = set()
+    for sid in sample_ids:
+        sid = str(sid or "")
+        if sid in seen:
+            return True
+        seen.add(sid)
+    return False
+
+
+def _groupwise_robust_norm(sample_ids: list[str], values: list[float], *, clip: float = 2.5) -> list[float]:
+    by_group: Dict[str, list[tuple[int, float]]] = {}
+    for idx, (sid, value) in enumerate(zip(sample_ids, values)):
+        by_group.setdefault(str(sid or ""), []).append((idx, float(value)))
+    out = [float(v) for v in values]
+    for items in by_group.values():
+        if len(items) < 2:
+            continue
+        vals = [v for _, v in items]
+        med = statistics.median(vals)
+        scale = max(_mad(vals) * 1.4826, 1e-4)
+        for idx, value in items:
+            z = (value - med) / scale
+            out[idx] = max(-clip, min(clip, z))
+    return out
+
+
+def apply_task_aware_reward_processing(
+    component_name: str,
+    rewards: list[float],
+    *,
+    sample_id: list[str] | None,
+    task_family: list[str] | None,
+    normalize: bool,
+    clip: float = 2.5,
+    temperature: float = 1.5,
+) -> list[float]:
+    key = COMPONENT_ROUTING_KEY.get(component_name)
+    families = task_family or [""] * len(rewards)
+    routed: list[float] = []
+    active_idx: list[int] = []
+    for idx, (reward, tf) in enumerate(zip(rewards, families)):
+        active = key is None or key in ACTIVE_REWARD_COMPONENTS_BY_TASK.get(str(tf or ""), {key})
+        if active:
+            routed.append(float(reward))
+            active_idx.append(idx)
+        else:
+            routed.append(0.0)
+    if not normalize or not sample_id or not _has_repeated_sample_id([str(x or "") for x in sample_id]):
+        return routed
+    active_ids = [str(sample_id[i] or "") for i in active_idx]
+    active_values = [routed[i] for i in active_idx]
+    norm_values = _groupwise_robust_norm(active_ids, active_values, clip=clip)
+    for pos, idx in enumerate(active_idx):
+        routed[idx] = math.tanh(norm_values[pos] / max(float(temperature), 1e-6))
+    return routed
+
+
 def _mean_std(values: list[float]) -> tuple[float, float]:
     if not values:
         return 0.0, 0.0
@@ -148,13 +236,24 @@ def audit_reward_trace_file(path: Path, *, min_reward_std: float, max_zero_std_f
         ):
             weak_components.append(component)
     group_stds = []
+    active_group_stds = []
     for values in by_group.values():
         if len(values) > 1:
-            group_stds.append(_mean_std(values)[1])
+            std = _mean_std(values)[1]
+            group_stds.append(std)
+            # Ignore exactly all-zero task-inapplicable reward groups. They are
+            # still reported in group_zero_std_fraction, but only active groups
+            # should decide whether the useful GRPO reward signal collapsed.
+            if any(abs(float(v)) > 1e-12 for v in values):
+                active_group_stds.append(std)
     zero_std_frac = (sum(1 for x in group_stds if x < 1e-9) / len(group_stds)) if group_stds else 1.0
-    weak_reward = bool(weak_components) or zero_std_frac > max_zero_std_frac
+    active_zero_std_frac = (
+        sum(1 for x in active_group_stds if x < 1e-9) / len(active_group_stds)
+        if active_group_stds else 1.0
+    )
+    weak_reward = bool(weak_components) or active_zero_std_frac > max_zero_std_frac
     return {
-        "status": "ok",
+        "status": "fail" if weak_reward else "pass",
         "path": str(path),
         "rows": len(rows),
         "component_stats": component_stats,
@@ -375,6 +474,7 @@ def partial_field_presence_reward(completion: Any, keys: tuple[str, ...], *, emp
 
 def reward_label_exact_match(prompts, completions, reference_label=None, label_text=None, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
     task_family = task_family or [""] * len(completions)
+    _normalize_rewards = sample_id is not None
     reference_label = reference_label or label_text or [None] * len(completions)
     sample_id = sample_id or [""] * len(completions)
     domain = domain or [""] * len(completions)
@@ -392,6 +492,13 @@ def reward_label_exact_match(prompts, completions, reference_label=None, label_t
             rewards.append(0.5)
         else:
             rewards.append(-1.0)
+    rewards = apply_task_aware_reward_processing(
+        "label_exact_match",
+        rewards,
+        sample_id=sample_id,
+        task_family=task_family,
+        normalize=_normalize_rewards,
+    )
     REWARD_LOGGER.append("label_exact_match", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
 
@@ -400,14 +507,12 @@ def reward_label_exact_match(prompts, completions, reference_label=None, label_t
 
 def reward_schema_validity(prompts, completions, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
     task_family = task_family or [""] * len(completions)
+    _normalize_rewards = sample_id is not None
     sample_id = sample_id or [""] * len(completions)
     domain = domain or [""] * len(completions)
 
     rewards = []
     for completion, tf in zip(completions, task_family):
-        if tf == "image_label_rl":
-            rewards.append(0.0)
-            continue
         obj = parse_prediction_object(completion)
         reward = partial_json_progress_reward(completion, tf)
         if isinstance(obj, dict):
@@ -422,11 +527,19 @@ def reward_schema_validity(prompts, completions, sample_id=None, domain=None, ta
                 if any(k in obj for k in ["start_date", "end_date", "valid_from", "valid_to", "time_source"]):
                     reward = 1.0
         rewards.append(reward)
+    rewards = apply_task_aware_reward_processing(
+        "schema_validity",
+        rewards,
+        sample_id=sample_id,
+        task_family=task_family,
+        normalize=_normalize_rewards,
+    )
     REWARD_LOGGER.append("schema_validity", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
 
 def reward_graph_consistency(prompts, completions, reference_assertions_json=None, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
     task_family = task_family or [""] * len(completions)
+    _normalize_rewards = sample_id is not None
     reference_assertions_json = reference_assertions_json or [None] * len(completions)
     sample_id = sample_id or [""] * len(completions)
     domain = domain or [""] * len(completions)
@@ -465,11 +578,19 @@ def reward_graph_consistency(prompts, completions, reference_assertions_json=Non
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
         rewards.append(2.0 * f1 - 1.0)
         
+    rewards = apply_task_aware_reward_processing(
+        "graph_consistency",
+        rewards,
+        sample_id=sample_id,
+        task_family=task_family,
+        normalize=_normalize_rewards,
+    )
     REWARD_LOGGER.append("graph_consistency", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
 
 def reward_temporal_consistency(prompts, completions, reference_temporal_json=None, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
     task_family = task_family or [""] * len(completions)
+    _normalize_rewards = sample_id is not None
     reference_temporal_json = reference_temporal_json or [None] * len(completions)
     sample_id = sample_id or [""] * len(completions)
     domain = domain or [""] * len(completions)
@@ -498,11 +619,19 @@ def reward_temporal_consistency(prompts, completions, reference_temporal_json=No
                 matched += int(norm_text(pred_temporal.get(field)) == norm_text(ref_temporal.get(field)))
         rewards.append((matched / total) if total else 0.0)
         
+    rewards = apply_task_aware_reward_processing(
+        "temporal_consistency",
+        rewards,
+        sample_id=sample_id,
+        task_family=task_family,
+        normalize=_normalize_rewards,
+    )
     REWARD_LOGGER.append("temporal_consistency", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
 
 def reward_evidence_presence(prompts, completions, evidence_text=None, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
     task_family = task_family or [""] * len(completions)
+    _normalize_rewards = sample_id is not None
     evidence_text = evidence_text or [None] * len(completions)
     sample_id = sample_id or [""] * len(completions)
     domain = domain or [""] * len(completions)
@@ -535,11 +664,19 @@ def reward_evidence_presence(prompts, completions, evidence_text=None, sample_id
         else:
             rewards.append(0.0)
             
+    rewards = apply_task_aware_reward_processing(
+        "evidence_presence",
+        rewards,
+        sample_id=sample_id,
+        task_family=task_family,
+        normalize=_normalize_rewards,
+    )
     REWARD_LOGGER.append("evidence_presence", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
 
 def reward_expert_override_match(prompts, completions, expected_verdict=None, sample_id=None, domain=None, task_family=None, trainer_state=None, **kwargs):
     task_family = task_family or [""] * len(completions)
+    _normalize_rewards = sample_id is not None
     expected_verdict = expected_verdict or [None] * len(completions)
     sample_id = sample_id or [""] * len(completions)
     domain = domain or [""] * len(completions)
@@ -585,6 +722,13 @@ def reward_expert_override_match(prompts, completions, expected_verdict=None, sa
         else:
             rewards.append(-0.9)
             
+    rewards = apply_task_aware_reward_processing(
+        "expert_override_match",
+        rewards,
+        sample_id=sample_id,
+        task_family=task_family,
+        normalize=_normalize_rewards,
+    )
     REWARD_LOGGER.append("expert_override_match", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
 
@@ -645,6 +789,14 @@ def _supports_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any
     return {k: v for k, v in kwargs.items() if k in params}
 
 
+
+def offline_pretrained_kwargs() -> Dict[str, Any]:
+    """Force local cache usage after the job switches Hugging Face into offline mode."""
+    if os.environ.get('HF_HUB_OFFLINE') == '1' or os.environ.get('TRANSFORMERS_OFFLINE') == '1':
+        return {'local_files_only': True}
+    return {}
+
+
 def _flash_attn_available() -> bool:
     return importlib.util.find_spec('flash_attn') is not None
 
@@ -659,7 +811,7 @@ def resolve_attn_implementation(attn_impl: str) -> str:
 
 
 def load_processor(model_id: str, min_pixels: int | None, max_pixels: int | None, trust_remote_code: bool = False):
-    kwargs: Dict[str, Any] = {'trust_remote_code': trust_remote_code}
+    kwargs: Dict[str, Any] = {'trust_remote_code': trust_remote_code, **offline_pretrained_kwargs()}
     if min_pixels is not None:
         kwargs['min_pixels'] = min_pixels
     if max_pixels is not None:
@@ -717,7 +869,7 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, attn_imp
         )
         device_map = {'': get_local_rank()} if torch.cuda.is_available() else None
 
-    kwargs = {'attn_implementation': resolve_attn_implementation(attn_impl), 'trust_remote_code': trust_remote_code}
+    kwargs = {'attn_implementation': resolve_attn_implementation(attn_impl), 'trust_remote_code': trust_remote_code, **offline_pretrained_kwargs()}
     if torch_dtype is not None: kwargs['torch_dtype'] = torch_dtype
     if quant_config is not None: kwargs['quantization_config'] = quant_config
     if device_map is not None: kwargs['device_map'] = device_map
@@ -1251,6 +1403,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--num-generations', type=int, default=2)
     ap.add_argument('--num-generations-eval', type=int, default=2)
     ap.add_argument('--max-completion-length', type=int, default=512)
+    ap.add_argument('--num-iterations', type=int, default=1, help='GRPO inner optimization iterations per generation batch when supported by installed TRL.')
     ap.add_argument('--logging-steps', type=int, default=5)
     ap.add_argument('--save-steps', type=int, default=40)
     ap.add_argument('--eval-steps', type=int, default=40)
@@ -1299,9 +1452,14 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--temperature', type=float, default=0.8)
     ap.add_argument('--top-p', type=float, default=0.95)
     ap.add_argument('--top-k', type=int, default=0)
-    ap.add_argument('--mask-truncated-completions', action='store_true')
+    ap.add_argument('--epsilon', type=float, default=0.2, help='Lower PPO/GRPO clipping epsilon when supported by installed TRL.')
+    ap.add_argument('--epsilon-high', type=float, default=0.28, help='Upper clipping epsilon for asymmetric clipping when supported by installed TRL.')
+    ap.add_argument('--top-entropy-quantile', type=float, default=0.2, help='Only update on high-entropy tokens/positions when supported by installed TRL.')
+    ap.add_argument('--mask-truncated-completions', action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument('--importance-sampling-level', default='sequence', choices=['token', 'sequence'])
     ap.add_argument('--multi-objective-aggregation', default='normalize_then_sum', choices=['sum_then_normalize', 'normalize_then_sum'])
+    ap.add_argument('--reward-normalization-clip', type=float, default=2.5, help='Clip value for task-aware robust reward normalization.')
+    ap.add_argument('--reward-normalization-temperature', type=float, default=1.5, help='Tanh temperature for task-aware robust reward normalization.')
     ap.add_argument('--reward-weights', type=float, nargs='+', default=[0.0, 1.0, 0.8, 1.2, 0.5, 1.5], help="Weights for: label, schema, temporal, graph, evidence, verdict")
     ap.add_argument('--log-completions', action='store_true')
     ap.add_argument('--min-reward-std', type=float, default=0.02, help='Warn/fail if post-run reward std is below this threshold for active components.')
@@ -1363,7 +1521,7 @@ def main() -> None:
         eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
 
     processor = load_processor(args.model_id, args.min_pixels, args.max_pixels, args.trust_remote_code)
-    tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
+    tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code, **offline_pretrained_kwargs())
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None: 
         tokenizer.pad_token = tokenizer.eos_token
@@ -1382,7 +1540,7 @@ def main() -> None:
     if args.sft_adapter_path:
         if PeftModel is None:
             raise RuntimeError('peft.PeftModel is required for --sft-adapter-path; install a full peft package.')
-        model = PeftModel.from_pretrained(model, str(args.sft_adapter_path), is_trainable=True)
+        model = PeftModel.from_pretrained(model, str(args.sft_adapter_path), is_trainable=True, **offline_pretrained_kwargs())
         if args.gradient_checkpointing and hasattr(model, 'enable_input_require_grads'):
             model.enable_input_require_grads()
     elif args.use_lora or args.qlora:
@@ -1417,9 +1575,13 @@ def main() -> None:
         num_generations=args.num_generations,
         num_generations_eval=args.num_generations_eval,
         max_completion_length=args.max_completion_length,
+        num_iterations=args.num_iterations,
         temperature=args.temperature,
         top_p=args.top_p,
         top_k=args.top_k,
+        epsilon=args.epsilon,
+        epsilon_high=args.epsilon_high,
+        top_entropy_quantile=args.top_entropy_quantile,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         eval_steps=args.eval_steps,
@@ -1494,20 +1656,21 @@ def main() -> None:
     
     trainer.save_model(args.output_dir)
 
-    reward_audit = audit_reward_trace_file(
-        args.output_dir / 'grpo_reward_trace.jsonl',
-        min_reward_std=args.min_reward_std,
-        max_zero_std_frac=args.max_zero_std_frac,
-    )
-    (args.output_dir / 'post_run_reward_audit.json').write_text(
-        json.dumps(reward_audit, ensure_ascii=False, indent=2),
-        encoding='utf-8',
-    )
-    if reward_audit.get('weak_reward'):
-        print('[train_vlm_grpo] weak reward signal detected; see post_run_reward_audit.json', flush=True)
-        if args.fail_on_weak_reward:
-            raise SystemExit(2)
-    processor.save_pretrained(args.output_dir)
+    if is_main_process():
+        reward_audit = audit_reward_trace_file(
+            args.output_dir / 'grpo_reward_trace.jsonl',
+            min_reward_std=args.min_reward_std,
+            max_zero_std_frac=args.max_zero_std_frac,
+        )
+        (args.output_dir / 'post_run_reward_audit.json').write_text(
+            json.dumps(reward_audit, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+        if reward_audit.get('weak_reward'):
+            print('[train_vlm_grpo] weak reward signal detected; see post_run_reward_audit.json', flush=True)
+            if args.fail_on_weak_reward:
+                raise SystemExit(2)
+        processor.save_pretrained(args.output_dir)
 
 if __name__ == '__main__':
     main()

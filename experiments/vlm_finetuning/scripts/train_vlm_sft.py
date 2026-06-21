@@ -331,6 +331,14 @@ def _supports_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any
     return {k: v for k, v in kwargs.items() if k in params}
 
 
+
+
+def offline_pretrained_kwargs() -> Dict[str, Any]:
+    """Force local cache usage after DataSphere/Kaggle switches HF into offline mode."""
+    if os.environ.get('HF_HUB_OFFLINE') == '1' or os.environ.get('TRANSFORMERS_OFFLINE') == '1':
+        return {'local_files_only': True}
+    return {}
+
 def _flash_attn_available() -> bool:
     return importlib.util.find_spec('flash_attn') is not None
 
@@ -345,7 +353,7 @@ def resolve_attn_implementation(attn_impl: str) -> str:
 
 
 def load_processor(model_id: str, trust_remote_code: bool, min_pixels: int | None, max_pixels: int | None):
-    kwargs: Dict[str, Any] = {'trust_remote_code': trust_remote_code}
+    kwargs: Dict[str, Any] = {'trust_remote_code': trust_remote_code, **offline_pretrained_kwargs()}
     if min_pixels is not None:
         kwargs['min_pixels'] = min_pixels
     if max_pixels is not None:
@@ -372,7 +380,7 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
             bnb_4bit_compute_dtype=torch.bfloat16 if bf16 else torch.float16,
         )
         device_map = {'': get_local_rank()} if torch.cuda.is_available() else None
-    kwargs: Dict[str, Any] = {'trust_remote_code': trust_remote_code, 'attn_implementation': resolve_attn_implementation(attn_impl)}
+    kwargs: Dict[str, Any] = {'trust_remote_code': trust_remote_code, 'attn_implementation': resolve_attn_implementation(attn_impl), **offline_pretrained_kwargs()}
     if torch_dtype is not None:
         # `torch_dtype` remains accepted by released Transformers versions; model cards may show `dtype`.
         kwargs['torch_dtype'] = torch_dtype
@@ -1108,7 +1116,7 @@ def main() -> None:
     disable_unsupported_vlm_assistant_only_loss(args, actual_mode)
 
     processor = load_processor(args.model_id, args.trust_remote_code, args.min_pixels, args.max_pixels)
-    tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
+    tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code, **offline_pretrained_kwargs())
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     if hasattr(processor, 'tokenizer') and getattr(processor.tokenizer, 'pad_token', None) is None:
@@ -1125,7 +1133,7 @@ def main() -> None:
     if args.init_adapter_path:
         if is_main_process():
             print(f'[train_vlm_sft] loading trainable PEFT adapter from {args.init_adapter_path}', flush=True)
-        model = PeftModel.from_pretrained(model, str(args.init_adapter_path), is_trainable=True)
+        model = PeftModel.from_pretrained(model, str(args.init_adapter_path), is_trainable=True, **offline_pretrained_kwargs())
     elif args.use_lora or args.qlora:
         model = get_peft_model(
             model,

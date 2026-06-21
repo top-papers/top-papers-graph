@@ -116,6 +116,7 @@ python experiments/vlm_finetuning/scripts/build_scireason_alignment_datasets.py 
   --max-images-per-example-grpo "${MAX_IMAGES_PER_EXAMPLE_GRPO:-0}" \
   --max-sft-samples "${MAX_SFT_SAMPLES:-0}" \
   --max-grpo-samples "${MAX_GRPO_SAMPLES:-0}" \
+  --max-dpo-pairs-per-row "${MAX_DPO_PAIRS_PER_ROW:-3}" \
   --hf-download-max-workers "${HF_DOWNLOAD_MAX_WORKERS:-2}" \
   --seed "${SEED:-42}"
 
@@ -202,6 +203,16 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_sft.py \
 tar_adapter_dir "$VLM_SFT_DIR" "outputs/${OUT_PREFIX}_vlm_sft_lora.tar.gz"
 
 # 3) DPO is the default alignment stage. It trains on chosen/rejected pairs.
+DPO_LOSS_ARGS=()
+read -r -a DPO_LOSS_TYPES_ARR <<< "${DPO_LOSS_TYPES:-${DPO_LOSS_TYPE:-robust sft}}"
+DPO_LOSS_ARGS+=(--loss-type "${DPO_LOSS_TYPES_ARR[@]}")
+if [ -n "${DPO_LOSS_WEIGHTS:-1.0 0.15}" ]; then
+  read -r -a DPO_LOSS_WEIGHTS_ARR <<< "${DPO_LOSS_WEIGHTS:-1.0 0.15}"
+  DPO_LOSS_ARGS+=(--loss-weights "${DPO_LOSS_WEIGHTS_ARR[@]}")
+fi
+if [ "${DPO_USE_WEIGHTING:-1}" = "1" ]; then DPO_LOSS_ARGS+=(--use-weighting); else DPO_LOSS_ARGS+=(--no-use-weighting); fi
+if [ "${DPO_PRECOMPUTE_REF_LOG_PROBS:-1}" = "1" ]; then DPO_LOSS_ARGS+=(--precompute-ref-log-probs); fi
+if [ -n "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}" ]; then DPO_LOSS_ARGS+=(--precompute-ref-batch-size "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}"); fi
 torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --model-id "$BASE_MODEL" \
   --sft-adapter-path "$VLM_SFT_DIR" \
@@ -215,9 +226,9 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --bf16 --gradient-checkpointing \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --learning-rate "${DPO_LR:-7e-6}" \
-  --beta "${DPO_BETA:-0.08}" \
-  --loss-type "${DPO_LOSS_TYPE:-robust}" \
-  --label-smoothing "${DPO_LABEL_SMOOTHING:-0.03}" \
+  --beta "${DPO_BETA:-0.06}" \
+  "${DPO_LOSS_ARGS[@]}" \
+  --label-smoothing "${DPO_LABEL_SMOOTHING:-0.05}" \
   --max-steps "${DPO_MAX_STEPS:--1}" \
   --num-train-epochs "${DPO_EPOCHS:-1}" \
   --per-device-train-batch-size "${DPO_PER_DEVICE_BATCH:-1}" \
@@ -243,9 +254,9 @@ if [ "${ENABLE_GRPO_POLISH:-0}" = "1" ]; then
     --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
     --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
     --max-images-per-example "$GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
-    --learning-rate "${GRPO_LR:-5e-6}" \
+    --learning-rate "${GRPO_LR:-2e-6}" \
     --warmup-ratio "${GRPO_WARMUP_RATIO:-0.05}" \
-    --beta "${GRPO_BETA:-0.02}" \
+    --beta "${GRPO_BETA:-0.005}" \
     --lr-scheduler-type "${GRPO_LR_SCHEDULER:-cosine}" \
     --max-grad-norm "${GRPO_MAX_GRAD_NORM:-0.3}" \
     --max-steps "${GRPO_MAX_STEPS:--1}" \
@@ -254,20 +265,24 @@ if [ "${ENABLE_GRPO_POLISH:-0}" = "1" ]; then
     --per-device-eval-batch-size 1 \
     --gradient-accumulation-steps "${GRPO_GRAD_ACCUM:-8}" \
     --num-generations "${GRPO_NUM_GENERATIONS:-4}" \
-    --num-generations-eval "${GRPO_NUM_GENERATIONS_EVAL:-2}" \
-    --max-completion-length "${GRPO_MAX_COMPLETION_LENGTH:-768}" \
-    --temperature "${GRPO_TEMPERATURE:-0.8}" \
+    --num-generations-eval "${GRPO_NUM_GENERATIONS_EVAL:-4}" \
+    --num-iterations "${GRPO_NUM_ITERATIONS:-2}" \
+    --max-completion-length "${GRPO_MAX_COMPLETION_LENGTH:-640}" \
+    --temperature "${GRPO_TEMPERATURE:-0.85}" \
     --top-p "${GRPO_TOP_P:-0.95}" \
     --top-k "${GRPO_TOP_K:-0}" \
+    --epsilon "${GRPO_EPSILON:-0.2}" \
+    --epsilon-high "${GRPO_EPSILON_HIGH:-0.28}" \
+    --top-entropy-quantile "${GRPO_TOP_ENTROPY_QUANTILE:-0.2}" \
     --mask-truncated-completions \
     --importance-sampling-level "${GRPO_IMPORTANCE_SAMPLING_LEVEL:-sequence}" \
     --multi-objective-aggregation "${GRPO_MULTI_OBJECTIVE_AGGREGATION:-normalize_then_sum}" \
-    --reward-weights ${GRPO_REWARD_WEIGHTS:-0.0 0.5 0.8 1.6 1.2 1.5} \
+    --reward-weights ${GRPO_REWARD_WEIGHTS:-0.0 0.15 0.35 0.0 0.55 1.0} \
     --save-steps "${GRPO_SAVE_STEPS:-40}" \
     --eval-steps "${GRPO_EVAL_STEPS:-40}" \
     --logging-steps 5 \
-    --min-reward-std "${GRPO_MIN_REWARD_STD:-0.03}" \
-    --max-zero-std-frac "${GRPO_MAX_ZERO_STD_FRAC:-0.80}" \
+    --min-reward-std "${GRPO_MIN_REWARD_STD:-0.08}" \
+    --max-zero-std-frac "${GRPO_MAX_ZERO_STD_FRAC:-0.60}" \
     --log-completions \
     --fail-on-weak-reward
   tar_adapter_dir "$GRPO_DIR" "outputs/${OUT_PREFIX}_grpo_lora.tar.gz"

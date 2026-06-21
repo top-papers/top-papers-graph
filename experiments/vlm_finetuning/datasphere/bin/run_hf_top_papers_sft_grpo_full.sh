@@ -523,6 +523,7 @@ run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/s
   --max-images-per-example "$GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
   --learning-rate "${GRPO_LR:-1e-5}" \
   --warmup-ratio "${GRPO_WARMUP_RATIO:-0.08}" \
+  --beta "${GRPO_BETA:-0.02}" \
   --lr-scheduler-type "${GRPO_LR_SCHEDULER:-cosine}" \
   --max-grad-norm "${GRPO_MAX_GRAD_NORM:-0.3}" \
   --max-steps "$MAX_GRPO_STEPS" \
@@ -544,6 +545,8 @@ run_torchrun_timeout_budgeted "$GRPO_TIMEOUT_HOURS" experiments/vlm_finetuning/s
   --eval-steps "${GRPO_EVAL_STEPS:-40}" \
   --logging-steps 5 \
   --dataloader-num-workers "${GRPO_DATALOADER_NUM_WORKERS:-2}" \
+  --min-reward-std "${GRPO_MIN_REWARD_STD:-0.03}" \
+  --max-zero-std-frac "${GRPO_MAX_ZERO_STD_FRAC:-0.85}" \
   --log-completions
 
 tar_adapter_artifact_dir "$GRPO_DIR" "outputs/${OUT_PREFIX}_grpo_lora.tar.gz"
