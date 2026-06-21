@@ -216,6 +216,8 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --learning-rate "${DPO_LR:-7e-6}" \
   --beta "${DPO_BETA:-0.08}" \
+  --loss-type "${DPO_LOSS_TYPE:-robust}" \
+  --label-smoothing "${DPO_LABEL_SMOOTHING:-0.03}" \
   --max-steps "${DPO_MAX_STEPS:--1}" \
   --num-train-epochs "${DPO_EPOCHS:-1}" \
   --per-device-train-batch-size "${DPO_PER_DEVICE_BATCH:-1}" \
@@ -264,6 +266,8 @@ if [ "${ENABLE_GRPO_POLISH:-0}" = "1" ]; then
     --save-steps "${GRPO_SAVE_STEPS:-40}" \
     --eval-steps "${GRPO_EVAL_STEPS:-40}" \
     --logging-steps 5 \
+    --min-reward-std "${GRPO_MIN_REWARD_STD:-0.03}" \
+    --max-zero-std-frac "${GRPO_MAX_ZERO_STD_FRAC:-0.80}" \
     --log-completions \
     --fail-on-weak-reward
   tar_adapter_dir "$GRPO_DIR" "outputs/${OUT_PREFIX}_grpo_lora.tar.gz"

@@ -513,7 +513,7 @@ def test_grpo_expert_reward_distinguishes_wrong_valid_verdict_from_missing(monke
         task_family=["assertion_review_rl", "assertion_review_rl", "assertion_review_rl"],
     )
 
-    assert rewards == [1.0, -0.75, -1.0]
+    assert rewards == [1.0, -0.55, -0.9]
 
 
 def test_grpo_expert_reward_uses_partial_verdict_signal_for_truncated_json(monkeypatch):
@@ -587,3 +587,33 @@ def test_dpo_peft_best_checkpoint_uses_safe_copy_by_default(monkeypatch):
     model = types.SimpleNamespace(peft_config={"default": object()})
 
     assert mod.should_native_load_best_model(args, object(), model) is False
+
+
+def test_sft_training_image_cap_prefers_evidence_named_image(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_evidence_image_select_test")
+
+    row = {
+        "claim": "See figure seven for the ablation",
+        "evidence": {"figure": "figure_7"},
+    }
+    images = ["/tmp/page_001.png", "/tmp/figure_7_panel.png", "/tmp/table_2.png"]
+
+    assert mod._select_training_images_for_memory(row, images, 1) == ["/tmp/figure_7_panel.png"]
+
+
+def test_grpo_canonical_verdict_accepts_common_aliases(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_verdict_alias_test")
+
+    rewards = mod.reward_expert_override_match(
+        prompts=[None, None],
+        completions=[
+            '{"verdict": "unsupported", "rationale": "evidence contradicts it"}',
+            '{"verdict": "approved", "rationale": "ok"}',
+        ],
+        expected_verdict=["reject", "accept"],
+        task_family=["assertion_review_rl", "assertion_review_rl"],
+    )
+
+    assert rewards == [1.0, 1.0]

@@ -58,3 +58,23 @@ def test_dpo_rows_are_built_from_assistant_messages(monkeypatch):
     assert len(dpo) == 1
     assert dpo[0]["chosen"] == '{"verdict":"reject"}'
     assert dpo[0]["metadata"]["synthetic_negative"] is True
+
+
+def test_dpo_rows_include_grpo_reward_target_bootstrap(monkeypatch):
+    mod = _load_builder(monkeypatch)
+    rows = [
+        {
+            "id": "g1",
+            "task_family": "assertion_review_rl",
+            "expected_verdict": "unsupported",
+            "prompt": [{"role": "user", "content": [{"type": "text", "text": "review claim"}]}],
+            "images": ["/tmp/figure_7.png"],
+        }
+    ]
+
+    dpo = mod.make_dpo_rows_from_grpo(rows, synthetic_negatives=True)
+
+    assert len(dpo) == 1
+    assert '"verdict": "reject"' in dpo[0]["chosen"]
+    assert '"verdict": "accept"' in dpo[0]["rejected"]
+    assert dpo[0]["metadata"]["preference_source"] == "grpo_target_bootstrap"

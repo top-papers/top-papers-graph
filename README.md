@@ -211,3 +211,7 @@ The main product artifact chain is now explicitly modeled as:
 `ChunkRecord -> TemporalEvent -> Hypothesis`
 
 `ChunkRecord` is stored in `chunks.jsonl`, reused for Qdrant payloads, temporal graph provenance, and downstream multimodal verification.
+
+## SciReason alignment improvement
+
+See `SCIREASON_ALIGNMENT_IMPROVEMENT_REPORT_RU.md` for the latest DPO-first, reward-audited fine-tuning pipeline patch after the June 2026 DataSphere runs.

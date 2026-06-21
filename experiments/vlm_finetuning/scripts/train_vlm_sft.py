@@ -6,6 +6,7 @@ import inspect
 import importlib.util
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict
@@ -632,6 +633,66 @@ def filter_dataset_by_text_chars(ds, max_text_chars: int, split_name: str, *, al
 
 
 
+_IMAGE_SELECT_TOKEN_RE = re.compile(r"[A-Za-z0-9А-Яа-яёЁ]{3,}", re.UNICODE)
+
+
+def _stable_text_for_image_selection(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(value)
+
+
+def _image_select_tokens(value: Any) -> set[str]:
+    return {m.group(0).lower() for m in _IMAGE_SELECT_TOKEN_RE.finditer(_stable_text_for_image_selection(value))}
+
+
+def _score_training_image(image_ref: Any, row: Dict[str, Any], raw_index: int) -> float:
+    """Deterministic evidence-aware score for the training-time memory projection.
+
+    Full raw JSONL artifacts keep all image references.  When a g2.2-safe cap is
+    needed, this prefers images whose path/basename overlaps with evidence,
+    prompt, claim, metadata, figure/table/page hints, then preserves original
+    order as a stable tie-breaker.
+    """
+    image_text = _stable_text_for_image_selection(image_ref).lower()
+    basename = Path(str(image_ref)).name
+    image_tokens = _image_select_tokens(basename)
+    evidence_tokens = _image_select_tokens({
+        "evidence": row.get("evidence"),
+        "evidence_text": row.get("evidence_text"),
+        "reference_assertions_json": row.get("reference_assertions_json"),
+        "reference_temporal_json": row.get("reference_temporal_json"),
+        "metadata": row.get("metadata"),
+    })
+    row_tokens = _image_select_tokens({
+        "prompt": row.get("prompt"),
+        "messages": row.get("messages"),
+        "claim": row.get("claim"),
+        "question": row.get("question"),
+        "chosen": row.get("chosen"),
+        "rejected": row.get("rejected"),
+        "task_family": row.get("task_family"),
+    })
+    score = 0.0
+    score += 4.0 * len(image_tokens & evidence_tokens)
+    score += 1.0 * len(image_tokens & row_tokens)
+    if "figure" in image_text or "fig" in image_text:
+        score += 1.0
+    if "table" in image_text:
+        score += 1.0
+    if "page" in image_text or "p_" in image_text or "p-" in image_text:
+        score += 0.25
+    return score - raw_index * 1e-6
+
+
+def _select_training_images_for_memory(row: Dict[str, Any], images: list[Any], max_images_per_example: int) -> list[Any]:
+    if max_images_per_example <= 0 or len(images) <= max_images_per_example:
+        return list(images)
+    scored = [(_score_training_image(image, row, idx), idx, image) for idx, image in enumerate(images)]
+    chosen = sorted(scored, key=lambda item: (-item[0], item[1]))[:max_images_per_example]
+    return [image for _score, _idx, image in sorted(chosen, key=lambda item: item[1])]
+
 def cap_dataset_images_for_memory(ds, max_images_per_example: int, split_name: str):
     """Apply a training-only image-count cap after full-data export/audit.
 
@@ -643,9 +704,9 @@ def cap_dataset_images_for_memory(ds, max_images_per_example: int, split_name: s
     artifacts created by the builder.
     """
     if max_images_per_example is None or int(max_images_per_example) <= 0:
-        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     max_images_per_example = int(max_images_per_example)
-    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0}
+    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     for row in ds:
         images = _row_images_for_placeholder_alignment(row)
         extra = max(0, len(images) - max_images_per_example)
@@ -659,7 +720,7 @@ def cap_dataset_images_for_memory(ds, max_images_per_example: int, split_name: s
     def _cap(example: Dict[str, Any]) -> Dict[str, Any]:
         example = dict(example)
         images = _row_images_for_placeholder_alignment(example)
-        kept = images[:max_images_per_example]
+        kept = _select_training_images_for_memory(example, images, max_images_per_example)
         example['images'] = kept
         if kept:
             example['image'] = kept[0]
@@ -1020,7 +1081,7 @@ def main() -> None:
     train_ds, train_image_cap_stats = cap_dataset_images_for_memory(train_ds, args.max_images_per_example, 'train')
     train_ds = train_ds.map(_sanitize_sft_row_for_trl, with_indices=True, desc='Sanitizing train messages for Qwen3-VL')
     _validate_sft_dataset_for_qwen(train_ds, 'train')
-    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     if eval_ds is not None:
         eval_base_dir = Path(args.eval_file).parent if args.eval_file else train_base_dir
         eval_ds = eval_ds.map(lambda example: _normalise_sft_example(example, eval_base_dir))

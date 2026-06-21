@@ -5,6 +5,7 @@ import argparse
 import inspect
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--beta', type=float, default=0.1)
     ap.add_argument('--loss-type', default='sigmoid')
+    ap.add_argument('--label-smoothing', type=float, default=0.0, help='DPO noisy-preference smoothing for robust/cDPO-style losses when supported by installed TRL.')
     ap.add_argument('--use-lora', action='store_true')
     ap.add_argument('--qlora', action='store_true')
     ap.add_argument('--lora-r', type=int, default=16)
@@ -282,11 +284,71 @@ def _value_has_image(value) -> bool:
 
 
 
+_IMAGE_SELECT_TOKEN_RE = re.compile(r"[A-Za-z0-9А-Яа-яёЁ]{3,}", re.UNICODE)
+
+
+def _stable_text_for_image_selection(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(value)
+
+
+def _image_select_tokens(value: Any) -> set[str]:
+    return {m.group(0).lower() for m in _IMAGE_SELECT_TOKEN_RE.finditer(_stable_text_for_image_selection(value))}
+
+
+def _score_training_image(image_ref: Any, row: Dict[str, Any], raw_index: int) -> float:
+    """Deterministic evidence-aware score for the training-time memory projection.
+
+    Full raw JSONL artifacts keep all image references.  When a g2.2-safe cap is
+    needed, this prefers images whose path/basename overlaps with evidence,
+    prompt, claim, metadata, figure/table/page hints, then preserves original
+    order as a stable tie-breaker.
+    """
+    image_text = _stable_text_for_image_selection(image_ref).lower()
+    basename = Path(str(image_ref)).name
+    image_tokens = _image_select_tokens(basename)
+    evidence_tokens = _image_select_tokens({
+        "evidence": row.get("evidence"),
+        "evidence_text": row.get("evidence_text"),
+        "reference_assertions_json": row.get("reference_assertions_json"),
+        "reference_temporal_json": row.get("reference_temporal_json"),
+        "metadata": row.get("metadata"),
+    })
+    row_tokens = _image_select_tokens({
+        "prompt": row.get("prompt"),
+        "messages": row.get("messages"),
+        "claim": row.get("claim"),
+        "question": row.get("question"),
+        "chosen": row.get("chosen"),
+        "rejected": row.get("rejected"),
+        "task_family": row.get("task_family"),
+    })
+    score = 0.0
+    score += 4.0 * len(image_tokens & evidence_tokens)
+    score += 1.0 * len(image_tokens & row_tokens)
+    if "figure" in image_text or "fig" in image_text:
+        score += 1.0
+    if "table" in image_text:
+        score += 1.0
+    if "page" in image_text or "p_" in image_text or "p-" in image_text:
+        score += 0.25
+    return score - raw_index * 1e-6
+
+
+def _select_training_images_for_memory(row: Dict[str, Any], images: list[Any], max_images_per_example: int) -> list[Any]:
+    if max_images_per_example <= 0 or len(images) <= max_images_per_example:
+        return list(images)
+    scored = [(_score_training_image(image, row, idx), idx, image) for idx, image in enumerate(images)]
+    chosen = sorted(scored, key=lambda item: (-item[0], item[1]))[:max_images_per_example]
+    return [image for _score, _idx, image in sorted(chosen, key=lambda item: item[1])]
+
 def cap_dpo_images_for_memory(ds, max_images_per_example: int, split_name: str):
     if max_images_per_example is None or int(max_images_per_example) <= 0:
-        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     max_images_per_example = int(max_images_per_example)
-    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0}
+    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     for row in ds:
         images = []
         images.extend(_normalize_image_list(row.get('images'), Path('.')))
@@ -311,7 +373,7 @@ def cap_dpo_images_for_memory(ds, max_images_per_example: int, split_name: str):
         for image in images:
             if image not in deduped:
                 deduped.append(image)
-        kept = deduped[:max_images_per_example]
+        kept = _select_training_images_for_memory(example, deduped, max_images_per_example)
         example['images'] = kept
         if kept:
             example['image'] = kept[0]
@@ -371,8 +433,8 @@ def main() -> None:
     eval_ds = ds.get('eval')
 
     train_ds = train_ds.map(make_dpo_formatter(args.train_file.parent))
-    train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
-    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
+    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     if args.max_images_per_example and int(args.max_images_per_example) > 0:
         train_ds, train_image_cap_stats = cap_dpo_images_for_memory(train_ds, args.max_images_per_example, 'train')
     if eval_ds is not None:
@@ -445,6 +507,7 @@ def main() -> None:
         logging_strategy='steps',
         beta=args.beta,
         loss_type=args.loss_type,
+        label_smoothing=args.label_smoothing,
         load_best_model_at_end=should_native_load_best_model(args, eval_ds, model),
         metric_for_best_model=args.metric_for_best_model,
         greater_is_better=args.greater_is_better,

@@ -140,7 +140,12 @@ def audit_reward_trace_file(path: Path, *, min_reward_std: float, max_zero_std_f
     for component, values in sorted(by_component.items()):
         mean, std = _mean_std(values)
         component_stats[component] = {"count": len(values), "mean": round(mean, 6), "std": round(std, 6), "min": min(values), "max": max(values)}
-        if len(values) >= 8 and std < min_reward_std and component not in {"label_exact_match"}:
+        if (
+            len(values) >= 8
+            and std < min_reward_std
+            and component not in {"label_exact_match"}
+            and not (abs(min(values)) < 1e-12 and abs(max(values)) < 1e-12)
+        ):
             weak_components.append(component)
     group_stds = []
     for values in by_group.values():
@@ -156,6 +161,8 @@ def audit_reward_trace_file(path: Path, *, min_reward_std: float, max_zero_std_f
         "weak_components": weak_components,
         "group_count": len(group_stds),
         "group_zero_std_fraction": round(zero_std_frac, 6),
+        "active_group_zero_std_fraction": round(active_zero_std_frac, 6),
+        "active_group_count": len(active_group_stds),
         "thresholds": {"min_reward_std": min_reward_std, "max_zero_std_frac": max_zero_std_frac},
         "weak_reward": weak_reward,
     }
@@ -257,6 +264,41 @@ def parse_prediction_object(completion: Any) -> Optional[Any]:
     return parse_json_candidate(completion_to_text(completion))
 
 
+
+VERDICT_ALIASES = {
+    "accept": {"accept", "accepted", "valid", "supported", "true", "correct", "ok", "approve", "approved"},
+    "reject": {"reject", "rejected", "invalid", "unsupported", "false", "incorrect", "wrong", "deny", "denied", "not supported"},
+    "revise": {"revise", "revision", "needs revision", "needs_revision", "fix", "modify", "partial", "needs changes"},
+}
+
+
+def canonical_verdict(value: Any) -> str:
+    text = norm_text(value).replace("_", " ").replace("-", " ")
+    if not text:
+        return ""
+    # Exact alias matching first; avoid classifying "unsupported" as "accept"
+    # merely because it contains the substring "supported".
+    for canonical, aliases in VERDICT_ALIASES.items():
+        if text == canonical or text in aliases:
+            return canonical
+    if text.startswith("un") and ("support" in text or "valid" in text or "correct" in text):
+        return "reject"
+    if "not" in text and ("support" in text or "valid" in text or "correct" in text):
+        return "reject"
+    for canonical, aliases in VERDICT_ALIASES.items():
+        if any((" " in alias) and alias in text for alias in aliases):
+            return canonical
+    return text
+
+
+def canonical_label(value: Any) -> str:
+    obj = parse_json_candidate(completion_to_text(value)) if not isinstance(value, (dict, list)) else value
+    if isinstance(obj, dict):
+        for key in ("label", "class_label", "answer", "prediction", "verdict", "category"):
+            if obj.get(key) not in (None, ""):
+                return norm_text(obj.get(key))
+    return norm_text(value)
+
 def parse_label_candidate(completion: Any) -> str:
     text = completion_to_text(completion).strip()
     obj = parse_json_candidate(text)
@@ -342,8 +384,8 @@ def reward_label_exact_match(prompts, completions, reference_label=None, label_t
         if tf != "image_label_rl" or not target:
             rewards.append(0.0)
             continue
-        pred = norm_text(parse_label_candidate(completion))
-        target_norm = norm_text(target)
+        pred = canonical_label(parse_label_candidate(completion))
+        target_norm = canonical_label(target)
         if pred == target_norm:
             rewards.append(1.0)
         elif target_norm and target_norm in pred:
@@ -391,7 +433,7 @@ def reward_graph_consistency(prompts, completions, reference_assertions_json=Non
 
     rewards = []
     for completion, ref_json, tf in zip(completions, reference_assertions_json, task_family):
-        if tf not in {"trajectory_reasoning_rl", "assertion_review_rl"}:
+        if tf != "trajectory_reasoning_rl":
             rewards.append(0.0)
             continue
         
@@ -409,7 +451,7 @@ def reward_graph_consistency(prompts, completions, reference_assertions_json=Non
             # for reconstructing the full assertion graph. Penalize missing graph
             # output for trajectory reconstruction, but keep assertion review
             # neutral unless the model actually proposes assertions to compare.
-            rewards.append(0.0 if tf == "assertion_review_rl" else (-1.0 if ref_keys else 0.0))
+            rewards.append(-1.0 if ref_keys else 0.0)
             continue
 
         if not ref_keys:
@@ -507,37 +549,41 @@ def reward_expert_override_match(prompts, completions, expected_verdict=None, sa
         if tf not in {"assertion_review_rl", "mm_review_rl", "temporal_fix_rl"}:
             rewards.append(0.0)
             continue
-            
+        verdict_norm = canonical_verdict(verdict)
+        if not verdict_norm:
+            rewards.append(0.0)
+            continue
+
         pred_obj = parse_prediction_object(completion)
         if not isinstance(pred_obj, dict):
-            text_norm = norm_text(completion_to_text(completion))
-            verdict_norm = norm_text(verdict)
-            if verdict_norm and verdict_norm in text_norm:
-                rewards.append(-0.25)
+            text_norm = canonical_verdict(completion_to_text(completion))
+            # Dense signal for clipped JSON/text: exact mention of the target is
+            # useful but must stay below a valid parsed JSON answer.
+            if text_norm == verdict_norm or verdict_norm in norm_text(completion_to_text(completion)):
+                rewards.append(0.35)
             else:
-                rewards.append(partial_field_presence_reward(completion, ("verdict", "mm_verdict"), empty_reward=-1.0))
+                rewards.append(partial_field_presence_reward(completion, ("verdict", "mm_verdict"), empty_reward=-0.75))
             continue
-            
+
         if tf == "mm_review_rl":
             pred_verdict = pred_obj.get("mm_verdict") or pred_obj.get("verdict")
         else:
-            pred_verdict = pred_obj.get("verdict")
-            
-        if not verdict:
-            rewards.append(0.0)
+            pred_verdict = pred_obj.get("verdict") or pred_obj.get("expected_verdict")
+
+        pred_norm = canonical_verdict(pred_verdict)
+        rationale = completion_to_text(
+            pred_obj.get("rationale") or pred_obj.get("mm_rationale") or pred_obj.get("comment") or ""
+        ).strip()
+        if pred_norm == verdict_norm:
+            rewards.append(1.0 if rationale else 0.75)
+        elif not pred_norm:
+            rewards.append(-0.9)
+        elif pred_norm in {"accept", "reject", "revise"}:
+            rewards.append(-0.55)
+        elif verdict_norm in norm_text(completion_to_text(completion)):
+            rewards.append(0.15)
         else:
-            pred_norm = norm_text(pred_verdict)
-            verdict_norm = norm_text(verdict)
-            if pred_norm == verdict_norm:
-                rewards.append(1.0)
-            elif not pred_norm:
-                rewards.append(-1.0)
-            elif verdict_norm and verdict_norm in norm_text(completion_to_text(completion)):
-                rewards.append(-0.25)
-            elif pred_norm in {"accept", "accepted", "reject", "rejected", "revise", "needs revision", "needs_revision", "unknown"}:
-                rewards.append(-0.75)
-            else:
-                rewards.append(-1.0)
+            rewards.append(-0.9)
             
     REWARD_LOGGER.append("expert_override_match", trainer_state, sample_id, domain, task_family, rewards)
     return rewards
@@ -1018,11 +1064,71 @@ def _filter_text_only_vlm_grpo_rows(ds, split_name: str, *, required: bool = Fal
 
 
 
+_IMAGE_SELECT_TOKEN_RE = re.compile(r"[A-Za-z0-9А-Яа-яёЁ]{3,}", re.UNICODE)
+
+
+def _stable_text_for_image_selection(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(value)
+
+
+def _image_select_tokens(value: Any) -> set[str]:
+    return {m.group(0).lower() for m in _IMAGE_SELECT_TOKEN_RE.finditer(_stable_text_for_image_selection(value))}
+
+
+def _score_training_image(image_ref: Any, row: Dict[str, Any], raw_index: int) -> float:
+    """Deterministic evidence-aware score for the training-time memory projection.
+
+    Full raw JSONL artifacts keep all image references.  When a g2.2-safe cap is
+    needed, this prefers images whose path/basename overlaps with evidence,
+    prompt, claim, metadata, figure/table/page hints, then preserves original
+    order as a stable tie-breaker.
+    """
+    image_text = _stable_text_for_image_selection(image_ref).lower()
+    basename = Path(str(image_ref)).name
+    image_tokens = _image_select_tokens(basename)
+    evidence_tokens = _image_select_tokens({
+        "evidence": row.get("evidence"),
+        "evidence_text": row.get("evidence_text"),
+        "reference_assertions_json": row.get("reference_assertions_json"),
+        "reference_temporal_json": row.get("reference_temporal_json"),
+        "metadata": row.get("metadata"),
+    })
+    row_tokens = _image_select_tokens({
+        "prompt": row.get("prompt"),
+        "messages": row.get("messages"),
+        "claim": row.get("claim"),
+        "question": row.get("question"),
+        "chosen": row.get("chosen"),
+        "rejected": row.get("rejected"),
+        "task_family": row.get("task_family"),
+    })
+    score = 0.0
+    score += 4.0 * len(image_tokens & evidence_tokens)
+    score += 1.0 * len(image_tokens & row_tokens)
+    if "figure" in image_text or "fig" in image_text:
+        score += 1.0
+    if "table" in image_text:
+        score += 1.0
+    if "page" in image_text or "p_" in image_text or "p-" in image_text:
+        score += 0.25
+    return score - raw_index * 1e-6
+
+
+def _select_training_images_for_memory(row: Dict[str, Any], images: list[Any], max_images_per_example: int) -> list[Any]:
+    if max_images_per_example <= 0 or len(images) <= max_images_per_example:
+        return list(images)
+    scored = [(_score_training_image(image, row, idx), idx, image) for idx, image in enumerate(images)]
+    chosen = sorted(scored, key=lambda item: (-item[0], item[1]))[:max_images_per_example]
+    return [image for _score, _idx, image in sorted(chosen, key=lambda item: item[1])]
+
 def cap_grpo_images_for_memory(ds, max_images_per_example: int, split_name: str):
     if max_images_per_example is None or int(max_images_per_example) <= 0:
-        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+        return ds, {"enabled": False, "max_images_per_example": int(max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     max_images_per_example = int(max_images_per_example)
-    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0}
+    stats = {"enabled": True, "max_images_per_example": max_images_per_example, "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     for row in ds:
         images = []
         images.extend(_normalize_image_list(row.get('images'), Path('.')))
@@ -1049,7 +1155,7 @@ def cap_grpo_images_for_memory(ds, max_images_per_example: int, split_name: str)
         for image in images:
             if image not in deduped:
                 deduped.append(image)
-        kept = deduped[:max_images_per_example]
+        kept = _select_training_images_for_memory(example, deduped, max_images_per_example)
         example['images'] = kept
         if kept:
             example['image'] = kept[0]
@@ -1230,8 +1336,8 @@ def main() -> None:
 
     format_grpo = make_grpo_formatter(args.train_file.parent)
     train_ds = train_ds.map(format_grpo)
-    train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
-    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0}
+    train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
+    eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     if args.max_images_per_example and int(args.max_images_per_example) > 0:
         train_ds, train_image_cap_stats = cap_grpo_images_for_memory(train_ds, args.max_images_per_example, 'train')
     if eval_ds is not None:

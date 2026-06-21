@@ -51,12 +51,19 @@ def audit(path: Path, min_reward_std: float, max_zero_std_frac: float) -> dict[s
             "count": len(values), "mean": round(mean, 6), "std": round(std, 6),
             "min": min(values), "max": max(values),
         }
-        if len(values) >= 8 and std < min_reward_std and component not in {"label_exact_match"}:
+        if (
+            len(values) >= 8
+            and std < min_reward_std
+            and component not in {"label_exact_match"}
+            and not (abs(min(values)) < 1e-12 and abs(max(values)) < 1e-12)
+        ):
             weak_components.append(component)
 
     group_stds = [mean_std(values)[1] for values in by_group.values() if len(values) > 1]
+    active_group_stds = [mean_std(values)[1] for values in by_group.values() if len(values) > 1 and any(abs(float(v)) > 1e-12 for v in values)]
     zero_std_frac = sum(1 for x in group_stds if x < 1e-9) / len(group_stds) if group_stds else 1.0
-    weak_reward = bool(weak_components) or zero_std_frac > max_zero_std_frac
+    active_zero_std_frac = sum(1 for x in active_group_stds if x < 1e-9) / len(active_group_stds) if active_group_stds else 1.0
+    weak_reward = bool(weak_components) or active_zero_std_frac > max_zero_std_frac
     return {
         "status": "fail" if weak_reward else "pass",
         "rows": len(rows),
@@ -64,6 +71,8 @@ def audit(path: Path, min_reward_std: float, max_zero_std_frac: float) -> dict[s
         "weak_components": weak_components,
         "group_count": len(group_stds),
         "group_zero_std_fraction": round(zero_std_frac, 6),
+        "active_group_zero_std_fraction": round(active_zero_std_frac, 6),
+        "active_group_count": len(active_group_stds),
         "thresholds": {"min_reward_std": min_reward_std, "max_zero_std_frac": max_zero_std_frac},
     }
 

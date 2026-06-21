@@ -117,6 +117,22 @@ def first_nonempty(*values: Any, default: Any = None) -> Any:
     return default
 
 
+def compact_dict(obj: Mapping[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for k, v in obj.items():
+        if isinstance(v, Mapping):
+            vv = compact_dict(v)
+            if vv:
+                out[k] = vv
+        elif isinstance(v, list):
+            vv = [x for x in v if x not in (None, "", [], {})]
+            if vv:
+                out[k] = vv
+        elif v not in (None, "", [], {}):
+            out[k] = v
+    return out
+
+
 def metadata(row: Mapping[str, Any]) -> Mapping[str, Any]:
     value = row.get("metadata")
     return value if isinstance(value, Mapping) else {}
@@ -420,6 +436,153 @@ def make_dpo_rows_from_sft(rows: Sequence[Dict[str, Any]], synthetic_negatives: 
     return dpo_rows
 
 
+
+VERDICT_ALIASES = {
+    "accept": {"accept", "accepted", "valid", "supported", "true", "correct", "ok", "approve", "approved"},
+    "reject": {"reject", "rejected", "invalid", "unsupported", "false", "incorrect", "wrong", "deny", "denied"},
+    "revise": {"revise", "revision", "needs revision", "needs_revision", "fix", "correct", "modify", "partial"},
+}
+
+
+def canonical_verdict(value: Any) -> str:
+    text = normalize_token_text(value).replace("_", " ").replace("-", " ")
+    if not text:
+        return "unknown"
+    # Exact alias matching first; avoid classifying "unsupported" as "accept"
+    # merely because it contains the substring "supported".
+    for canonical, aliases in VERDICT_ALIASES.items():
+        if text == canonical or text in aliases:
+            return canonical
+    if text.startswith("un") and ("support" in text or "valid" in text or "correct" in text):
+        return "reject"
+    if "not" in text and ("support" in text or "valid" in text or "correct" in text):
+        return "reject"
+    for canonical, aliases in VERDICT_ALIASES.items():
+        if any((" " in alias) and alias in text for alias in aliases):
+            return canonical
+    return text
+
+
+def opposite_verdict(verdict: str) -> str:
+    verdict = canonical_verdict(verdict)
+    if verdict == "accept":
+        return "reject"
+    if verdict == "reject":
+        return "accept"
+    if verdict == "revise":
+        return "accept"
+    return "unknown"
+
+
+def ensure_text_response(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return stable_json(value)
+
+
+def make_dpo_rows_from_grpo(rows: Sequence[Dict[str, Any]], synthetic_negatives: bool) -> List[Dict[str, Any]]:
+    """Build additional offline preference pairs from explicit RL targets.
+
+    The last successful run showed that GRPO reward variance is still weak.  These
+    rows move the deterministic supervision signal into DPO first, using the RL
+    export's expected verdict/temporal/assertion targets as preferred answers and
+    a task-aware hard negative as the rejected completion.
+    """
+    dpo_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        tf = str(row.get("task_family") or "unknown")
+        chosen_obj: Any | None = None
+        rejected_obj: Any | None = None
+        if tf in {"assertion_review_rl", "mm_review_rl"}:
+            expected = first_nonempty(
+                nested_get(row, "expected_verdict", "reference_verdict", "verdict", "mm_verdict"),
+                default=None,
+            )
+            if expected in (None, ""):
+                continue
+            verdict = canonical_verdict(expected)
+            chosen_obj = {
+                "verdict" if tf == "assertion_review_rl" else "mm_verdict": verdict,
+                "rationale": first_nonempty(row.get("rationale"), row.get("evidence_text"), row.get("evidence"), default="Use the provided paper evidence and expert annotation."),
+            }
+            rejected_obj = {
+                "verdict" if tf == "assertion_review_rl" else "mm_verdict": opposite_verdict(verdict),
+                "rationale": "Incorrect preference bootstrap negative: contradicts the expert target.",
+            }
+        elif tf == "temporal_fix_rl":
+            ref = first_nonempty(
+                nested_get(row, "reference_temporal_json", "expected_output"),
+                compact_dict({
+                    "start_date": nested_get(row, "corrected_start_date", "start_date"),
+                    "end_date": nested_get(row, "corrected_end_date", "end_date"),
+                    "time_source": nested_get(row, "time_source"),
+                }),
+                default=None,
+            )
+            if ref in (None, "", [], {}):
+                continue
+            chosen_obj = ref
+            rejected_obj = {"start_date": "unknown", "end_date": "unknown", "time_source": "missing"}
+        elif tf == "trajectory_reasoning_rl":
+            ref = first_nonempty(nested_get(row, "reference_assertions_json", "reference_json", "expected_output"), default=None)
+            if ref in (None, "", [], {}):
+                continue
+            chosen_obj = {"inference": "supported", "next_question": "verify remaining evidence", "extracted_assertions": ref}
+            rejected_obj = {"inference": "unsupported", "next_question": "unknown", "extracted_assertions": []}
+        elif tf == "image_label_rl":
+            label = first_nonempty(nested_get(row, "reference_label", "label_text"), default=None)
+            if not label:
+                continue
+            chosen_obj = {"label": label}
+            rejected_obj = {"label": "unknown"}
+        else:
+            continue
+
+        if not synthetic_negatives and not first_nonempty(row.get("rejected"), row.get("dispreferred"), row.get("negative_response")):
+            continue
+        chosen = ensure_text_response(chosen_obj)
+        rejected = ensure_text_response(first_nonempty(row.get("rejected"), row.get("dispreferred"), row.get("negative_response"), rejected_obj))
+        if normalize_token_text(chosen) == normalize_token_text(rejected):
+            continue
+        rec: Dict[str, Any] = {
+            "id": f"dpo-grpo:{row.get('id')}",
+            "task_family": tf.replace("_rl", ""),
+            "domain": row.get("domain"),
+            "prompt": prompt_messages_without_answer(row),
+            "chosen": chosen,
+            "rejected": rejected,
+            "metadata": {
+                "source_id": row.get("id"),
+                "source_task_family": tf,
+                "leakage_group": row.get("leakage_group"),
+                "synthetic_negative": not bool(first_nonempty(row.get("rejected"), row.get("dispreferred"), row.get("negative_response"))),
+                "preference_source": "grpo_target_bootstrap",
+            },
+        }
+        if is_multimodal(row):
+            rec["images"] = row.get("images") or as_list(row.get("image"))
+            if rec["images"]:
+                rec["image"] = rec["images"][0]
+        dpo_rows.append(rec)
+    return dpo_rows
+
+
+def dedupe_dpo_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen: set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        key = hashlib.sha1(stable_json({
+            "prompt": row.get("prompt"),
+            "chosen": row.get("chosen"),
+            "rejected": row.get("rejected"),
+            "images": row.get("images"),
+        }).encode("utf-8", errors="ignore")).hexdigest()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
 def row_has_any(row: Mapping[str, Any], keys: Sequence[str]) -> bool:
     for key in keys:
         if row.get(key) not in (None, "", [], {}):
@@ -534,7 +697,9 @@ def main() -> None:
     sft_train, sft_eval, sft_leakage = deterministic_group_split(sft_rows, args.eval_ratio, args.seed)
     grpo_train_all, grpo_eval_all, grpo_leakage = deterministic_group_split(grpo_rows, args.eval_ratio, args.seed + 31)
 
-    dpo_all = make_dpo_rows_from_sft(sft_rows, synthetic_negatives=not args.no_synthetic_dpo_negatives)
+    dpo_from_sft = make_dpo_rows_from_sft(sft_rows, synthetic_negatives=not args.no_synthetic_dpo_negatives)
+    dpo_from_grpo = make_dpo_rows_from_grpo(grpo_rows, synthetic_negatives=not args.no_synthetic_dpo_negatives)
+    dpo_all = dedupe_dpo_rows(dpo_from_sft + dpo_from_grpo)
     dpo_train, dpo_eval, dpo_leakage = deterministic_group_split(dpo_all, args.eval_ratio, args.seed + 61)
 
     grpo_ready_all, reward_audit_all = filter_reward_ready_grpo(grpo_rows)
@@ -598,6 +763,8 @@ def main() -> None:
             "sft_vlm_eval": sum(1 for r in sft_eval if is_multimodal(r)),
             "dpo_train": len(dpo_train),
             "dpo_eval": len(dpo_eval),
+            "dpo_from_sft": len(dpo_from_sft),
+            "dpo_from_grpo": len(dpo_from_grpo),
             "grpo_train_verified": len(grpo_ready_train),
             "grpo_eval_verified": len(grpo_ready_eval),
         },
@@ -607,6 +774,7 @@ def main() -> None:
             "image_selection": "all_available_refs" if not (args.max_images_per_example_sft > 0 or args.max_images_per_example_grpo > 0) else "relevance_top_k_then_original_order",
             "full_data_usage_audit": "recommended",
             "dpo_negatives": "synthetic_bootstrap_enabled" if not args.no_synthetic_dpo_negatives else "explicit_pairs_only",
+            "dpo_sources": {"sft_rows": len(dpo_from_sft), "grpo_reward_targets": len(dpo_from_grpo)},
             "grpo": "verified_reward_target_rows_only",
         },
     }
