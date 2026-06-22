@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-from datasets import Image as HFImage, Sequence
+from datasets import Dataset, Image as HFImage, Sequence
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 try:
@@ -1162,6 +1162,62 @@ def make_grpo_formatter(base_dir: Path):
         return example
     return format_grpo
 
+
+def _read_json_records(path: str | Path) -> list[Dict[str, Any]]:
+    path = Path(path)
+    text = path.read_text(encoding='utf-8')
+    if not text.strip():
+        return []
+    if path.suffix == '.jsonl':
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    obj = json.loads(text)
+    if isinstance(obj, list):
+        return obj
+    if isinstance(obj, dict):
+        for key in ('data', 'rows', 'examples'):
+            if isinstance(obj.get(key), list):
+                return obj[key]
+        return [obj]
+    raise ValueError(f'Unsupported JSON top-level value in {path}: {type(obj).__name__}')
+
+
+def _arrow_stable_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _load_grpo_json_dataset_loose(path: str | Path, base_dir: Path):
+    """Load GRPO JSONL without Arrow inferring heterogeneous metadata structs.
+
+    Reward functions need scalar target columns plus prompt/images.  Nested raw
+    metadata is useful for audits but not for GRPOTrainer; serialize nested
+    non-prompt values to JSON strings before creating the Dataset.
+    """
+    formatter = make_grpo_formatter(base_dir)
+    rows = []
+    for raw in _read_json_records(path):
+        if not isinstance(raw, dict):
+            continue
+        ex = formatter(dict(raw))
+        images = _normalize_image_list(ex.get('images'), Path('.'))
+        image = ex.get('image')
+        if image in (None, '', []):
+            image = images[0] if images else None
+        projected = {
+            'prompt': ex.get('prompt') or [],
+            'images': images,
+            'image': image,
+        }
+        for key, value in ex.items():
+            if key in projected or key in ('prompt_chat', 'prompt_messages'):
+                continue
+            projected[key] = _arrow_stable_value(value)
+        rows.append(projected)
+    if not rows:
+        raise ValueError(f'No GRPO rows found in {path}')
+    return Dataset.from_list(rows)
+
 def _value_has_image(value) -> bool:
     if value in (None, ''):
         return False
@@ -1485,23 +1541,14 @@ def main() -> None:
     
     REWARD_LOGGER.path = args.output_dir / "grpo_reward_trace.jsonl"
 
-    data_files = {'train': str(args.train_file)}
-    if args.eval_file: 
-        data_files['eval'] = str(args.eval_file)
-        
-    ds = load_dataset('json', data_files=data_files)
-    train_ds = ds['train']
-    eval_ds = ds.get('eval')
+    train_ds = _load_grpo_json_dataset_loose(args.train_file, args.train_file.parent)
+    eval_ds = _load_grpo_json_dataset_loose(args.eval_file, args.eval_file.parent) if args.eval_file else None
 
-    format_grpo = make_grpo_formatter(args.train_file.parent)
-    train_ds = train_ds.map(format_grpo)
     train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     if args.max_images_per_example and int(args.max_images_per_example) > 0:
         train_ds, train_image_cap_stats = cap_grpo_images_for_memory(train_ds, args.max_images_per_example, 'train')
     if eval_ds is not None:
-        eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
-        eval_ds = eval_ds.map(make_grpo_formatter(eval_base_dir))
         if args.max_images_per_example and int(args.max_images_per_example) > 0:
             eval_ds, eval_image_cap_stats = cap_grpo_images_for_memory(eval_ds, args.max_images_per_example, 'eval')
 

@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from datasets import Image as HFImage, Sequence
+from datasets import Dataset, Image as HFImage, Sequence
 from datasets import load_dataset
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -306,6 +306,54 @@ def make_dpo_formatter(base_dir: Path):
     return format_dpo
 
 
+
+def _read_json_records(path: str | Path) -> list[dict[str, Any]]:
+    path = Path(path)
+    text = path.read_text(encoding='utf-8')
+    if not text.strip():
+        return []
+    if path.suffix == '.jsonl':
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    obj = json.loads(text)
+    if isinstance(obj, list):
+        return obj
+    if isinstance(obj, dict):
+        for key in ('data', 'rows', 'examples'):
+            if isinstance(obj.get(key), list):
+                return obj[key]
+        return [obj]
+    raise ValueError(f'Unsupported JSON top-level value in {path}: {type(obj).__name__}')
+
+
+def _load_dpo_json_dataset_loose(path: str | Path, base_dir: Path):
+    """Load DPO JSONL through a stable preference-column projection.
+
+    Raw v2 rows may contain heterogeneous metadata dictionaries that break
+    Arrow schema inference in ``load_dataset('json')``.  DPOTrainer only needs
+    prompt/chosen/rejected plus optional image columns, so normalize those before
+    constructing the Dataset.
+    """
+    formatter = make_dpo_formatter(base_dir)
+    rows = []
+    for raw in _read_json_records(path):
+        if not isinstance(raw, dict):
+            continue
+        ex = formatter(dict(raw))
+        images = _normalize_image_list(ex.get('images'), Path('.'))
+        image = ex.get('image')
+        if image in (None, '', []):
+            image = images[0] if images else None
+        rows.append({
+            'prompt': ex.get('prompt') or [],
+            'chosen': ex.get('chosen') or '',
+            'rejected': ex.get('rejected') or '',
+            'images': images,
+            'image': image,
+        })
+    if not rows:
+        raise ValueError(f'No DPO rows found in {path}')
+    return Dataset.from_list(rows)
+
 def _value_has_image(value) -> bool:
     if value in (None, ''):
         return False
@@ -458,21 +506,14 @@ def main() -> None:
     if args.loss_weights is not None and len(args.loss_weights) != len(args.loss_type):
         raise ValueError('--loss-weights length must match --loss-type length')
 
-    data_files = {'train': str(args.train_file)}
-    if args.eval_file:
-        data_files['eval'] = str(args.eval_file)
-    ds = load_dataset('json', data_files=data_files)
-    train_ds = ds['train']
-    eval_ds = ds.get('eval')
+    train_ds = _load_dpo_json_dataset_loose(args.train_file, args.train_file.parent)
+    eval_ds = _load_dpo_json_dataset_loose(args.eval_file, args.eval_file.parent) if args.eval_file else None
 
-    train_ds = train_ds.map(make_dpo_formatter(args.train_file.parent))
     train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     if args.max_images_per_example and int(args.max_images_per_example) > 0:
         train_ds, train_image_cap_stats = cap_dpo_images_for_memory(train_ds, args.max_images_per_example, 'train')
     if eval_ds is not None:
-        eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
-        eval_ds = eval_ds.map(make_dpo_formatter(eval_base_dir))
         if args.max_images_per_example and int(args.max_images_per_example) > 0:
             eval_ds, eval_image_cap_stats = cap_dpo_images_for_memory(eval_ds, args.max_images_per_example, 'eval')
 

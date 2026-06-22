@@ -6,6 +6,12 @@ import types
 from pathlib import Path
 
 
+class _DummyDataset(list):
+    @classmethod
+    def from_list(cls, rows):
+        return cls(rows)
+
+
 class _Dummy:
     def __init__(self, *args, **kwargs):
         pass
@@ -17,6 +23,7 @@ class _Dummy:
 
 def _install_training_stubs(monkeypatch):
     datasets = types.ModuleType("datasets")
+    datasets.Dataset = _DummyDataset
     datasets.Image = _Dummy
     datasets.Sequence = lambda feature: ("sequence", feature)
     datasets.load_dataset = lambda *args, **kwargs: None
@@ -40,7 +47,7 @@ def _install_training_stubs(monkeypatch):
     transformers.set_seed = lambda seed: None
 
     trl = types.ModuleType("trl")
-    for attr in ["SFTConfig", "SFTTrainer", "GRPOConfig", "GRPOTrainer"]:
+    for attr in ["SFTConfig", "SFTTrainer", "DPOConfig", "DPOTrainer", "GRPOConfig", "GRPOTrainer"]:
         setattr(trl, attr, _Dummy)
 
     torch = types.ModuleType("torch")
@@ -667,3 +674,52 @@ def test_dpo_formatter_wraps_string_completions_for_conversational_prompt(monkey
     assert out["chosen"] == [{"role": "assistant", "content": '{"verdict":"reject"}'}]
     assert out["rejected"] == [{"role": "assistant", "content": '{"verdict":"accept"}'}]
     assert out["images"] == ["/tmp/page_001.png"]
+
+
+def test_sft_loose_json_loader_ignores_heterogeneous_metadata(monkeypatch, tmp_path):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_loose_loader_test")
+    path = tmp_path / "sft.jsonl"
+    rows = [
+        {"messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}], "metadata": {"extra": {"x": 1}}},
+        {"messages": [{"role": "user", "content": "q2"}, {"role": "assistant", "content": "a2"}], "metadata": {"extra": "x", "graph_kind": "temporal", "importance_score": 0.2}},
+    ]
+    path.write_text("\n".join(__import__("json").dumps(r) for r in rows), encoding="utf-8")
+    ds = mod._load_sft_json_dataset_loose(path, tmp_path)
+    assert len(ds) == 2
+    assert set(ds[0]) == {"messages", "images", "image"}
+
+
+def test_dpo_loose_json_loader_projects_preference_columns(monkeypatch, tmp_path):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_dpo.py", "train_vlm_dpo_loose_loader_test")
+    path = tmp_path / "dpo.jsonl"
+    row = {
+        "prompt": [{"role": "user", "content": "q"}],
+        "chosen": "good",
+        "rejected": "bad",
+        "metadata": {"extra": {"x": 1}, "graph_kind": "semantic"},
+    }
+    path.write_text(__import__("json").dumps(row) + "\n", encoding="utf-8")
+    ds = mod._load_dpo_json_dataset_loose(path, tmp_path)
+    assert len(ds) == 1
+    assert ds[0]["chosen"] == [{"role": "assistant", "content": "good"}]
+    assert set(ds[0]) == {"prompt", "chosen", "rejected", "images", "image"}
+
+
+def test_grpo_loose_json_loader_serializes_nested_non_prompt_values(monkeypatch, tmp_path):
+    _install_training_stubs(monkeypatch)
+    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_loose_loader_test")
+    path = tmp_path / "grpo.jsonl"
+    row = {
+        "prompt": [{"role": "user", "content": "q"}],
+        "reference_assertions_json": [{"id": "a1"}],
+        "metadata": {"extra": {"x": 1}, "graph_kind": "temporal", "importance_score": 0.3},
+        "expected_verdict": "accept",
+    }
+    path.write_text(__import__("json").dumps(row) + "\n", encoding="utf-8")
+    ds = mod._load_grpo_json_dataset_loose(path, tmp_path)
+    assert len(ds) == 1
+    assert isinstance(ds[0]["metadata"], str)
+    assert isinstance(ds[0]["reference_assertions_json"], str)
+    assert ds[0]["expected_verdict"] == "accept"
