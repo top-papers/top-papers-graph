@@ -1,0 +1,28 @@
+{
+  "started_at_utc": "20260622T181106Z",
+  "project_id": "dummy",
+  "config": "experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml",
+  "expected_pipeline": [
+    "text-SFT",
+    "VLM-SFT",
+    "robust mixed DPO",
+    "optional GRPO polish",
+    "Hugging Face upload"
+  ],
+  "managed_entrypoint": "bash experiments/vlm_finetuning/datasphere/launch_examples.sh hf-full-managed",
+  "job_id": null,
+  "ttl_days": 1,
+  "commands": {
+    "execute": [
+      "datasphere",
+      "project",
+      "job",
+      "execute",
+      "-p",
+      "dummy",
+      "-c",
+      "experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml"
+    ]
+  },
+  "status": "planned"
+}
