@@ -2,8 +2,8 @@ name: hf-top-papers-qwen3vl-8b-sft-dpo-grpo-v2-g2-2
 desc: >-
   Recommended v2 SciReason fine-tuning pipeline for Qwen3-VL-8B-Instruct:
   export-only leakage-safe dataset build, text-only SFT with assistant-only loss,
-  multimodal SFT on evidence images, DPO as the main alignment stage, and optional
-  short GRPO polish gated by ENABLE_GRPO_POLISH.
+  multimodal SFT on evidence images, DPO as the main alignment stage, and
+  enabled short GRPO polish after DPO by default.
 cmd: bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_dpo_grpo_v2.sh
 env:
   python:
@@ -26,13 +26,19 @@ env:
   - MAX_IMAGES_PER_EXAMPLE_GRPO: 0
   - BASE_MODEL: Qwen/Qwen3-VL-8B-Instruct
   - OUT_PREFIX: hf_top_papers_qwen3vl_8b_v2
+  - HF_UPLOAD_AFTER_TRAINING: '1'
+  - HF_REPO_ID: top-papers/Qwen3-VL-8B-Instruct-scireason
+  - HF_REPO_TYPE: model
+  - HF_REVISION: main
+  - HF_UPLOAD_PATH_PREFIX: ''
+  - HF_FINAL_STAGE: auto
   - TEXT_SFT_MAX_STEPS: -1
   - TEXT_SFT_EPOCHS: 3
   - TEXT_SFT_LR: 5e-5
   - VLM_SFT_MAX_STEPS: -1
   - VLM_SFT_EPOCHS: 2
   - VLM_SFT_LR: 3e-5
-  - DPO_EPOCHS: 1
+  - DPO_EPOCHS: '1.5'
   - DPO_LR: 7e-6
   - DPO_BETA: '0.06'
   - DPO_LOSS_TYPES: robust sft
@@ -41,8 +47,8 @@ env:
   - DPO_PRECOMPUTE_REF_LOG_PROBS: '1'
   - DPO_PRECOMPUTE_REF_BATCH_SIZE: 2
   - DPO_LABEL_SMOOTHING: '0.05'
-  - ENABLE_GRPO_POLISH: '0'
-  - GRPO_MAX_STEPS: -1
+  - ENABLE_GRPO_POLISH: '1'
+  - GRPO_MAX_STEPS: 120
   - GRPO_LR: 2e-6
   - GRPO_BETA: '0.005'
   - GRPO_NUM_GENERATIONS: 4

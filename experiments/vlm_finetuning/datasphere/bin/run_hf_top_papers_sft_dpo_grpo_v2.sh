@@ -24,6 +24,12 @@ VLM_SFT_DIR="outputs/${OUT_PREFIX}_vlm_sft_lora"
 DPO_DIR="outputs/${OUT_PREFIX}_dpo_lora"
 GRPO_DIR="outputs/${OUT_PREFIX}_grpo_lora"
 REPORT_DIR="reports/${OUT_PREFIX}_datasphere"
+HF_REPO_ID="${HF_REPO_ID:-top-papers/Qwen3-VL-8B-Instruct-scireason}"
+HF_REPO_TYPE="${HF_REPO_TYPE:-model}"
+HF_REVISION="${HF_REVISION:-main}"
+HF_UPLOAD_AFTER_TRAINING="${HF_UPLOAD_AFTER_TRAINING:-0}"
+HF_UPLOAD_PATH_PREFIX="${HF_UPLOAD_PATH_PREFIX:-}"
+HF_UPLOAD_BUNDLE_DIR="${HF_UPLOAD_BUNDLE_DIR:-$REPORT_DIR/hf_upload_bundle}"
 mkdir -p "$REPORT_DIR" outputs data/derived
 # G2.2 memory-safe training projection. Raw data/audit files still preserve all
 # rows and all image refs when MAX_IMAGES_PER_EXAMPLE_*=0.
@@ -78,10 +84,10 @@ paths = {
     "text_sft_config": Path("$TEXT_SFT_DIR/run_config.json"),
     "vlm_sft_config": Path("$VLM_SFT_DIR/run_config.json"),
     "dpo_config": Path("$DPO_DIR/run_config.json"),
-    "grpo_config": Path("$GRPO_DIR/planned_run_config.json"),
+    "grpo_config": Path("$GRPO_DIR/run_config.json") if Path("$GRPO_DIR/run_config.json").exists() else Path("$GRPO_DIR/planned_run_config.json"),
 }
 summary = {
-    "pipeline": "scireason_v2_text_sft_vlm_sft_dpo_optional_grpo",
+    "pipeline": "scireason_v2_text_sft_vlm_sft_dpo_grpo",
     "dataset_id": "$DATASET_ID",
     "dataset_revision": "$DATASET_REVISION",
     "dataset_export_subdir": "$DATASET_EXPORT_SUBDIR",
@@ -92,6 +98,9 @@ summary = {
         "dpo_dir": "$DPO_DIR",
         "grpo_dir": "$GRPO_DIR",
         "report_dir": "$REPORT_DIR",
+        "dpo_archive": "outputs/${OUT_PREFIX}_dpo_lora.tar.gz",
+        "grpo_archive": "outputs/${OUT_PREFIX}_grpo_lora.tar.gz",
+        "hf_upload_bundle_dir": "$HF_UPLOAD_BUNDLE_DIR",
     },
 }
 for key, path in paths.items():
@@ -102,6 +111,38 @@ for key, path in paths.items():
             summary[key] = {"path": str(path), "error": str(exc)}
 print(json.dumps(summary, ensure_ascii=False, indent=2))
 PY
+}
+
+
+hf_upload_enabled() {
+  case "$(printf '%s' "$HF_UPLOAD_AFTER_TRAINING" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+upload_to_huggingface() {
+  if ! hf_upload_enabled; then
+    echo "[datasphere-pipeline] Hugging Face upload disabled: HF_UPLOAD_AFTER_TRAINING=$HF_UPLOAD_AFTER_TRAINING"
+    return 0
+  fi
+  unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE
+  echo "[datasphere-pipeline] uploading DPO-first artifacts to Hugging Face: $HF_REPO_ID"
+  python experiments/vlm_finetuning/scripts/upload_hf_finetuned_artifacts.py \
+    --repo-id "$HF_REPO_ID" \
+    --repo-type "$HF_REPO_TYPE" \
+    --revision "$HF_REVISION" \
+    --path-in-repo "$HF_UPLOAD_PATH_PREFIX" \
+    --base-model "$BASE_MODEL" \
+    --dataset-id "$DATASET_ID" \
+    --out-prefix "$OUT_PREFIX" \
+    --data-dir "$DATA_DIR" \
+    --sft-dir "$VLM_SFT_DIR" \
+    --dpo-dir "$DPO_DIR" \
+    --grpo-dir "$GRPO_DIR" \
+    --final-stage "${HF_FINAL_STAGE:-auto}" \
+    --report-dir "$REPORT_DIR" \
+    --bundle-dir "$HF_UPLOAD_BUNDLE_DIR"
 }
 
 trap 'status=$?; write_stage_summary || true; exit $status' EXIT
@@ -240,8 +281,8 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
 
 tar_adapter_dir "$DPO_DIR" "outputs/${OUT_PREFIX}_dpo_lora.tar.gz"
 
-# 4) Optional short GRPO polish. Disabled unless ENABLE_GRPO_POLISH=1.
-if [ "${ENABLE_GRPO_POLISH:-0}" = "1" ]; then
+# 4) GRPO polish. Enabled by default for the full SFT->DPO->GRPO scheme; set ENABLE_GRPO_POLISH=0 only for DPO-only ablations.
+if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then
   torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_grpo.py \
     --model-id "$BASE_MODEL" \
     --sft-adapter-path "$DPO_DIR" \
@@ -291,5 +332,8 @@ else
   printf '%s\n' '{"status":"skipped","reason":"ENABLE_GRPO_POLISH is not 1; use DPO checkpoint as the main candidate."}' > "$GRPO_DIR/planned_run_config.json"
 fi
 
+write_stage_summary
+tar --exclude="$REPORT_DIR/hf_upload_bundle" -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" "$DATA_DIR" 2>/dev/null || true
+upload_to_huggingface
 write_stage_summary
 tar --exclude="$REPORT_DIR/hf_upload_bundle" -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" "$DATA_DIR" 2>/dev/null || true

@@ -279,12 +279,29 @@ def _normalize_image_list(value, base_dir: Path):
     return out
 
 
+def _assistant_completion_message(value: Any) -> list[dict[str, str]]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict) and value.get('role'):
+        return [value]
+    if not isinstance(value, str):
+        value = json.dumps(value, ensure_ascii=False)
+    return [{'role': 'assistant', 'content': value}]
+
+
 def make_dpo_formatter(base_dir: Path):
     def format_dpo(example):
         images = []
         images.extend(_normalize_image_list(example.get('images'), base_dir))
         images.extend(_normalize_image_list(example.get('image'), base_dir))
         example['images'] = images
+        # The v2 builder stores prompt as chat messages and chosen/rejected as
+        # compact strings to keep JSONL readable.  TRL's conversational DPO
+        # format requires all three fields to be message lists, so normalize
+        # completions here rather than duplicating message wrappers in the data.
+        if isinstance(example.get('prompt'), list):
+            example['chosen'] = _assistant_completion_message(example.get('chosen', ''))
+            example['rejected'] = _assistant_completion_message(example.get('rejected', ''))
         return example
     return format_dpo
 

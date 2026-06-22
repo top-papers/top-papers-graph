@@ -36,6 +36,27 @@ DATASET_SOURCE_MODE="${HF_DATASET_SOURCE_MODE:-export}"
 DATASET_EXPORT_SUBDIR="${HF_DATASET_EXPORT_SUBDIR:-exports/colab-run-001}"
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3-VL-8B-Instruct}"
 OUT_PREFIX="${OUT_PREFIX:-hf_top_papers_qwen3vl_8b}"
+# Backward-compatible safety rail: historical full jobs used the legacy
+# SFT->GRPO entrypoint, which bypasses the DPO improvements.  Unless explicitly
+# disabled, non-smoke runs delegate to the recommended full SFT->DPO->GRPO pipeline.
+if [ "${ENABLE_DPO_FIRST_PIPELINE:-1}" = "1" ] && [[ "${OUT_PREFIX:-}" != *smoke* ]]; then
+  echo "[datasphere-pipeline] ENABLE_DPO_FIRST_PIPELINE=1; delegating legacy full job to run_hf_top_papers_sft_dpo_grpo_v2.sh so DPO improvements run in production."
+  export DATA_DIR="${DATA_DIR:-data/derived/hf_top_papers_scireason_v2}"
+  export OUT_PREFIX="${OUT_PREFIX:-hf_top_papers_qwen3vl_8b_v2}"
+  export TEXT_SFT_EPOCHS="${TEXT_SFT_EPOCHS:-3}"
+  export VLM_SFT_EPOCHS="${VLM_SFT_EPOCHS:-2}"
+  export DPO_EPOCHS="${DPO_EPOCHS:-1.5}"
+  export DPO_LR="${DPO_LR:-7e-6}"
+  export DPO_BETA="${DPO_BETA:-0.06}"
+  export DPO_LOSS_TYPES="${DPO_LOSS_TYPES:-robust sft}"
+  export DPO_LOSS_WEIGHTS="${DPO_LOSS_WEIGHTS:-1.0 0.15}"
+  export DPO_USE_WEIGHTING="${DPO_USE_WEIGHTING:-1}"
+  export DPO_PRECOMPUTE_REF_LOG_PROBS="${DPO_PRECOMPUTE_REF_LOG_PROBS:-1}"
+  export DPO_PRECOMPUTE_REF_BATCH_SIZE="${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}"
+  export DPO_LABEL_SMOOTHING="${DPO_LABEL_SMOOTHING:-0.05}"
+  export ENABLE_GRPO_POLISH="${ENABLE_GRPO_POLISH:-1}"
+  exec bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_dpo_grpo_v2.sh
+fi
 DATA_DIR="data/derived/hf_top_papers_graph_experts"
 SFT_DIR="outputs/${OUT_PREFIX}_sft_lora"
 GRPO_DIR="outputs/${OUT_PREFIX}_grpo_lora"

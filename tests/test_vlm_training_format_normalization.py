@@ -642,3 +642,28 @@ def test_grpo_task_aware_reward_processing_imports_math_for_group_norm(monkeypat
     assert len(rewards) == 4
     assert rewards[0] < rewards[1]
     assert all(-1.0 <= value <= 1.0 for value in rewards)
+
+
+def test_dpo_formatter_wraps_string_completions_for_conversational_prompt(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    trl = sys.modules["trl"]
+    trl.DPOConfig = _Dummy
+    trl.DPOTrainer = _Dummy
+    mod = _load_script(
+        "experiments/vlm_finetuning/scripts/train_vlm_dpo.py",
+        "train_vlm_dpo_formatter_conversational_test",
+    )
+
+    formatter = mod.make_dpo_formatter(Path("."))
+    out = formatter(
+        {
+            "prompt": [{"role": "user", "content": "review this claim"}],
+            "chosen": '{"verdict":"reject"}',
+            "rejected": '{"verdict":"accept"}',
+            "images": ["/tmp/page_001.png"],
+        }
+    )
+
+    assert out["chosen"] == [{"role": "assistant", "content": '{"verdict":"reject"}'}]
+    assert out["rejected"] == [{"role": "assistant", "content": '{"verdict":"accept"}'}]
+    assert out["images"] == ["/tmp/page_001.png"]

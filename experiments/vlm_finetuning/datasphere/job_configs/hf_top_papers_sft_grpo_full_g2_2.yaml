@@ -1,7 +1,7 @@
 name: hf-top-papers-qwen3vl-8b-sft-grpo-g2-2
-desc: 'Budget-guarded full SFT plus GRPO VLM fine-tuning for Qwen3-VL-8B-Instruct
+desc: 'Budget-guarded DPO-first SciReason VLM fine-tuning for Qwen3-VL-8B-Instruct
   on top-papers/top-papers-graph-experts-data export exports/colab-run-001, DataSphere
-  g2.2 A100 x2, 1 TB SSD, hard project budget guard below 100000 RUB.
+  g2.2 A100 x2, 1 TB SSD, hard project budget guard below 100000 RUB. Legacy-compatible config delegates to the v2 SFT->DPO->GRPO pipeline by default.
 
   '
 cmd: bash experiments/vlm_finetuning/datasphere/bin/run_hf_top_papers_sft_grpo_full.sh
@@ -43,6 +43,26 @@ env:
   - GRPO_TIMEOUT_HOURS: 35
   - MAX_SFT_STEPS: -1
   - MAX_GRPO_STEPS: 120
+  - GRPO_MAX_STEPS: 120
+  - ENABLE_DPO_FIRST_PIPELINE: '1'
+  - TEXT_SFT_EPOCHS: 3
+  - VLM_SFT_EPOCHS: 2
+  - DPO_EPOCHS: '1.5'
+  - DPO_LR: 7e-6
+  - DPO_BETA: '0.06'
+  - DPO_LOSS_TYPES: robust sft
+  - DPO_LOSS_WEIGHTS: 1.0 0.15
+  - DPO_USE_WEIGHTING: '1'
+  - DPO_PRECOMPUTE_REF_LOG_PROBS: '1'
+  - DPO_PRECOMPUTE_REF_BATCH_SIZE: 2
+  - DPO_LABEL_SMOOTHING: '0.05'
+  - DPO_PER_DEVICE_BATCH: 1
+  - DPO_GRAD_ACCUM: 8
+  - DPO_SAVE_STEPS: 60
+  - DPO_EVAL_STEPS: 60
+  - DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE: '3'
+  - MAX_DPO_PAIRS_PER_ROW: 3
+  - ENABLE_GRPO_POLISH: '1'
   - SFT_EPOCHS: 4
   - GRPO_EPOCHS: 1
   - SFT_LR: 7e-5
@@ -112,18 +132,20 @@ inputs:
 - data/
 - examples/
 outputs:
-- data/derived/hf_top_papers_graph_experts/summary.json
+- data/derived/hf_top_papers_scireason_v2/summary.json
 - data/derived/hf_top_papers_graph_experts/README.md
 - data/derived/hf_top_papers_graph_experts/export_summary.json
 - data/derived/hf_top_papers_graph_experts/ARTICLE_IMAGE_SOURCES.md
 - data/derived/hf_top_papers_graph_experts/article_image_sources.jsonl
-- data/derived/hf_top_papers_graph_experts/sft_all.jsonl
-- data/derived/hf_top_papers_graph_experts/sft_train.jsonl
-- data/derived/hf_top_papers_graph_experts/sft_eval.jsonl
-- data/derived/hf_top_papers_graph_experts/grpo_all.jsonl
-- data/derived/hf_top_papers_graph_experts/grpo_train.jsonl
-- data/derived/hf_top_papers_graph_experts/grpo_eval.jsonl
-- outputs/hf_top_papers_qwen3vl_8b_sft_lora.tar.gz
+- data/derived/hf_top_papers_scireason_v2/sft_all.jsonl
+- data/derived/hf_top_papers_scireason_v2/sft_vlm_train.jsonl
+- data/derived/hf_top_papers_scireason_v2/sft_vlm_eval.jsonl
+- data/derived/hf_top_papers_scireason_v2/grpo_train_all.jsonl
+- data/derived/hf_top_papers_scireason_v2/grpo_train_verified.jsonl
+- data/derived/hf_top_papers_scireason_v2/grpo_eval_verified.jsonl
+- outputs/hf_top_papers_qwen3vl_8b_text_sft_lora.tar.gz
+- outputs/hf_top_papers_qwen3vl_8b_vlm_sft_lora.tar.gz
+- outputs/hf_top_papers_qwen3vl_8b_dpo_lora.tar.gz
 - outputs/hf_top_papers_qwen3vl_8b_grpo_lora.tar.gz
 - reports/hf_top_papers_qwen3vl_8b_datasphere_reports.tar.gz
 - reports/hf_top_papers_qwen3vl_8b_datasphere/budget_plan.json

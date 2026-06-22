@@ -230,3 +230,25 @@ def test_sft_trainer_config_accepts_ddp_timeout() -> None:
     assert "--ddp-timeout-seconds" in text
     assert "'ddp_timeout': args.ddp_timeout_seconds" in text
     assert "filter_dataset_by_text_chars" in text
+
+def test_v2_and_legacy_full_configs_enable_complete_sft_dpo_grpo_by_default() -> None:
+    for name in ["hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml", "hf_top_papers_sft_grpo_full_g2_2.yaml"]:
+        path = DATASPHERE_DIR / "job_configs" / name
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+        vars_list = cfg.get("env", {}).get("vars", [])
+        env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+        assert str(env.get("ENABLE_GRPO_POLISH")) == "1", name
+        assert "DPO_EPOCHS" in env, name
+        assert "GRPO_MAX_STEPS" in env or name == "hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml", name
+        outputs = "\n".join(map(str, cfg.get("outputs", [])))
+        assert "dpo_lora.tar.gz" in outputs, name
+        assert "grpo_lora.tar.gz" in outputs, name
+
+
+def test_v2_wrapper_runs_grpo_after_dpo_by_default() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_dpo_grpo_v2.sh").read_text(encoding="utf-8")
+    assert "train_vlm_dpo.py" in script
+    assert "train_vlm_grpo.py" in script
+    assert "--sft-adapter-path \"$DPO_DIR\"" in script
+    assert 'if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then' in script
+    assert "train_vlm_dpo.py" in script[: script.index("train_vlm_grpo.py")]
