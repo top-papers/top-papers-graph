@@ -292,15 +292,17 @@ def get_world_size() -> int:
 def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
     """Return the DDP unused-parameter setting for Trainer/SFTConfig.
 
-    VLM + LoRA fine-tuning can leave different trainable branches unused on
-    different ranks for a given step. In multi-process VLM runs, enable DDP's
+    Qwen3-VL LoRA targets can include branches that are unused for a given
+    mini-batch. This is especially common in the text-SFT stage, where the
+    vision tower / multimodal adapter targets may be trainable but no image
+    tensors participate in the loss. In multi-process runs, enable DDP's
     unused-parameter detection unless the caller explicitly overrides it. Keep
-    text-only and single-process runs on the faster default path.
+    single-process runs on the faster default path.
     """
     requested = getattr(args, 'ddp_find_unused_parameters', None)
     if requested is not None:
         return bool(requested)
-    return actual_mode == 'vlm' and get_world_size() > 1
+    return get_world_size() > 1
 
 
 def disable_unsupported_vlm_assistant_only_loss(args: argparse.Namespace, actual_mode: str) -> None:

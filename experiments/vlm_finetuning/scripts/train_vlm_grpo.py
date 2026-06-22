@@ -746,15 +746,16 @@ def get_world_size() -> int:
 def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
     """Return the DDP unused-parameter setting for GRPOConfig.
 
-    VLM + LoRA/adapter training under DDP can leave some trainable branches
-    unused on a rank for a particular step. Enable DDP's unused-parameter
-    detection automatically for multi-process VLM runs, while preserving the
-    explicit CLI override and the faster text-only/single-process default.
+    LoRA/adapter training under DDP can leave some trainable branches unused
+    on a rank for a particular step, depending on whether a batch exercises
+    text-only or multimodal paths. Enable DDP's unused-parameter detection
+    automatically for all multi-process runs, while preserving the explicit
+    CLI override and the faster single-process default.
     """
     requested = getattr(args, 'ddp_find_unused_parameters', None)
     if requested is not None:
         return bool(requested)
-    return actual_mode == 'vlm' and get_world_size() > 1
+    return get_world_size() > 1
 
 
 def enforce_minimum_grpo_generations(args: argparse.Namespace) -> None:

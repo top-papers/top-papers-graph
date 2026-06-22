@@ -36,6 +36,12 @@ mkdir -p "$REPORT_DIR" outputs data/derived
 SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE="${SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
 DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
 GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-2}"
+DDP_UNUSED_ARGS=()
+if [ "${DDP_FIND_UNUSED_PARAMETERS:-1}" = "1" ]; then
+  DDP_UNUSED_ARGS+=(--ddp-find-unused-parameters)
+else
+  DDP_UNUSED_ARGS+=(--no-ddp-find-unused-parameters)
+fi
 
 prefetch_base_model_and_enable_offline_hub() {
   if [ "${PREFETCH_BASE_MODEL:-1}" = "1" ]; then
@@ -189,6 +195,7 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_sft.py \
   --use-lora \
   --assistant-only-loss \
   --bf16 --tf32 --gradient-checkpointing \
+  "${DDP_UNUSED_ARGS[@]}" \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --learning-rate "${TEXT_SFT_LR:-5e-5}" \
   --warmup-ratio "${TEXT_SFT_WARMUP_RATIO:-0.05}" \
@@ -221,6 +228,7 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_sft.py \
   --train-mode vlm \
   --image-column images \
   --bf16 --tf32 --gradient-checkpointing \
+  "${DDP_UNUSED_ARGS[@]}" \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
   --learning-rate "${VLM_SFT_LR:-3e-5}" \
@@ -265,6 +273,7 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
   --max-images-per-example "$DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
   --bf16 --gradient-checkpointing \
+  "${DDP_UNUSED_ARGS[@]}" \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --learning-rate "${DPO_LR:-7e-6}" \
   --beta "${DPO_BETA:-0.06}" \
@@ -292,6 +301,7 @@ if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then
     --train-mode vlm \
     --image-column images \
     --bf16 --tf32 --gradient-checkpointing \
+    "${DDP_UNUSED_ARGS[@]}" \
     --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
     --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
     --max-images-per-example "$GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \

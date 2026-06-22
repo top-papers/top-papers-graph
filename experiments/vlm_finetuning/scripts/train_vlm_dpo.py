@@ -75,6 +75,16 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help='Training-time VLM memory guard: keep at most this many images per preference row. 0 disables the projection.',
     )
+    ap.add_argument(
+        '--ddp-find-unused-parameters',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            'Pass find_unused_parameters to DistributedDataParallel. '
+            'Default: enabled automatically for multi-process LoRA/adapter DPO runs, '
+            'because some text/VLM branches may be unused on a rank for a step.'
+        ),
+    )
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Select the best eval checkpoint before final save when eval is enabled.')
     ap.add_argument('--native-load-best-model-at-end', action=argparse.BooleanOptionalAction, default=False, help='Use Transformers native best-checkpoint reload. Default is false for PEFT adapter runs because some PEFT/Transformers combinations fail while reloading LoRA adapters in DDP.')
@@ -98,6 +108,26 @@ def _supports_kwargs(callable_obj, kwargs):
 
 def is_main_process() -> bool:
     return int(os.environ.get('RANK', '0')) == 0
+
+
+def get_world_size() -> int:
+    try:
+        return int(os.environ.get('WORLD_SIZE', '1'))
+    except ValueError:
+        return 1
+
+
+def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
+    """Return the DDP unused-parameter setting for DPOConfig.
+
+    DPO continues from SFT/VLM adapters and may keep LoRA targets that are not
+    used by every rank on every mini-batch. For multi-process runs, enable DDP
+    unused-parameter detection unless the caller explicitly overrides it.
+    """
+    requested = getattr(args, 'ddp_find_unused_parameters', None)
+    if requested is not None:
+        return bool(requested)
+    return get_world_size() > 1
 
 
 def _truthy_env(name: str, default: str = '0') -> bool:
@@ -576,12 +606,14 @@ def main() -> None:
         report_to=[] if args.report_to == 'none' else [args.report_to],
         remove_unused_columns=False,
         gradient_checkpointing=args.gradient_checkpointing,
+        gradient_checkpointing_kwargs={'use_reentrant': False},
         bf16=args.bf16,
         fp16=args.fp16,
         max_length=args.max_length,
         save_strategy='steps',
         eval_strategy='steps' if eval_ds is not None else 'no',
         logging_strategy='steps',
+        ddp_find_unused_parameters=resolve_ddp_find_unused_parameters(args, actual_mode),
         beta=args.beta,
         loss_type=effective_loss_type,
         loss_weights=effective_loss_weights,
@@ -616,6 +648,7 @@ def main() -> None:
 
     run_config = vars(args).copy()
     run_config['resolved_mode'] = actual_mode
+    run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['train_image_cap_stats'] = train_image_cap_stats
