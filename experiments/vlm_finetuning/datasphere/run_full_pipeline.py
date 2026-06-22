@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, MutableMapping
 
-DEFAULT_CONFIG = Path("experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_grpo_full_g2_2.yaml")
+DEFAULT_CONFIG = Path("experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml")
 JOB_ID_PATTERNS = [
     # Keep this deliberately narrow. The DataSphere CLI can also print
     # authentication subject ids such as ``subject-id 'ajes...'`` before the
@@ -100,7 +100,7 @@ def write_manifest(path: Path, payload: dict) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Run the full HF top-papers VLM SFT+GRPO pipeline via Yandex DataSphere Jobs.")
+    ap = argparse.ArgumentParser(description="Run the full HF top-papers SciReason text-SFT -> VLM-SFT -> robust mixed DPO -> optional GRPO pipeline via Yandex DataSphere Jobs.")
     ap.add_argument("--project-id", default=os.environ.get("DATASPHERE_PROJECT_ID"), help="DataSphere project id. Can also be set via DATASPHERE_PROJECT_ID.")
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--ttl-days", type=int, default=1, help="TTL for DataSphere job data after completion.")
@@ -115,14 +115,22 @@ def main() -> None:
         raise SystemExit(f"Job config not found: {args.config}")
 
     started_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    log_file = args.log_dir / f"hf_top_papers_sft_grpo_{started_at}.log"
-    manifest_file = args.log_dir / f"hf_top_papers_sft_grpo_{started_at}.manifest.json"
+    log_file = args.log_dir / f"hf_top_papers_sft_dpo_grpo_{started_at}.log"
+    manifest_file = args.log_dir / f"hf_top_papers_sft_dpo_grpo_{started_at}.manifest.json"
     execute_cmd = ["datasphere", "project", "job", "execute", "-p", args.project_id, "-c", str(args.config)]
 
     manifest = {
         "started_at_utc": started_at,
         "project_id": args.project_id,
         "config": str(args.config),
+        "expected_pipeline": [
+            "text-SFT",
+            "VLM-SFT",
+            "robust mixed DPO",
+            "optional GRPO polish",
+            "Hugging Face upload",
+        ],
+        "managed_entrypoint": "bash experiments/vlm_finetuning/datasphere/launch_examples.sh hf-full-managed",
         "job_id": None,
         "ttl_days": args.ttl_days,
         "commands": {"execute": execute_cmd},
