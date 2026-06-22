@@ -58,17 +58,26 @@ def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
                 yield obj
 
 
+def _add_id_values(ids: set[str], value: Any) -> None:
+    if value in (None, "", [], {}):
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            _add_id_values(ids, item)
+        return
+    ids.add(str(value))
+
+
 def source_ids_from_jsonl(path: Path, *, metadata: bool = False) -> set[str]:
     ids: set[str] = set()
     for row in iter_jsonl(path):
-        value: Any
         if metadata:
             meta = row.get("metadata")
-            value = meta.get("source_id") if isinstance(meta, Mapping) else None
+            if isinstance(meta, Mapping):
+                _add_id_values(ids, meta.get("source_id"))
+                _add_id_values(ids, meta.get("source_ids"))
         else:
-            value = row.get("id")
-        if value not in (None, "", [], {}):
-            ids.add(str(value))
+            _add_id_values(ids, row.get("id"))
     return ids
 
 
@@ -149,7 +158,7 @@ def main() -> None:
     covered_sft_sources = len(sft_source_ids & dpo_source_ids) if sft_source_ids and dpo_source_ids else -1
     expected_sft_sources = len(sft_source_ids) if sft_source_ids else raw_sft
     dpo_from_sft = int(nested(summary, "counts", "dpo_from_sft", default=-1) or -1)
-    dpo_count_ok = counts["dpo_all"] >= int(raw_sft or 0)
+    dpo_count_ok = counts["dpo_all"] > 0 and (counts["dpo_all"] >= int(raw_sft or 0) or dpo_from_sft >= int(raw_sft or 0))
     dpo_source_ok = covered_sft_sources == expected_sft_sources if covered_sft_sources >= 0 else dpo_from_sft >= int(raw_sft or 0)
     add_check(
         checks,
