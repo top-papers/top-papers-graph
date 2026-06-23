@@ -252,3 +252,9 @@ def test_v2_wrapper_runs_grpo_after_dpo_by_default() -> None:
     assert "--sft-adapter-path \"$DPO_DIR\"" in script
     assert 'if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then' in script
     assert "train_vlm_dpo.py" in script[: script.index("train_vlm_grpo.py")]
+
+
+def test_v2_wrapper_does_not_precompute_dpo_ref_log_probs_by_default_for_vlm() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_dpo_grpo_v2.sh").read_text(encoding="utf-8")
+    assert 'DPO_PRECOMPUTE_REF_LOG_PROBS:-0' in script
+    assert 'DPO_PRECOMPUTE_REF_LOG_PROBS:-1' not in script

@@ -91,3 +91,15 @@ def test_dpo_model_loader_never_forwards_auto_attention(monkeypatch):
 
     assert model.kwargs["attn_implementation"] == "sdpa"
     assert model.kwargs["trust_remote_code"] is True
+
+
+def test_dpo_disables_precompute_ref_log_probs_for_vlm(monkeypatch):
+    _install_dpo_training_stubs(monkeypatch)
+    mod = _load_dpo_script("train_vlm_dpo_precompute_vlm_guard_test")
+
+    requested = types.SimpleNamespace(precompute_ref_log_probs=True)
+    assert mod.resolve_precompute_ref_log_probs(requested, "vlm") is False
+    assert mod.resolve_precompute_ref_log_probs(requested, "text") is True
+
+    not_requested = types.SimpleNamespace(precompute_ref_log_probs=False)
+    assert mod.resolve_precompute_ref_log_probs(not_requested, "vlm") is False

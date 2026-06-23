@@ -1,3 +1,10 @@
+## 2026-06-23 — DataSphere VLM DPO ref-log-prob precompute guard
+
+- Fixed the next DataSphere DPO failure after the attention-backend fix: TRL rejects `precompute_ref_log_probs=True` for VLM/vision datasets.
+- Added `resolve_precompute_ref_log_probs()` in `train_vlm_dpo.py` to force-disable reference-log-prob precompute whenever the prepared DPO dataset is multimodal.
+- Changed the full SFT→DPO→GRPO DataSphere wrapper default to `DPO_PRECOMPUTE_REF_LOG_PROBS=0`; explicit opt-in remains available for text-only DPO runs.
+- Added regression tests for the VLM precompute guard and the wrapper default.
+
 
 ## 2026-06-23 — DataSphere DPO attention backend fix
 

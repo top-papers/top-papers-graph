@@ -158,6 +158,26 @@ def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: st
     return get_world_size() > 1
 
 
+def resolve_precompute_ref_log_probs(args: argparse.Namespace, actual_mode: str) -> bool:
+    """Return whether TRL may precompute DPO reference log-probabilities.
+
+    TRL rejects ``precompute_ref_log_probs=True`` for vision datasets because
+    VLM image processing is performed on the fly. The full DataSphere DPO stage
+    uses mixed multimodal rows, so keep the user-facing flag for text-only DPO
+    but force it off for VLM mode to avoid a late DPOTrainer construction crash.
+    """
+    requested = bool(getattr(args, 'precompute_ref_log_probs', False))
+    if requested and actual_mode == 'vlm':
+        if is_main_process():
+            print(
+                '[train_vlm_dpo] disabling precompute_ref_log_probs for VLM mode: '
+                'TRL vision datasets are processed on the fly.',
+                flush=True,
+            )
+        return False
+    return requested
+
+
 def _truthy_env(name: str, default: str = '0') -> bool:
     return os.environ.get(name, default).lower() in {'1', 'true', 'yes', 'on'}
 
@@ -641,6 +661,8 @@ def main() -> None:
     effective_loss_type = args.loss_type if len(args.loss_type) > 1 else args.loss_type[0]
     effective_loss_weights = args.loss_weights
 
+    effective_precompute_ref_log_probs = resolve_precompute_ref_log_probs(args, actual_mode)
+
     dpo_kwargs = dict(
         output_dir=str(args.output_dir),
         learning_rate=args.learning_rate,
@@ -670,8 +692,8 @@ def main() -> None:
         loss_weights=effective_loss_weights,
         label_smoothing=args.label_smoothing,
         use_weighting=args.use_weighting,
-        precompute_ref_log_probs=args.precompute_ref_log_probs,
-        precompute_ref_batch_size=args.precompute_ref_batch_size,
+        precompute_ref_log_probs=effective_precompute_ref_log_probs,
+        precompute_ref_batch_size=args.precompute_ref_batch_size if effective_precompute_ref_log_probs else None,
         padding_free=args.padding_free,
         activation_offloading=args.activation_offloading,
         load_best_model_at_end=should_native_load_best_model(args, eval_ds, model),
@@ -700,6 +722,7 @@ def main() -> None:
     run_config = vars(args).copy()
     run_config['resolved_mode'] = actual_mode
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
+    run_config['precompute_ref_log_probs_resolved'] = effective_precompute_ref_log_probs
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['train_image_cap_stats'] = train_image_cap_stats

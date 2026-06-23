@@ -260,8 +260,10 @@ if [ -n "${DPO_LOSS_WEIGHTS:-1.0 0.15}" ]; then
   DPO_LOSS_ARGS+=(--loss-weights "${DPO_LOSS_WEIGHTS_ARR[@]}")
 fi
 if [ "${DPO_USE_WEIGHTING:-1}" = "1" ]; then DPO_LOSS_ARGS+=(--use-weighting); else DPO_LOSS_ARGS+=(--no-use-weighting); fi
-if [ "${DPO_PRECOMPUTE_REF_LOG_PROBS:-1}" = "1" ]; then DPO_LOSS_ARGS+=(--precompute-ref-log-probs); fi
-if [ -n "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}" ]; then DPO_LOSS_ARGS+=(--precompute-ref-batch-size "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}"); fi
+if [ "${DPO_PRECOMPUTE_REF_LOG_PROBS:-0}" = "1" ]; then
+  DPO_LOSS_ARGS+=(--precompute-ref-log-probs)
+  if [ -n "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}" ]; then DPO_LOSS_ARGS+=(--precompute-ref-batch-size "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}"); fi
+fi
 torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --model-id "$BASE_MODEL" \
   --sft-adapter-path "$VLM_SFT_DIR" \
