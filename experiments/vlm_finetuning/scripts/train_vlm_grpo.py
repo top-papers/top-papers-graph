@@ -1721,5 +1721,26 @@ def main() -> None:
                 raise SystemExit(2)
         processor.save_pretrained(args.output_dir)
 
+
+
+def cleanup_distributed_process_group() -> None:
+    """Best-effort DDP/NCCL shutdown to avoid noisy or hanging process teardown."""
+    try:
+        import torch
+        dist = getattr(torch, 'distributed', None)
+        if dist is not None and getattr(dist, 'is_available', lambda: False)() and dist.is_initialized():
+            dist.destroy_process_group()
+    except Exception as exc:
+        if is_main_process():
+            print(f'[train_vlm_grpo] warning: failed to destroy distributed process group: {exc}', flush=True)
+
+
+def main_with_distributed_cleanup() -> None:
+    try:
+        main()
+    finally:
+        cleanup_distributed_process_group()
+
+
 if __name__ == '__main__':
-    main()
+    main_with_distributed_cleanup()

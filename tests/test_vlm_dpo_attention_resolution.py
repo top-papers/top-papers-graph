@@ -118,3 +118,89 @@ def test_dpo_run_config_json_handles_path_arguments(monkeypatch):
     encoded = mod.json.dumps(run_config, ensure_ascii=False, indent=2, default=str)
     assert "outputs/dpo" in encoded
     assert "data/dpo_train.jsonl" in encoded
+
+
+
+def _count_image_placeholders(messages):
+    count = 0
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            count += sum(1 for block in content if isinstance(block, dict) and block.get("type") == "image")
+    return count
+
+
+class _MiniDataset:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def __len__(self):
+        return len(self.rows)
+
+    def map(self, fn, desc=None):
+        return _MiniDataset([fn(dict(row)) for row in self.rows])
+
+
+def test_dpo_formatter_aligns_prompt_placeholders_to_images(monkeypatch, tmp_path):
+    _install_dpo_training_stubs(monkeypatch)
+    mod = _load_dpo_script("train_vlm_dpo_placeholder_formatter_test")
+
+    formatter = mod.make_dpo_formatter(tmp_path)
+    row = {
+        "images": ["fig1.png", "fig2.png"],
+        "image": "fig2.png",
+        "prompt": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "text", "text": "compare the figures"},
+                ],
+            }
+        ],
+        "chosen": "better answer",
+        "rejected": "worse answer",
+    }
+
+    formatted = formatter(row)
+
+    assert len(formatted["images"]) == 2
+    assert _count_image_placeholders(formatted["prompt"]) == len(formatted["images"])
+    assert formatted["chosen"] == [{"role": "assistant", "content": "better answer"}]
+    assert formatted["rejected"] == [{"role": "assistant", "content": "worse answer"}]
+
+
+def test_dpo_image_cap_realigns_prompt_placeholders(monkeypatch, tmp_path):
+    _install_dpo_training_stubs(monkeypatch)
+    mod = _load_dpo_script("train_vlm_dpo_placeholder_cap_test")
+
+    row = {
+        "images": [str(tmp_path / f"fig{i}.png") for i in range(4)],
+        "image": str(tmp_path / "fig0.png"),
+        "prompt": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "text", "text": "answer using the evidence"},
+                ],
+            }
+        ],
+        "chosen": "yes",
+        "rejected": "no",
+    }
+
+    capped, stats = mod.cap_dpo_images_for_memory(_MiniDataset([row]), 1, "train")
+    capped_row = capped.rows[0]
+
+    assert stats["truncated_rows"] == 1
+    assert len(capped_row["images"]) == 1
+    assert _count_image_placeholders(capped_row["prompt"]) == 1

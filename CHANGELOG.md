@@ -1,3 +1,11 @@
+## 2026-06-23 — DataSphere DPO image placeholder alignment fix
+
+- Fixed the next VLM DPO failure after attention/precompute/run-config fixes: when training-time image capping reduces `images`, DPO now realigns `prompt` image placeholders before TRL multimodal collation.
+- Added DPO prompt placeholder alignment during formatter normalization and after the memory-cap projection.
+- Added regression tests for formatter-level and post-cap DPO placeholder alignment.
+- Kept `DPO_PRECOMPUTE_REF_LOG_PROBS=0` in full DataSphere VLM job configs and legacy delegation defaults.
+- Added best-effort distributed process-group cleanup to VLM SFT/DPO/GRPO entrypoints.
+
 ## 2026-06-23 — DataSphere DPO run-config JSON serialization fix
 
 - Fixed the next DataSphere DPO failure after the VLM ref-log-prob guard: `run_config.json` serialization crashed on `pathlib.PosixPath` values from argparse path arguments.

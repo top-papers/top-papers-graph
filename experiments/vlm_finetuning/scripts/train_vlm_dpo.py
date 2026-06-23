@@ -380,6 +380,83 @@ def _normalize_image_list(value, base_dir: Path):
     return out
 
 
+def _text_block(value: Any) -> dict[str, str]:
+    return {'type': 'text', 'text': '' if value is None else str(value)}
+
+
+def _messages_have_image_block(messages: list[dict[str, Any]]) -> bool:
+    for msg in messages:
+        content = msg.get('content')
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'image':
+                    return True
+    return False
+
+
+def _align_image_placeholders_to_images(messages: list[dict[str, Any]], image_count: int) -> list[dict[str, Any]]:
+    """Keep TRL multimodal placeholders in lockstep with the images list.
+
+    TRL validates that every conversational DPO example contains exactly as
+    many ``{'type': 'image'}`` blocks in ``prompt`` as there are elements in
+    ``images``. DPO applies a training-time image cap for memory, so the prompt
+    must be realigned after formatting and after any later image projection.
+    """
+    image_count = max(0, int(image_count or 0))
+    kept_images = 0
+    aligned: list[dict[str, Any]] = []
+    for msg in messages:
+        role = str(msg.get('role') or 'user')
+        content = msg.get('content')
+        if not isinstance(content, list):
+            aligned.append({'role': role, 'content': content})
+            continue
+        new_content: list[dict[str, Any]] = []
+        for block in content:
+            if isinstance(block, dict) and block.get('type') == 'image':
+                if kept_images < image_count:
+                    new_content.append({'type': 'image'})
+                    kept_images += 1
+                continue
+            new_content.append(block if isinstance(block, dict) else _text_block(block))
+        if new_content:
+            aligned.append({'role': role, 'content': new_content})
+
+    missing = image_count - kept_images
+    if missing > 0:
+        placeholders = [{'type': 'image'} for _ in range(missing)]
+        for msg in aligned:
+            if msg.get('role') == 'user':
+                content = msg.get('content')
+                if isinstance(content, str):
+                    msg['content'] = placeholders + [{'type': 'text', 'text': content}]
+                elif isinstance(content, list):
+                    msg['content'] = placeholders + content
+                else:
+                    msg['content'] = placeholders
+                break
+        else:
+            aligned.insert(0, {'role': 'user', 'content': placeholders})
+    return aligned
+
+
+def _ensure_image_placeholder(messages: list[dict[str, Any]], has_images: bool) -> list[dict[str, Any]]:
+    if not has_images or _messages_have_image_block(messages):
+        return messages
+    for msg in messages:
+        if msg.get('role') == 'user':
+            content = msg.setdefault('content', [])
+            if isinstance(content, str):
+                msg['content'] = [{'type': 'image'}, {'type': 'text', 'text': content}]
+            elif isinstance(content, list):
+                content.insert(0, {'type': 'image'})
+            else:
+                msg['content'] = [{'type': 'image'}]
+            return messages
+    messages.insert(0, {'role': 'user', 'content': [{'type': 'image'}]})
+    return messages
+
+
 def _assistant_completion_message(value: Any) -> list[dict[str, str]]:
     if isinstance(value, list):
         return value
@@ -393,14 +470,22 @@ def _assistant_completion_message(value: Any) -> list[dict[str, str]]:
 def make_dpo_formatter(base_dir: Path):
     def format_dpo(example):
         images = []
-        images.extend(_normalize_image_list(example.get('images'), base_dir))
-        images.extend(_normalize_image_list(example.get('image'), base_dir))
+        for image in _normalize_image_list(example.get('images'), base_dir):
+            if image not in images:
+                images.append(image)
+        for image in _normalize_image_list(example.get('image'), base_dir):
+            if image not in images:
+                images.append(image)
         example['images'] = images
         # The v2 builder stores prompt as chat messages and chosen/rejected as
         # compact strings to keep JSONL readable.  TRL's conversational DPO
         # format requires all three fields to be message lists, so normalize
         # completions here rather than duplicating message wrappers in the data.
+        # For VLM rows, also make prompt image placeholders match the normalized
+        # image list before TRL's multimodal DPO collator validates the sample.
         if isinstance(example.get('prompt'), list):
+            prompt = _ensure_image_placeholder(example.get('prompt') or [], bool(images))
+            example['prompt'] = _align_image_placeholders_to_images(prompt, len(images))
             example['chosen'] = _assistant_completion_message(example.get('chosen', ''))
             example['rejected'] = _assistant_completion_message(example.get('rejected', ''))
         return example
@@ -559,6 +644,9 @@ def cap_dpo_images_for_memory(ds, max_images_per_example: int, split_name: str):
             example['image'] = kept[0]
         elif 'image' in example:
             example['image'] = None
+        if isinstance(example.get('prompt'), list):
+            prompt = _ensure_image_placeholder(example.get('prompt') or [], bool(kept))
+            example['prompt'] = _align_image_placeholders_to_images(prompt, len(kept))
         return example
 
     capped = ds.map(_cap, desc=f'Capping {split_name} DPO rows to {max_images_per_example} images for GPU memory')
@@ -757,5 +845,26 @@ def main() -> None:
         print(f'[train_vlm_dpo] final save status: {save_manifest.get("status")}; best checkpoint: {save_manifest.get("best_model_checkpoint")}', flush=True)
 
 
+
+
+def cleanup_distributed_process_group() -> None:
+    """Best-effort DDP/NCCL shutdown to avoid noisy or hanging process teardown."""
+    try:
+        import torch
+        dist = getattr(torch, 'distributed', None)
+        if dist is not None and getattr(dist, 'is_available', lambda: False)() and dist.is_initialized():
+            dist.destroy_process_group()
+    except Exception as exc:
+        if is_main_process():
+            print(f'[train_vlm_dpo] warning: failed to destroy distributed process group: {exc}', flush=True)
+
+
+def main_with_distributed_cleanup() -> None:
+    try:
+        main()
+    finally:
+        cleanup_distributed_process_group()
+
+
 if __name__ == '__main__':
-    main()
+    main_with_distributed_cleanup()
