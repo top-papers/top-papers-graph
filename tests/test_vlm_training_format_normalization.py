@@ -742,3 +742,29 @@ def test_grpo_loose_json_loader_serializes_nested_non_prompt_values(monkeypatch,
     assert isinstance(ds[0]["metadata"], str)
     assert isinstance(ds[0]["reference_assertions_json"], str)
     assert ds[0]["expected_verdict"] == "accept"
+
+
+def test_dpo_installs_fsdpmodule_alias_before_trl_import(monkeypatch):
+    _install_training_stubs(monkeypatch)
+
+    torch_mod = sys.modules["torch"]
+    torch_mod.__path__ = []
+    distributed = types.ModuleType("torch.distributed")
+    fsdp = types.ModuleType("torch.distributed.fsdp")
+
+    class LegacyFullyShardedDataParallel:
+        pass
+
+    fsdp.FullyShardedDataParallel = LegacyFullyShardedDataParallel
+    distributed.fsdp = fsdp
+    torch_mod.distributed = distributed
+    monkeypatch.setitem(sys.modules, "torch.distributed", distributed)
+    monkeypatch.setitem(sys.modules, "torch.distributed.fsdp", fsdp)
+
+    mod = _load_script(
+        "experiments/vlm_finetuning/scripts/train_vlm_dpo.py",
+        "train_vlm_dpo_fsdpmodule_compat_test",
+    )
+
+    assert mod.install_torch_fsdp_module_import_compat() is False
+    assert fsdp.FSDPModule is LegacyFullyShardedDataParallel

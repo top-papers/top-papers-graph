@@ -21,6 +21,33 @@ from transformers import (
     Qwen3VLForConditionalGeneration,
     set_seed,
 )
+
+
+def install_torch_fsdp_module_import_compat() -> bool:
+    """Make newer TRL DPO imports work with torch builds lacking FSDPModule.
+
+    Recent TRL versions import ``FSDPModule`` from ``torch.distributed.fsdp``
+    even when the current job uses DDP rather than FSDP. Some DataSphere
+    torch builds expose only the legacy ``FullyShardedDataParallel`` symbol,
+    which makes ``from trl import DPOTrainer`` fail before training starts.
+    Installing this narrow alias is safe for our DDP/LoRA path: it is only an
+    import-time compatibility shim for TRL's optional FSDP helpers.
+    """
+    try:
+        import torch.distributed.fsdp as fsdp
+    except Exception:
+        return False
+    if hasattr(fsdp, "FSDPModule"):
+        return False
+    try:
+        from torch.distributed.fsdp import FullyShardedDataParallel
+    except Exception:
+        return False
+    setattr(fsdp, "FSDPModule", FullyShardedDataParallel)
+    return True
+
+
+install_torch_fsdp_module_import_compat()
 from trl import DPOConfig, DPOTrainer
 
 
