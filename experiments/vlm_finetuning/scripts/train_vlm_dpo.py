@@ -732,10 +732,10 @@ def main() -> None:
     run_config['best_checkpoint_selection_mode'] = 'native_load' if native_best_reload_enabled else ('safe_checkpoint_file_copy' if args.load_best_model_at_end and eval_ds is not None else 'disabled')
     run_config['effective_loss_type'] = effective_loss_type
     run_config['effective_loss_weights'] = effective_loss_weights
-    (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2), encoding='utf-8')
+    (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 
     if args.dry_run:
-        print(json.dumps(run_config, ensure_ascii=False, indent=2))
+        print(json.dumps(run_config, ensure_ascii=False, indent=2, default=str))
         return
 
     train_result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

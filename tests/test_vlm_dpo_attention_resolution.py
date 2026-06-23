@@ -103,3 +103,18 @@ def test_dpo_disables_precompute_ref_log_probs_for_vlm(monkeypatch):
 
     not_requested = types.SimpleNamespace(precompute_ref_log_probs=False)
     assert mod.resolve_precompute_ref_log_probs(not_requested, "vlm") is False
+
+
+def test_dpo_run_config_json_handles_path_arguments(monkeypatch):
+    _install_dpo_training_stubs(monkeypatch)
+    mod = _load_dpo_script("train_vlm_dpo_run_config_json_test")
+
+    run_config = {
+        "output_dir": Path("outputs/dpo"),
+        "train_file": Path("data/dpo_train.jsonl"),
+        "resolved_mode": "vlm",
+    }
+
+    encoded = mod.json.dumps(run_config, ensure_ascii=False, indent=2, default=str)
+    assert "outputs/dpo" in encoded
+    assert "data/dpo_train.jsonl" in encoded

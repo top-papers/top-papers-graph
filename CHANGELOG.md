@@ -1,3 +1,9 @@
+## 2026-06-23 — DataSphere DPO run-config JSON serialization fix
+
+- Fixed the next DataSphere DPO failure after the VLM ref-log-prob guard: `run_config.json` serialization crashed on `pathlib.PosixPath` values from argparse path arguments.
+- Matched the existing SFT/GRPO behavior by serializing DPO run config with `json.dumps(..., default=str)` for both file output and dry-run printing.
+- Added a regression test covering `Path` values in DPO run config serialization.
+
 ## 2026-06-23 — DataSphere VLM DPO ref-log-prob precompute guard
 
 - Fixed the next DataSphere DPO failure after the attention-backend fix: TRL rejects `precompute_ref_log_probs=True` for VLM/vision datasets.
