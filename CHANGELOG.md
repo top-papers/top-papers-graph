@@ -1,4 +1,10 @@
 
+## 2026-06-23 — DataSphere DPO attention backend fix
+
+- Fixed DPO Qwen3-VL loading when `ATTN_IMPLEMENTATION=auto` is passed by DataSphere jobs.
+- Mirrored SFT/GRPO attention backend resolution in `train_vlm_dpo.py`: `auto` now becomes `flash_attention_2` when `flash_attn` is installed, otherwise `sdpa`.
+- Added a regression test to ensure DPO never forwards unsupported `attn_implementation="auto"` into Transformers model loading.
+
 ## 2026-06-19 — SciReason fine-tuning v2 pipeline
 
 - Added export-only `build_scireason_alignment_datasets.py` for leakage-safe SFT/DPO/GRPO dataset preparation.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import inspect
 import json
 import os
@@ -169,6 +170,20 @@ def offline_pretrained_kwargs() -> dict[str, Any]:
         return {'local_files_only': True}
     return {}
 
+
+def _flash_attn_available() -> bool:
+    return importlib.util.find_spec('flash_attn') is not None
+
+
+def resolve_attn_implementation(attn_impl: str) -> str:
+    if attn_impl == 'auto':
+        return 'flash_attention_2' if _flash_attn_available() else 'sdpa'
+    if attn_impl == 'flash_attention_2' and not _flash_attn_available():
+        print('[train_vlm_dpo] flash_attn is not installed; falling back to sdpa.', flush=True)
+        return 'sdpa'
+    return attn_impl
+
+
 def is_peft_adapter_model(model: Any) -> bool:
     return hasattr(model, 'peft_config') or model.__class__.__name__.lower().startswith('peft')
 
@@ -288,7 +303,7 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
             bnb_4bit_compute_dtype=torch.bfloat16 if bf16 else torch.float16,
         )
         device_map = {'': get_local_rank()} if torch.cuda.is_available() else None
-    kwargs = {'trust_remote_code': trust_remote_code, 'attn_implementation': attn_impl, **offline_pretrained_kwargs()}
+    kwargs = {'trust_remote_code': trust_remote_code, 'attn_implementation': resolve_attn_implementation(attn_impl), **offline_pretrained_kwargs()}
     if torch_dtype is not None:
         kwargs['torch_dtype'] = torch_dtype
     if quant_config is not None:
@@ -296,10 +311,19 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
     if device_map is not None:
         kwargs['device_map'] = device_map
     if 'Qwen3-VL' in model_id:
-        return Qwen3VLForConditionalGeneration.from_pretrained(model_id, **kwargs)
-    if 'Qwen2.5-VL' in model_id or 'Qwen2-VL' in model_id:
-        return Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id, **kwargs)
-    raise ValueError(f'Unsupported model for this entrypoint: {model_id}')
+        model_cls = Qwen3VLForConditionalGeneration
+    elif 'Qwen2.5-VL' in model_id or 'Qwen2-VL' in model_id:
+        model_cls = Qwen2_5_VLForConditionalGeneration
+    else:
+        raise ValueError(f'Unsupported model for this entrypoint: {model_id}')
+    try:
+        return model_cls.from_pretrained(model_id, **kwargs)
+    except Exception as exc:
+        if kwargs.get('attn_implementation') == 'flash_attention_2':
+            print(f'[train_vlm_dpo] flash_attention_2 load failed ({exc!r}); retrying with sdpa.', flush=True)
+            kwargs['attn_implementation'] = 'sdpa'
+            return model_cls.from_pretrained(model_id, **kwargs)
+        raise
 
 
 def _is_url(value: str) -> bool:
