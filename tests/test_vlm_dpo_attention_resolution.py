@@ -204,3 +204,70 @@ def test_dpo_image_cap_realigns_prompt_placeholders(monkeypatch, tmp_path):
     assert stats["truncated_rows"] == 1
     assert len(capped_row["images"]) == 1
     assert _count_image_placeholders(capped_row["prompt"]) == 1
+
+
+class _MiniColumnsDataset:
+    def __init__(self, rows, features=None):
+        self.rows = [dict(row) for row in rows]
+        self.features = dict(features or {key: object() for key in self.rows[0]})
+        self.column_names = list(self.features)
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, item):
+        if isinstance(item, slice):
+            subset = self.rows[item]
+            return {key: [row.get(key) for row in subset] for key in self.column_names}
+        return self.rows[item]
+
+    def cast(self, features):
+        self.features = dict(features)
+        self.column_names = list(self.features)
+        return self
+
+    def cast_column(self, column, feature):
+        self.features[column] = feature
+        if column not in self.column_names:
+            self.column_names.append(column)
+        return self
+
+    def remove_columns(self, columns):
+        columns = set(columns)
+        self.rows = [{key: value for key, value in row.items() if key not in columns} for row in self.rows]
+        self.features = {key: value for key, value in self.features.items() if key not in columns}
+        self.column_names = [key for key in self.column_names if key not in columns]
+        return self
+
+
+def test_dpo_vlm_plural_images_path_drops_singleton_image_column(monkeypatch):
+    _install_dpo_training_stubs(monkeypatch)
+    mod = _load_dpo_script("train_vlm_dpo_drop_singleton_image_test")
+
+    ds = _MiniColumnsDataset([
+        {
+            "prompt": [{"role": "user", "content": [{"type": "image"}, {"type": "image"}, {"type": "text", "text": "compare"}]}],
+            "chosen": [{"role": "assistant", "content": "good"}],
+            "rejected": [{"role": "assistant", "content": "bad"}],
+            "images": ["fig1.png", "fig2.png"],
+            "image": "fig1.png",
+        }
+    ])
+
+    prepared, mode = mod.maybe_prepare_dataset(ds, "images", "vlm")
+
+    assert mode == "vlm"
+    assert "images" in prepared.column_names
+    assert "image" not in prepared.column_names
+
+
+def test_dpo_singleton_image_column_would_collapse_plural_images_without_guard():
+    example = {"images": ["fig1.png", "fig2.png", "fig3.png"], "image": "fig1.png"}
+
+    # Mirrors TRL's vision DPO collator branch: if ``image`` is present, it
+    # overwrites the plural list with a one-element list. Our dataset guard must
+    # therefore remove ``image`` on the plural-image path before collation.
+    if "image" in example:
+        example["images"] = [example.pop("image")]
+
+    assert example["images"] == ["fig1.png"]

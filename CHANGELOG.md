@@ -1,5 +1,13 @@
 ## 2026-06-23 — DataSphere DPO image placeholder alignment fix
 
+## 2026-06-24 — DataSphere DPO singleton image column fix
+
+- Fixed the next DPO multimodal collation failure after prompt-placeholder alignment: TRL collapses plural `images` to `[image]` when a legacy singleton `image` column is still present.
+- DPO now drops the singleton `image` compatibility column on the plural `images` VLM path before constructing `DPOTrainer`.
+- Added regression tests that prove the plural-image path preserves `images` and removes the TRL-collapsing singleton column.
+- Added `DATASPHERE_DPO_SINGLETON_IMAGE_COLUMN_FIX_RU.md`.
+
+
 - Fixed the next VLM DPO failure after attention/precompute/run-config fixes: when training-time image capping reduces `images`, DPO now realigns `prompt` image placeholders before TRL multimodal collation.
 - Added DPO prompt placeholder alignment during formatter normalization and after the memory-cap projection.
 - Added regression tests for formatter-level and post-cap DPO placeholder alignment.

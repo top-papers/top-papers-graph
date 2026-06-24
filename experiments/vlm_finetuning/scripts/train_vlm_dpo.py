@@ -685,7 +685,20 @@ def maybe_prepare_dataset(ds, image_column: str, requested_mode: str):
 
     # Keep mixed text-only + image rows instead of filtering them out. This
     # matches the SFT/GRPO entrypoints and prevents silent loss of examples.
-    return _cast_images_column(ds, detected_column), 'vlm'
+    prepared = _cast_images_column(ds, detected_column)
+
+    # TRL's vision DPO collator treats a singleton ``image`` column as higher
+    # priority than the plural ``images`` column: when ``image`` is present it
+    # rewrites every example to ``example['images'] = [example.pop('image')]``.
+    # That collapses multi-image DPO rows to one provided image while our prompt
+    # correctly keeps multiple image placeholders after the memory cap, causing
+    # ``Number of images provided (1) does not match number of image placeholders``.
+    # For the plural-image path used by the DataSphere wrapper, drop the legacy
+    # singleton compatibility column before DPOTrainer sees the dataset.
+    if detected_column == 'images' and 'image' in getattr(prepared, 'column_names', []):
+        prepared = prepared.remove_columns(['image'])
+
+    return prepared, 'vlm'
 
 
 def main() -> None:
