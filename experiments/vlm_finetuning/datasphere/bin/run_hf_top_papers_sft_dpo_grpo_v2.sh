@@ -34,7 +34,7 @@ mkdir -p "$REPORT_DIR" outputs data/derived
 # G2.2 memory-safe training projection. Raw data/audit files still preserve all
 # rows and all image refs when MAX_IMAGES_PER_EXAMPLE_*=0.
 SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE="${SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
-DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
+DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-1}"
 GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-2}"
 DDP_UNUSED_ARGS=()
 if [ "${DDP_FIND_UNUSED_PARAMETERS:-1}" = "1" ]; then
@@ -272,8 +272,10 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --output-dir "$DPO_DIR" \
   --train-mode vlm \
   --image-column images \
-  --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
+  --max-pixels "${DPO_MAX_PIXELS:-501760}" \
   --max-images-per-example "$DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
+  --max-text-chars "${DPO_MAX_TEXT_CHARS:-12000}" \
+  --torch-empty-cache-steps "${DPO_TORCH_EMPTY_CACHE_STEPS:-5}" \
   --bf16 --gradient-checkpointing \
   "${DDP_UNUSED_ARGS[@]}" \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \

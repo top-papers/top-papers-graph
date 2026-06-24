@@ -1,5 +1,14 @@
 ## 2026-06-23 — DataSphere DPO image placeholder alignment fix
 
+## 2026-06-24 — DataSphere DPO CUDA OOM memory guard fix
+
+- Fixed the next DPO blocker after placeholder/singleton-image fixes: CUDA OOM inside TRL `DPOTrainer._compute_loss` on very long VLM preference rows.
+- Tightened DPO-only training projection to one image per example by default and introduced `DPO_MAX_PIXELS=501760`.
+- Added `--max-text-chars` to `train_vlm_dpo.py` to filter pathological prompt+chosen+rejected rows before VLM collation while preserving raw full-data artifacts.
+- Added `--torch-empty-cache-steps` passthrough for supported TRL/Transformers versions.
+- Added regression tests for DPO text filtering and memory-safe DataSphere defaults.
+
+
 ## 2026-06-24 — DataSphere DPO singleton image column fix
 
 - Fixed the next DPO multimodal collation failure after prompt-placeholder alignment: TRL collapses plural `images` to `[image]` when a legacy singleton `image` column is still present.

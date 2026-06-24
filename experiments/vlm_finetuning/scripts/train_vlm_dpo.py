@@ -97,6 +97,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--min-pixels', type=int, default=None)
     ap.add_argument('--max-pixels', type=int, default=None)
     ap.add_argument('--max-length', type=int, default=None)
+    ap.add_argument('--max-text-chars', type=int, default=0, help='Training-time memory guard: drop DPO rows whose prompt+chosen+rejected text surface exceeds this many characters. 0 disables the guard.')
+    ap.add_argument('--torch-empty-cache-steps', type=int, default=None, help='Call torch.cuda.empty_cache every N optimizer steps when supported by TRL/Transformers. 0 disables.')
     ap.add_argument(
         '--max-images-per-example',
         type=int,
@@ -467,6 +469,68 @@ def _assistant_completion_message(value: Any) -> list[dict[str, str]]:
     return [{'role': 'assistant', 'content': value}]
 
 
+def _text_chars_in_content(content: Any) -> int:
+    if content is None:
+        return 0
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        return sum(_text_chars_in_content(item) for item in content)
+    if isinstance(content, dict):
+        if content.get('type') == 'text' or 'text' in content:
+            return len(str(content.get('text') or ''))
+        return len(json.dumps(content, ensure_ascii=False, sort_keys=True))
+    return len(str(content))
+
+
+def _dpo_row_text_chars(row: dict[str, Any]) -> int:
+    total = 0
+    prompt = row.get('prompt') or []
+    if isinstance(prompt, list):
+        total += sum(_text_chars_in_content(msg.get('content')) for msg in prompt if isinstance(msg, dict))
+    else:
+        total += _text_chars_in_content(prompt)
+    for key in ('chosen', 'rejected'):
+        value = row.get(key)
+        if isinstance(value, list):
+            total += sum(_text_chars_in_content(msg.get('content')) for msg in value if isinstance(msg, dict))
+        else:
+            total += _text_chars_in_content(value)
+    return total
+
+
+def filter_dpo_dataset_by_text_chars(ds, max_text_chars: int, split_name: str, *, allow_empty: bool = False):
+    """Drop pathological long DPO rows before VLM preference training.
+
+    Qwen3-VL DPO intentionally keeps ``max_length=None`` because generic
+    sequence truncation can remove image tokens without removing pixel inputs.
+    The safe way to avoid rare enormous logits tensors in TRL's DPO loss is to
+    bound the normalized text surface before collation while preserving the raw
+    exported JSONL/audit artifacts.
+    """
+    if max_text_chars is None or int(max_text_chars) <= 0:
+        return ds, {"enabled": False, "max_text_chars": int(max_text_chars or 0), "dropped_rows": 0}
+    max_text_chars = int(max_text_chars)
+    before = len(ds)
+    filtered = ds.filter(
+        lambda example: _dpo_row_text_chars(example) <= max_text_chars,
+        desc=f'Filtering {split_name} DPO rows longer than {max_text_chars} text chars',
+    )
+    dropped = before - len(filtered)
+    if dropped and is_main_process():
+        print(
+            f'[train_vlm_dpo] dropped {dropped}/{before} {split_name} rows with '
+            f'prompt+chosen+rejected text longer than {max_text_chars} chars to avoid CUDA OOM.',
+            flush=True,
+        )
+    if len(filtered) == 0 and not allow_empty:
+        raise ValueError(
+            f'All {split_name} rows were filtered by --max-text-chars={max_text_chars}; '
+            'increase the limit or disable the guard with 0.'
+        )
+    return filtered, {"enabled": True, "max_text_chars": max_text_chars, "dropped_rows": dropped}
+
+
 def make_dpo_formatter(base_dir: Path):
     def format_dpo(example):
         images = []
@@ -711,6 +775,17 @@ def main() -> None:
     train_ds = _load_dpo_json_dataset_loose(args.train_file, args.train_file.parent)
     eval_ds = _load_dpo_json_dataset_loose(args.eval_file, args.eval_file.parent) if args.eval_file else None
 
+    train_text_filter_stats = {"enabled": False, "max_text_chars": int(args.max_text_chars or 0), "dropped_rows": 0}
+    eval_text_filter_stats = {"enabled": False, "max_text_chars": int(args.max_text_chars or 0), "dropped_rows": 0}
+    if args.max_text_chars and int(args.max_text_chars) > 0:
+        train_ds, train_text_filter_stats = filter_dpo_dataset_by_text_chars(train_ds, args.max_text_chars, 'train')
+        if eval_ds is not None:
+            eval_ds, eval_text_filter_stats = filter_dpo_dataset_by_text_chars(eval_ds, args.max_text_chars, 'eval', allow_empty=True)
+            if len(eval_ds) == 0:
+                if is_main_process():
+                    print('[train_vlm_dpo] eval split became empty after max-text-chars filtering; disabling eval.', flush=True)
+                eval_ds = None
+
     train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     if args.max_images_per_example and int(args.max_images_per_example) > 0:
@@ -797,6 +872,7 @@ def main() -> None:
         precompute_ref_batch_size=args.precompute_ref_batch_size if effective_precompute_ref_log_probs else None,
         padding_free=args.padding_free,
         activation_offloading=args.activation_offloading,
+        torch_empty_cache_steps=args.torch_empty_cache_steps if args.torch_empty_cache_steps and args.torch_empty_cache_steps > 0 else None,
         load_best_model_at_end=should_native_load_best_model(args, eval_ds, model),
         metric_for_best_model=args.metric_for_best_model,
         greater_is_better=args.greater_is_better,
@@ -828,6 +904,8 @@ def main() -> None:
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['train_image_cap_stats'] = train_image_cap_stats
     run_config['eval_image_cap_stats'] = eval_image_cap_stats
+    run_config['train_text_filter_stats'] = train_text_filter_stats
+    run_config['eval_text_filter_stats'] = eval_text_filter_stats
     run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
     run_config['native_best_checkpoint_reload_enabled'] = native_best_reload_enabled
     run_config['best_checkpoint_selection_mode'] = 'native_load' if native_best_reload_enabled else ('safe_checkpoint_file_copy' if args.load_best_model_at_end and eval_ds is not None else 'disabled')

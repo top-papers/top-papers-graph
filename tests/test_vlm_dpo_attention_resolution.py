@@ -143,6 +143,9 @@ class _MiniDataset:
     def map(self, fn, desc=None):
         return _MiniDataset([fn(dict(row)) for row in self.rows])
 
+    def filter(self, fn, desc=None):
+        return _MiniDataset([dict(row) for row in self.rows if fn(dict(row))])
+
 
 def test_dpo_formatter_aligns_prompt_placeholders_to_images(monkeypatch, tmp_path):
     _install_dpo_training_stubs(monkeypatch)
@@ -271,3 +274,34 @@ def test_dpo_singleton_image_column_would_collapse_plural_images_without_guard()
         example["images"] = [example.pop("image")]
 
     assert example["images"] == ["fig1.png"]
+
+
+def test_dpo_text_char_filter_drops_pathological_preference_rows(monkeypatch):
+    _install_dpo_training_stubs(monkeypatch)
+    mod = _load_dpo_script("train_vlm_dpo_text_char_filter_test")
+
+    ds = _MiniDataset([
+        {
+            "prompt": [{"role": "user", "content": [{"type": "text", "text": "short prompt"}]}],
+            "chosen": [{"role": "assistant", "content": "short chosen"}],
+            "rejected": [{"role": "assistant", "content": "short rejected"}],
+        },
+        {
+            "prompt": [{"role": "user", "content": [{"type": "text", "text": "x" * 80}]}],
+            "chosen": [{"role": "assistant", "content": "y" * 80}],
+            "rejected": [{"role": "assistant", "content": "z" * 80}],
+        },
+    ])
+
+    filtered, stats = mod.filter_dpo_dataset_by_text_chars(ds, 100, "train")
+
+    assert len(filtered.rows) == 1
+    assert stats == {"enabled": True, "max_text_chars": 100, "dropped_rows": 1}
+
+
+def test_dpo_empty_cache_steps_is_passed_only_when_positive(monkeypatch):
+    _install_dpo_training_stubs(monkeypatch)
+    mod = _load_dpo_script("train_vlm_dpo_empty_cache_config_test")
+
+    kwargs = {"torch_empty_cache_steps": 5, "output_dir": "out"}
+    assert mod._supports_kwargs(mod.DPOConfig, kwargs)["torch_empty_cache_steps"] == 5

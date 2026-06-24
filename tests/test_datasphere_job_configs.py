@@ -272,3 +272,22 @@ def test_full_vlm_job_configs_keep_dpo_ref_precompute_disabled() -> None:
     legacy_script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_grpo_full.sh").read_text(encoding="utf-8")
     assert 'DPO_PRECOMPUTE_REF_LOG_PROBS:-0' in legacy_script
     assert 'DPO_PRECOMPUTE_REF_LOG_PROBS:-1' not in legacy_script
+
+
+def test_full_dpo_configs_use_memory_safe_vlm_projection() -> None:
+    for name in ["hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml", "hf_top_papers_sft_grpo_full_g2_2.yaml"]:
+        path = DATASPHERE_DIR / "job_configs" / name
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+        vars_list = cfg.get("env", {}).get("vars", [])
+        env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+        assert int(env["DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE"]) <= 1, name
+        assert int(env["DPO_MAX_PIXELS"]) <= 501760, name
+        assert int(env["DPO_MAX_TEXT_CHARS"]) > 0, name
+        assert int(env["DPO_TORCH_EMPTY_CACHE_STEPS"]) > 0, name
+
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_dpo_grpo_v2.sh").read_text(encoding="utf-8")
+    assert 'DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-1' in script
+    assert 'DPO_MAX_PIXELS:-501760' in script
+    assert '--max-text-chars "${DPO_MAX_TEXT_CHARS:-12000}"' in script
+    assert '--torch-empty-cache-steps "${DPO_TORCH_EMPTY_CACHE_STEPS:-5}"' in script
