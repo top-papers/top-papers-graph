@@ -24,24 +24,12 @@ VLM_SFT_DIR="outputs/${OUT_PREFIX}_vlm_sft_lora"
 DPO_DIR="outputs/${OUT_PREFIX}_dpo_lora"
 GRPO_DIR="outputs/${OUT_PREFIX}_grpo_lora"
 REPORT_DIR="reports/${OUT_PREFIX}_datasphere"
-HF_REPO_ID="${HF_REPO_ID:-top-papers/Qwen3-VL-8B-Instruct-scireason}"
-HF_REPO_TYPE="${HF_REPO_TYPE:-model}"
-HF_REVISION="${HF_REVISION:-main}"
-HF_UPLOAD_AFTER_TRAINING="${HF_UPLOAD_AFTER_TRAINING:-0}"
-HF_UPLOAD_PATH_PREFIX="${HF_UPLOAD_PATH_PREFIX:-}"
-HF_UPLOAD_BUNDLE_DIR="${HF_UPLOAD_BUNDLE_DIR:-$REPORT_DIR/hf_upload_bundle}"
 mkdir -p "$REPORT_DIR" outputs data/derived
 # G2.2 memory-safe training projection. Raw data/audit files still preserve all
 # rows and all image refs when MAX_IMAGES_PER_EXAMPLE_*=0.
 SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE="${SFT_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
-DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-1}"
+DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-3}"
 GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE="${GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE:-2}"
-DDP_UNUSED_ARGS=()
-if [ "${DDP_FIND_UNUSED_PARAMETERS:-1}" = "1" ]; then
-  DDP_UNUSED_ARGS+=(--ddp-find-unused-parameters)
-else
-  DDP_UNUSED_ARGS+=(--no-ddp-find-unused-parameters)
-fi
 
 prefetch_base_model_and_enable_offline_hub() {
   if [ "${PREFETCH_BASE_MODEL:-1}" = "1" ]; then
@@ -90,10 +78,10 @@ paths = {
     "text_sft_config": Path("$TEXT_SFT_DIR/run_config.json"),
     "vlm_sft_config": Path("$VLM_SFT_DIR/run_config.json"),
     "dpo_config": Path("$DPO_DIR/run_config.json"),
-    "grpo_config": Path("$GRPO_DIR/run_config.json") if Path("$GRPO_DIR/run_config.json").exists() else Path("$GRPO_DIR/planned_run_config.json"),
+    "grpo_config": Path("$GRPO_DIR/planned_run_config.json"),
 }
 summary = {
-    "pipeline": "scireason_v2_text_sft_vlm_sft_dpo_grpo",
+    "pipeline": "scireason_v2_text_sft_vlm_sft_dpo_optional_grpo",
     "dataset_id": "$DATASET_ID",
     "dataset_revision": "$DATASET_REVISION",
     "dataset_export_subdir": "$DATASET_EXPORT_SUBDIR",
@@ -104,9 +92,6 @@ summary = {
         "dpo_dir": "$DPO_DIR",
         "grpo_dir": "$GRPO_DIR",
         "report_dir": "$REPORT_DIR",
-        "dpo_archive": "outputs/${OUT_PREFIX}_dpo_lora.tar.gz",
-        "grpo_archive": "outputs/${OUT_PREFIX}_grpo_lora.tar.gz",
-        "hf_upload_bundle_dir": "$HF_UPLOAD_BUNDLE_DIR",
     },
 }
 for key, path in paths.items():
@@ -117,38 +102,6 @@ for key, path in paths.items():
             summary[key] = {"path": str(path), "error": str(exc)}
 print(json.dumps(summary, ensure_ascii=False, indent=2))
 PY
-}
-
-
-hf_upload_enabled() {
-  case "$(printf '%s' "$HF_UPLOAD_AFTER_TRAINING" | tr '[:upper:]' '[:lower:]')" in
-    0|false|no|off) return 1 ;;
-    *) return 0 ;;
-  esac
-}
-
-upload_to_huggingface() {
-  if ! hf_upload_enabled; then
-    echo "[datasphere-pipeline] Hugging Face upload disabled: HF_UPLOAD_AFTER_TRAINING=$HF_UPLOAD_AFTER_TRAINING"
-    return 0
-  fi
-  unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE
-  echo "[datasphere-pipeline] uploading DPO-first artifacts to Hugging Face: $HF_REPO_ID"
-  python experiments/vlm_finetuning/scripts/upload_hf_finetuned_artifacts.py \
-    --repo-id "$HF_REPO_ID" \
-    --repo-type "$HF_REPO_TYPE" \
-    --revision "$HF_REVISION" \
-    --path-in-repo "$HF_UPLOAD_PATH_PREFIX" \
-    --base-model "$BASE_MODEL" \
-    --dataset-id "$DATASET_ID" \
-    --out-prefix "$OUT_PREFIX" \
-    --data-dir "$DATA_DIR" \
-    --sft-dir "$VLM_SFT_DIR" \
-    --dpo-dir "$DPO_DIR" \
-    --grpo-dir "$GRPO_DIR" \
-    --final-stage "${HF_FINAL_STAGE:-auto}" \
-    --report-dir "$REPORT_DIR" \
-    --bundle-dir "$HF_UPLOAD_BUNDLE_DIR"
 }
 
 trap 'status=$?; write_stage_summary || true; exit $status' EXIT
@@ -195,7 +148,6 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_sft.py \
   --use-lora \
   --assistant-only-loss \
   --bf16 --tf32 --gradient-checkpointing \
-  "${DDP_UNUSED_ARGS[@]}" \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --learning-rate "${TEXT_SFT_LR:-5e-5}" \
   --warmup-ratio "${TEXT_SFT_WARMUP_RATIO:-0.05}" \
@@ -228,7 +180,6 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_sft.py \
   --train-mode vlm \
   --image-column images \
   --bf16 --tf32 --gradient-checkpointing \
-  "${DDP_UNUSED_ARGS[@]}" \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
   --learning-rate "${VLM_SFT_LR:-3e-5}" \
@@ -260,10 +211,8 @@ if [ -n "${DPO_LOSS_WEIGHTS:-1.0 0.15}" ]; then
   DPO_LOSS_ARGS+=(--loss-weights "${DPO_LOSS_WEIGHTS_ARR[@]}")
 fi
 if [ "${DPO_USE_WEIGHTING:-1}" = "1" ]; then DPO_LOSS_ARGS+=(--use-weighting); else DPO_LOSS_ARGS+=(--no-use-weighting); fi
-if [ "${DPO_PRECOMPUTE_REF_LOG_PROBS:-0}" = "1" ]; then
-  DPO_LOSS_ARGS+=(--precompute-ref-log-probs)
-  if [ -n "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}" ]; then DPO_LOSS_ARGS+=(--precompute-ref-batch-size "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}"); fi
-fi
+if [ "${DPO_PRECOMPUTE_REF_LOG_PROBS:-1}" = "1" ]; then DPO_LOSS_ARGS+=(--precompute-ref-log-probs); fi
+if [ -n "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}" ]; then DPO_LOSS_ARGS+=(--precompute-ref-batch-size "${DPO_PRECOMPUTE_REF_BATCH_SIZE:-2}"); fi
 torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --model-id "$BASE_MODEL" \
   --sft-adapter-path "$VLM_SFT_DIR" \
@@ -272,12 +221,9 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
   --output-dir "$DPO_DIR" \
   --train-mode vlm \
   --image-column images \
-  --max-pixels "${DPO_MAX_PIXELS:-501760}" \
+  --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
   --max-images-per-example "$DPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
-  --max-text-chars "${DPO_MAX_TEXT_CHARS:-12000}" \
-  --torch-empty-cache-steps "${DPO_TORCH_EMPTY_CACHE_STEPS:-5}" \
   --bf16 --gradient-checkpointing \
-  "${DDP_UNUSED_ARGS[@]}" \
   --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
   --learning-rate "${DPO_LR:-7e-6}" \
   --beta "${DPO_BETA:-0.06}" \
@@ -294,8 +240,8 @@ torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_dpo.py \
 
 tar_adapter_dir "$DPO_DIR" "outputs/${OUT_PREFIX}_dpo_lora.tar.gz"
 
-# 4) GRPO polish. Enabled by default for the full SFT->DPO->GRPO scheme; set ENABLE_GRPO_POLISH=0 only for DPO-only ablations.
-if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then
+# 4) Optional short GRPO polish. Disabled unless ENABLE_GRPO_POLISH=1.
+if [ "${ENABLE_GRPO_POLISH:-0}" = "1" ]; then
   torchrun_stage experiments/vlm_finetuning/scripts/train_vlm_grpo.py \
     --model-id "$BASE_MODEL" \
     --sft-adapter-path "$DPO_DIR" \
@@ -305,7 +251,6 @@ if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then
     --train-mode vlm \
     --image-column images \
     --bf16 --tf32 --gradient-checkpointing \
-    "${DDP_UNUSED_ARGS[@]}" \
     --attn-implementation "${ATTN_IMPLEMENTATION:-auto}" \
     --max-pixels "${VLM_MAX_PIXELS:-1003520}" \
     --max-images-per-example "$GRPO_TRAIN_MAX_IMAGES_PER_EXAMPLE" \
@@ -320,7 +265,7 @@ if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then
     --per-device-eval-batch-size 1 \
     --gradient-accumulation-steps "${GRPO_GRAD_ACCUM:-8}" \
     --num-generations "${GRPO_NUM_GENERATIONS:-4}" \
-    --num-generations-eval "${GRPO_NUM_GENERATIONS_EVAL:-2}" \
+    --num-generations-eval "${GRPO_NUM_GENERATIONS_EVAL:-4}" \
     --num-iterations "${GRPO_NUM_ITERATIONS:-2}" \
     --max-completion-length "${GRPO_MAX_COMPLETION_LENGTH:-640}" \
     --temperature "${GRPO_TEMPERATURE:-0.85}" \
@@ -346,8 +291,5 @@ else
   printf '%s\n' '{"status":"skipped","reason":"ENABLE_GRPO_POLISH is not 1; use DPO checkpoint as the main candidate."}' > "$GRPO_DIR/planned_run_config.json"
 fi
 
-write_stage_summary
-tar --exclude="$REPORT_DIR/hf_upload_bundle" -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" "$DATA_DIR" 2>/dev/null || true
-upload_to_huggingface
 write_stage_summary
 tar --exclude="$REPORT_DIR/hf_upload_bundle" -czf "reports/${OUT_PREFIX}_datasphere_reports.tar.gz" "$REPORT_DIR" "$DATA_DIR" 2>/dev/null || true

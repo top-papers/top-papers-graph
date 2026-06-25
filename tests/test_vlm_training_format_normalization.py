@@ -6,12 +6,6 @@ import types
 from pathlib import Path
 
 
-class _DummyDataset(list):
-    @classmethod
-    def from_list(cls, rows):
-        return cls(rows)
-
-
 class _Dummy:
     def __init__(self, *args, **kwargs):
         pass
@@ -23,7 +17,6 @@ class _Dummy:
 
 def _install_training_stubs(monkeypatch):
     datasets = types.ModuleType("datasets")
-    datasets.Dataset = _DummyDataset
     datasets.Image = _Dummy
     datasets.Sequence = lambda feature: ("sequence", feature)
     datasets.load_dataset = lambda *args, **kwargs: None
@@ -47,7 +40,7 @@ def _install_training_stubs(monkeypatch):
     transformers.set_seed = lambda seed: None
 
     trl = types.ModuleType("trl")
-    for attr in ["SFTConfig", "SFTTrainer", "DPOConfig", "DPOTrainer", "GRPOConfig", "GRPOTrainer"]:
+    for attr in ["SFTConfig", "SFTTrainer", "GRPOConfig", "GRPOTrainer"]:
         setattr(trl, attr, _Dummy)
 
     torch = types.ModuleType("torch")
@@ -267,14 +260,14 @@ def test_grpo_aligns_image_placeholders_to_capped_images(monkeypatch):
 
 
 
-def test_sft_enables_ddp_find_unused_for_distributed_lora_by_default(monkeypatch):
+def test_sft_enables_ddp_find_unused_for_distributed_vlm_by_default(monkeypatch):
     _install_training_stubs(monkeypatch)
     monkeypatch.setenv("WORLD_SIZE", "2")
     mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_ddp_unused_test")
 
     args = types.SimpleNamespace(ddp_find_unused_parameters=None)
     assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
-    assert mod.resolve_ddp_find_unused_parameters(args, "text") is True
+    assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
 
     monkeypatch.setenv("WORLD_SIZE", "1")
     assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
@@ -286,33 +279,14 @@ def test_sft_enables_ddp_find_unused_for_distributed_lora_by_default(monkeypatch
     assert mod.resolve_ddp_find_unused_parameters(forced_off, "vlm") is False
 
 
-def test_grpo_enables_ddp_find_unused_for_distributed_lora_by_default(monkeypatch):
+def test_grpo_enables_ddp_find_unused_for_distributed_vlm_by_default(monkeypatch):
     _install_training_stubs(monkeypatch)
     monkeypatch.setenv("WORLD_SIZE", "2")
     mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_ddp_unused_test")
 
     args = types.SimpleNamespace(ddp_find_unused_parameters=None)
     assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
-    assert mod.resolve_ddp_find_unused_parameters(args, "text") is True
-
-    monkeypatch.setenv("WORLD_SIZE", "1")
-    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
-    monkeypatch.setenv("WORLD_SIZE", "2")
-
-    forced_on = types.SimpleNamespace(ddp_find_unused_parameters=True)
-    assert mod.resolve_ddp_find_unused_parameters(forced_on, "vlm") is True
-    forced_off = types.SimpleNamespace(ddp_find_unused_parameters=False)
-    assert mod.resolve_ddp_find_unused_parameters(forced_off, "vlm") is False
-
-
-def test_dpo_enables_ddp_find_unused_for_distributed_adapter_by_default(monkeypatch):
-    _install_training_stubs(monkeypatch)
-    monkeypatch.setenv("WORLD_SIZE", "2")
-    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_dpo.py", "train_vlm_dpo_ddp_unused_test")
-
-    args = types.SimpleNamespace(ddp_find_unused_parameters=None)
-    assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is True
-    assert mod.resolve_ddp_find_unused_parameters(args, "text") is True
+    assert mod.resolve_ddp_find_unused_parameters(args, "text") is False
 
     monkeypatch.setenv("WORLD_SIZE", "1")
     assert mod.resolve_ddp_find_unused_parameters(args, "vlm") is False
@@ -668,153 +642,3 @@ def test_grpo_task_aware_reward_processing_imports_math_for_group_norm(monkeypat
     assert len(rewards) == 4
     assert rewards[0] < rewards[1]
     assert all(-1.0 <= value <= 1.0 for value in rewards)
-
-
-def test_dpo_formatter_wraps_string_completions_for_conversational_prompt(monkeypatch):
-    _install_training_stubs(monkeypatch)
-    trl = sys.modules["trl"]
-    trl.DPOConfig = _Dummy
-    trl.DPOTrainer = _Dummy
-    mod = _load_script(
-        "experiments/vlm_finetuning/scripts/train_vlm_dpo.py",
-        "train_vlm_dpo_formatter_conversational_test",
-    )
-
-    formatter = mod.make_dpo_formatter(Path("."))
-    out = formatter(
-        {
-            "prompt": [{"role": "user", "content": "review this claim"}],
-            "chosen": '{"verdict":"reject"}',
-            "rejected": '{"verdict":"accept"}',
-            "images": ["/tmp/page_001.png"],
-        }
-    )
-
-    assert out["chosen"] == [{"role": "assistant", "content": '{"verdict":"reject"}'}]
-    assert out["rejected"] == [{"role": "assistant", "content": '{"verdict":"accept"}'}]
-    assert out["images"] == ["/tmp/page_001.png"]
-
-
-def test_sft_loose_json_loader_ignores_heterogeneous_metadata(monkeypatch, tmp_path):
-    _install_training_stubs(monkeypatch)
-    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_sft.py", "train_vlm_sft_loose_loader_test")
-    path = tmp_path / "sft.jsonl"
-    rows = [
-        {"messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}], "metadata": {"extra": {"x": 1}}},
-        {"messages": [{"role": "user", "content": "q2"}, {"role": "assistant", "content": "a2"}], "metadata": {"extra": "x", "graph_kind": "temporal", "importance_score": 0.2}},
-    ]
-    path.write_text("\n".join(__import__("json").dumps(r) for r in rows), encoding="utf-8")
-    ds = mod._load_sft_json_dataset_loose(path, tmp_path)
-    assert len(ds) == 2
-    assert set(ds[0]) == {"messages", "images", "image"}
-
-
-def test_dpo_loose_json_loader_projects_preference_columns(monkeypatch, tmp_path):
-    _install_training_stubs(monkeypatch)
-    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_dpo.py", "train_vlm_dpo_loose_loader_test")
-    path = tmp_path / "dpo.jsonl"
-    row = {
-        "prompt": [{"role": "user", "content": "q"}],
-        "chosen": "good",
-        "rejected": "bad",
-        "metadata": {"extra": {"x": 1}, "graph_kind": "semantic"},
-    }
-    path.write_text(__import__("json").dumps(row) + "\n", encoding="utf-8")
-    ds = mod._load_dpo_json_dataset_loose(path, tmp_path)
-    assert len(ds) == 1
-    assert ds[0]["chosen"] == [{"role": "assistant", "content": "good"}]
-    assert set(ds[0]) == {"prompt", "chosen", "rejected", "images", "image"}
-
-
-def test_grpo_loose_json_loader_serializes_nested_non_prompt_values(monkeypatch, tmp_path):
-    _install_training_stubs(monkeypatch)
-    mod = _load_script("experiments/vlm_finetuning/scripts/train_vlm_grpo.py", "train_vlm_grpo_loose_loader_test")
-    path = tmp_path / "grpo.jsonl"
-    row = {
-        "prompt": [{"role": "user", "content": "q"}],
-        "reference_assertions_json": [{"id": "a1"}],
-        "metadata": {"extra": {"x": 1}, "graph_kind": "temporal", "importance_score": 0.3},
-        "expected_verdict": "accept",
-    }
-    path.write_text(__import__("json").dumps(row) + "\n", encoding="utf-8")
-    ds = mod._load_grpo_json_dataset_loose(path, tmp_path)
-    assert len(ds) == 1
-    assert isinstance(ds[0]["metadata"], str)
-    assert isinstance(ds[0]["reference_assertions_json"], str)
-    assert ds[0]["expected_verdict"] == "accept"
-
-
-def test_dpo_installs_fsdpmodule_alias_before_trl_import(monkeypatch):
-    _install_training_stubs(monkeypatch)
-
-    torch_mod = sys.modules["torch"]
-    torch_mod.__path__ = []
-    distributed = types.ModuleType("torch.distributed")
-    fsdp = types.ModuleType("torch.distributed.fsdp")
-
-    class LegacyFullyShardedDataParallel:
-        pass
-
-    fsdp.FullyShardedDataParallel = LegacyFullyShardedDataParallel
-    distributed.fsdp = fsdp
-    torch_mod.distributed = distributed
-    monkeypatch.setitem(sys.modules, "torch.distributed", distributed)
-    monkeypatch.setitem(sys.modules, "torch.distributed.fsdp", fsdp)
-
-    mod = _load_script(
-        "experiments/vlm_finetuning/scripts/train_vlm_dpo.py",
-        "train_vlm_dpo_fsdpmodule_compat_test",
-    )
-
-    assert mod.install_torch_fsdp_module_import_compat() is False
-    assert fsdp.FSDPModule is LegacyFullyShardedDataParallel
-
-
-def test_grpo_resolves_eval_generation_count_to_divide_global_eval_batch(monkeypatch):
-    _install_training_stubs(monkeypatch)
-    monkeypatch.setenv("WORLD_SIZE", "2")
-    mod = _load_script(
-        "experiments/vlm_finetuning/scripts/train_vlm_grpo.py",
-        "train_vlm_grpo_eval_generation_divisibility_test",
-    )
-
-    args = types.SimpleNamespace(
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=8,
-        num_generations=4,
-        num_generations_eval=4,
-    )
-
-    stats = mod.resolve_grpo_generation_batch_divisibility(args, eval_enabled=True)
-
-    assert args.num_generations == 4
-    assert args.num_generations_eval == 2
-    assert stats["eval_global_batch_size_for_generations"] == 2
-    assert stats["num_generations_eval_original"] == 4
-    assert stats["num_generations_eval_resolved"] == 2
-    assert stats["eval_disabled_for_generation_batch"] is False
-
-
-def test_grpo_disables_eval_when_global_eval_batch_cannot_support_group(monkeypatch):
-    _install_training_stubs(monkeypatch)
-    monkeypatch.setenv("WORLD_SIZE", "1")
-    mod = _load_script(
-        "experiments/vlm_finetuning/scripts/train_vlm_grpo.py",
-        "train_vlm_grpo_eval_disable_generation_divisibility_test",
-    )
-
-    args = types.SimpleNamespace(
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=8,
-        num_generations=4,
-        num_generations_eval=2,
-    )
-
-    stats = mod.resolve_grpo_generation_batch_divisibility(args, eval_enabled=True)
-
-    assert args.num_generations == 4
-    assert args.num_generations_eval == 2
-    assert stats["eval_global_batch_size_for_generations"] == 1
-    assert stats["eval_disabled_for_generation_batch"] is True

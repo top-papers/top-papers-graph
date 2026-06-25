@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict
 
-from datasets import Dataset, Image as HFImage, Sequence
+from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -292,17 +292,15 @@ def get_world_size() -> int:
 def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
     """Return the DDP unused-parameter setting for Trainer/SFTConfig.
 
-    Qwen3-VL LoRA targets can include branches that are unused for a given
-    mini-batch. This is especially common in the text-SFT stage, where the
-    vision tower / multimodal adapter targets may be trainable but no image
-    tensors participate in the loss. In multi-process runs, enable DDP's
+    VLM + LoRA fine-tuning can leave different trainable branches unused on
+    different ranks for a given step. In multi-process VLM runs, enable DDP's
     unused-parameter detection unless the caller explicitly overrides it. Keep
-    single-process runs on the faster default path.
+    text-only and single-process runs on the faster default path.
     """
     requested = getattr(args, 'ddp_find_unused_parameters', None)
     if requested is not None:
         return bool(requested)
-    return get_world_size() > 1
+    return actual_mode == 'vlm' and get_world_size() > 1
 
 
 def disable_unsupported_vlm_assistant_only_loss(args: argparse.Namespace, actual_mode: str) -> None:
@@ -982,53 +980,6 @@ def _normalise_sft_example(example, base_dir: Path | None = None):
         example['image'] = images[0]
     return example
 
-
-def _read_json_records(path: str | Path) -> list[Dict[str, Any]]:
-    path = Path(path)
-    text = path.read_text(encoding='utf-8')
-    if not text.strip():
-        return []
-    if path.suffix == '.jsonl':
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    obj = json.loads(text)
-    if isinstance(obj, list):
-        return obj
-    if isinstance(obj, dict):
-        for key in ('data', 'rows', 'examples'):
-            if isinstance(obj.get(key), list):
-                return obj[key]
-        return [obj]
-    raise ValueError(f'Unsupported JSON top-level value in {path}: {type(obj).__name__}')
-
-
-def _load_sft_json_dataset_loose(path: str | Path, base_dir: Path):
-    """Load JSON/JSONL SFT rows without letting Arrow infer raw metadata schema.
-
-    The v2 builder intentionally keeps rich per-row metadata in the full-data
-    artifacts.  Hugging Face Datasets' JSON loader infers an Arrow schema from
-    early rows and can then fail when later metadata rows contain extra keys or
-    different nested types.  For SFT we only need normalized TRL columns, so we
-    read JSONL with Python, normalize messages/images first, and create the
-    Dataset from a stable projection.
-    """
-    rows = []
-    for raw in _read_json_records(path):
-        if not isinstance(raw, dict):
-            continue
-        norm = _normalise_sft_example(dict(raw), base_dir)
-        images = _normalize_image_list(norm.get('images'), Path('.'))
-        image = norm.get('image')
-        if image in (None, '', []):
-            image = images[0] if images else None
-        rows.append({
-            'messages': norm.get('messages') or [],
-            'images': images,
-            'image': image,
-        })
-    if not rows:
-        raise ValueError(f'No SFT rows found in {path}')
-    return Dataset.from_list(rows)
-
 def _value_has_image(value) -> bool:
     if value in (None, ''):
         return False
@@ -1118,13 +1069,13 @@ def main() -> None:
             pass
 
     train_file_str = args.train_file
-    train_base_dir = Path(train_file_str).parent if train_file_str.endswith(('.json', '.jsonl')) else Path('.')
     if train_file_str.endswith('.json') or train_file_str.endswith('.jsonl'):
-        train_ds = _load_sft_json_dataset_loose(train_file_str, train_base_dir)
-        eval_ds = None
+        data_files = {'train': train_file_str}
         if args.eval_file:
-            eval_base_dir = Path(args.eval_file).parent
-            eval_ds = _load_sft_json_dataset_loose(args.eval_file, eval_base_dir)
+            data_files['eval'] = args.eval_file
+        ds = load_dataset('json', data_files=data_files)
+        train_ds = ds['train']
+        eval_ds = ds.get('eval')
     else:
         ds = load_dataset(train_file_str)
         train_ds = ds.get('train')
@@ -1132,6 +1083,7 @@ def main() -> None:
             train_ds = ds['validation']
         eval_ds = ds.get('eval')
 
+    train_base_dir = Path(train_file_str).parent if train_file_str.endswith(('.json', '.jsonl')) else Path('.')
     train_ds = train_ds.map(lambda example: _normalise_sft_example(example, train_base_dir))
     train_ds = _keep_only_trl_sft_columns(train_ds, args.image_column)
     train_ds, train_image_cap_stats = cap_dataset_images_for_memory(train_ds, args.max_images_per_example, 'train')
@@ -1292,26 +1244,5 @@ def main() -> None:
         print(f'[train_vlm_sft] final save status: {save_manifest.get("status")}; best checkpoint: {save_manifest.get("best_model_checkpoint")}', flush=True)
 
 
-
-
-def cleanup_distributed_process_group() -> None:
-    """Best-effort DDP/NCCL shutdown to avoid noisy or hanging process teardown."""
-    try:
-        import torch
-        dist = getattr(torch, 'distributed', None)
-        if dist is not None and getattr(dist, 'is_available', lambda: False)() and dist.is_initialized():
-            dist.destroy_process_group()
-    except Exception as exc:
-        if is_main_process():
-            print(f'[train_vlm_sft] warning: failed to destroy distributed process group: {exc}', flush=True)
-
-
-def main_with_distributed_cleanup() -> None:
-    try:
-        main()
-    finally:
-        cleanup_distributed_process_group()
-
-
 if __name__ == '__main__':
-    main_with_distributed_cleanup()
+    main()

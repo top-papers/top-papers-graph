@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import inspect
 import json
 import os
@@ -11,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from datasets import Dataset, Image as HFImage, Sequence
+from datasets import Image as HFImage, Sequence
 from datasets import load_dataset
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -22,33 +21,6 @@ from transformers import (
     Qwen3VLForConditionalGeneration,
     set_seed,
 )
-
-
-def install_torch_fsdp_module_import_compat() -> bool:
-    """Make newer TRL DPO imports work with torch builds lacking FSDPModule.
-
-    Recent TRL versions import ``FSDPModule`` from ``torch.distributed.fsdp``
-    even when the current job uses DDP rather than FSDP. Some DataSphere
-    torch builds expose only the legacy ``FullyShardedDataParallel`` symbol,
-    which makes ``from trl import DPOTrainer`` fail before training starts.
-    Installing this narrow alias is safe for our DDP/LoRA path: it is only an
-    import-time compatibility shim for TRL's optional FSDP helpers.
-    """
-    try:
-        import torch.distributed.fsdp as fsdp
-    except Exception:
-        return False
-    if hasattr(fsdp, "FSDPModule"):
-        return False
-    try:
-        from torch.distributed.fsdp import FullyShardedDataParallel
-    except Exception:
-        return False
-    setattr(fsdp, "FSDPModule", FullyShardedDataParallel)
-    return True
-
-
-install_torch_fsdp_module_import_compat()
 from trl import DPOConfig, DPOTrainer
 
 
@@ -97,23 +69,11 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--min-pixels', type=int, default=None)
     ap.add_argument('--max-pixels', type=int, default=None)
     ap.add_argument('--max-length', type=int, default=None)
-    ap.add_argument('--max-text-chars', type=int, default=0, help='Training-time memory guard: drop DPO rows whose prompt+chosen+rejected text surface exceeds this many characters. 0 disables the guard.')
-    ap.add_argument('--torch-empty-cache-steps', type=int, default=None, help='Call torch.cuda.empty_cache every N optimizer steps when supported by TRL/Transformers. 0 disables.')
     ap.add_argument(
         '--max-images-per-example',
         type=int,
         default=0,
         help='Training-time VLM memory guard: keep at most this many images per preference row. 0 disables the projection.',
-    )
-    ap.add_argument(
-        '--ddp-find-unused-parameters',
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help=(
-            'Pass find_unused_parameters to DistributedDataParallel. '
-            'Default: enabled automatically for multi-process LoRA/adapter DPO runs, '
-            'because some text/VLM branches may be unused on a rank for a step.'
-        ),
     )
     ap.add_argument('--resume-from-checkpoint', default=None)
     ap.add_argument('--load-best-model-at-end', action=argparse.BooleanOptionalAction, default=True, help='Select the best eval checkpoint before final save when eval is enabled.')
@@ -140,46 +100,6 @@ def is_main_process() -> bool:
     return int(os.environ.get('RANK', '0')) == 0
 
 
-def get_world_size() -> int:
-    try:
-        return int(os.environ.get('WORLD_SIZE', '1'))
-    except ValueError:
-        return 1
-
-
-def resolve_ddp_find_unused_parameters(args: argparse.Namespace, actual_mode: str) -> bool:
-    """Return the DDP unused-parameter setting for DPOConfig.
-
-    DPO continues from SFT/VLM adapters and may keep LoRA targets that are not
-    used by every rank on every mini-batch. For multi-process runs, enable DDP
-    unused-parameter detection unless the caller explicitly overrides it.
-    """
-    requested = getattr(args, 'ddp_find_unused_parameters', None)
-    if requested is not None:
-        return bool(requested)
-    return get_world_size() > 1
-
-
-def resolve_precompute_ref_log_probs(args: argparse.Namespace, actual_mode: str) -> bool:
-    """Return whether TRL may precompute DPO reference log-probabilities.
-
-    TRL rejects ``precompute_ref_log_probs=True`` for vision datasets because
-    VLM image processing is performed on the fly. The full DataSphere DPO stage
-    uses mixed multimodal rows, so keep the user-facing flag for text-only DPO
-    but force it off for VLM mode to avoid a late DPOTrainer construction crash.
-    """
-    requested = bool(getattr(args, 'precompute_ref_log_probs', False))
-    if requested and actual_mode == 'vlm':
-        if is_main_process():
-            print(
-                '[train_vlm_dpo] disabling precompute_ref_log_probs for VLM mode: '
-                'TRL vision datasets are processed on the fly.',
-                flush=True,
-            )
-        return False
-    return requested
-
-
 def _truthy_env(name: str, default: str = '0') -> bool:
     return os.environ.get(name, default).lower() in {'1', 'true', 'yes', 'on'}
 
@@ -191,20 +111,6 @@ def offline_pretrained_kwargs() -> dict[str, Any]:
     if os.environ.get('HF_HUB_OFFLINE') == '1' or os.environ.get('TRANSFORMERS_OFFLINE') == '1':
         return {'local_files_only': True}
     return {}
-
-
-def _flash_attn_available() -> bool:
-    return importlib.util.find_spec('flash_attn') is not None
-
-
-def resolve_attn_implementation(attn_impl: str) -> str:
-    if attn_impl == 'auto':
-        return 'flash_attention_2' if _flash_attn_available() else 'sdpa'
-    if attn_impl == 'flash_attention_2' and not _flash_attn_available():
-        print('[train_vlm_dpo] flash_attn is not installed; falling back to sdpa.', flush=True)
-        return 'sdpa'
-    return attn_impl
-
 
 def is_peft_adapter_model(model: Any) -> bool:
     return hasattr(model, 'peft_config') or model.__class__.__name__.lower().startswith('peft')
@@ -325,7 +231,7 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
             bnb_4bit_compute_dtype=torch.bfloat16 if bf16 else torch.float16,
         )
         device_map = {'': get_local_rank()} if torch.cuda.is_available() else None
-    kwargs = {'trust_remote_code': trust_remote_code, 'attn_implementation': resolve_attn_implementation(attn_impl), **offline_pretrained_kwargs()}
+    kwargs = {'trust_remote_code': trust_remote_code, 'attn_implementation': attn_impl, **offline_pretrained_kwargs()}
     if torch_dtype is not None:
         kwargs['torch_dtype'] = torch_dtype
     if quant_config is not None:
@@ -333,19 +239,10 @@ def load_qwen_model(model_id: str, qlora: bool, bf16: bool, fp16: bool, trust_re
     if device_map is not None:
         kwargs['device_map'] = device_map
     if 'Qwen3-VL' in model_id:
-        model_cls = Qwen3VLForConditionalGeneration
-    elif 'Qwen2.5-VL' in model_id or 'Qwen2-VL' in model_id:
-        model_cls = Qwen2_5_VLForConditionalGeneration
-    else:
-        raise ValueError(f'Unsupported model for this entrypoint: {model_id}')
-    try:
-        return model_cls.from_pretrained(model_id, **kwargs)
-    except Exception as exc:
-        if kwargs.get('attn_implementation') == 'flash_attention_2':
-            print(f'[train_vlm_dpo] flash_attention_2 load failed ({exc!r}); retrying with sdpa.', flush=True)
-            kwargs['attn_implementation'] = 'sdpa'
-            return model_cls.from_pretrained(model_id, **kwargs)
-        raise
+        return Qwen3VLForConditionalGeneration.from_pretrained(model_id, **kwargs)
+    if 'Qwen2.5-VL' in model_id or 'Qwen2-VL' in model_id:
+        return Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id, **kwargs)
+    raise ValueError(f'Unsupported model for this entrypoint: {model_id}')
 
 
 def _is_url(value: str) -> bool:
@@ -382,227 +279,15 @@ def _normalize_image_list(value, base_dir: Path):
     return out
 
 
-def _text_block(value: Any) -> dict[str, str]:
-    return {'type': 'text', 'text': '' if value is None else str(value)}
-
-
-def _messages_have_image_block(messages: list[dict[str, Any]]) -> bool:
-    for msg in messages:
-        content = msg.get('content')
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get('type') == 'image':
-                    return True
-    return False
-
-
-def _align_image_placeholders_to_images(messages: list[dict[str, Any]], image_count: int) -> list[dict[str, Any]]:
-    """Keep TRL multimodal placeholders in lockstep with the images list.
-
-    TRL validates that every conversational DPO example contains exactly as
-    many ``{'type': 'image'}`` blocks in ``prompt`` as there are elements in
-    ``images``. DPO applies a training-time image cap for memory, so the prompt
-    must be realigned after formatting and after any later image projection.
-    """
-    image_count = max(0, int(image_count or 0))
-    kept_images = 0
-    aligned: list[dict[str, Any]] = []
-    for msg in messages:
-        role = str(msg.get('role') or 'user')
-        content = msg.get('content')
-        if not isinstance(content, list):
-            aligned.append({'role': role, 'content': content})
-            continue
-        new_content: list[dict[str, Any]] = []
-        for block in content:
-            if isinstance(block, dict) and block.get('type') == 'image':
-                if kept_images < image_count:
-                    new_content.append({'type': 'image'})
-                    kept_images += 1
-                continue
-            new_content.append(block if isinstance(block, dict) else _text_block(block))
-        if new_content:
-            aligned.append({'role': role, 'content': new_content})
-
-    missing = image_count - kept_images
-    if missing > 0:
-        placeholders = [{'type': 'image'} for _ in range(missing)]
-        for msg in aligned:
-            if msg.get('role') == 'user':
-                content = msg.get('content')
-                if isinstance(content, str):
-                    msg['content'] = placeholders + [{'type': 'text', 'text': content}]
-                elif isinstance(content, list):
-                    msg['content'] = placeholders + content
-                else:
-                    msg['content'] = placeholders
-                break
-        else:
-            aligned.insert(0, {'role': 'user', 'content': placeholders})
-    return aligned
-
-
-def _ensure_image_placeholder(messages: list[dict[str, Any]], has_images: bool) -> list[dict[str, Any]]:
-    if not has_images or _messages_have_image_block(messages):
-        return messages
-    for msg in messages:
-        if msg.get('role') == 'user':
-            content = msg.setdefault('content', [])
-            if isinstance(content, str):
-                msg['content'] = [{'type': 'image'}, {'type': 'text', 'text': content}]
-            elif isinstance(content, list):
-                content.insert(0, {'type': 'image'})
-            else:
-                msg['content'] = [{'type': 'image'}]
-            return messages
-    messages.insert(0, {'role': 'user', 'content': [{'type': 'image'}]})
-    return messages
-
-
-def _assistant_completion_message(value: Any) -> list[dict[str, str]]:
-    if isinstance(value, list):
-        return value
-    if isinstance(value, dict) and value.get('role'):
-        return [value]
-    if not isinstance(value, str):
-        value = json.dumps(value, ensure_ascii=False)
-    return [{'role': 'assistant', 'content': value}]
-
-
-def _text_chars_in_content(content: Any) -> int:
-    if content is None:
-        return 0
-    if isinstance(content, str):
-        return len(content)
-    if isinstance(content, list):
-        return sum(_text_chars_in_content(item) for item in content)
-    if isinstance(content, dict):
-        if content.get('type') == 'text' or 'text' in content:
-            return len(str(content.get('text') or ''))
-        return len(json.dumps(content, ensure_ascii=False, sort_keys=True))
-    return len(str(content))
-
-
-def _dpo_row_text_chars(row: dict[str, Any]) -> int:
-    total = 0
-    prompt = row.get('prompt') or []
-    if isinstance(prompt, list):
-        total += sum(_text_chars_in_content(msg.get('content')) for msg in prompt if isinstance(msg, dict))
-    else:
-        total += _text_chars_in_content(prompt)
-    for key in ('chosen', 'rejected'):
-        value = row.get(key)
-        if isinstance(value, list):
-            total += sum(_text_chars_in_content(msg.get('content')) for msg in value if isinstance(msg, dict))
-        else:
-            total += _text_chars_in_content(value)
-    return total
-
-
-def filter_dpo_dataset_by_text_chars(ds, max_text_chars: int, split_name: str, *, allow_empty: bool = False):
-    """Drop pathological long DPO rows before VLM preference training.
-
-    Qwen3-VL DPO intentionally keeps ``max_length=None`` because generic
-    sequence truncation can remove image tokens without removing pixel inputs.
-    The safe way to avoid rare enormous logits tensors in TRL's DPO loss is to
-    bound the normalized text surface before collation while preserving the raw
-    exported JSONL/audit artifacts.
-    """
-    if max_text_chars is None or int(max_text_chars) <= 0:
-        return ds, {"enabled": False, "max_text_chars": int(max_text_chars or 0), "dropped_rows": 0}
-    max_text_chars = int(max_text_chars)
-    before = len(ds)
-    filtered = ds.filter(
-        lambda example: _dpo_row_text_chars(example) <= max_text_chars,
-        desc=f'Filtering {split_name} DPO rows longer than {max_text_chars} text chars',
-    )
-    dropped = before - len(filtered)
-    if dropped and is_main_process():
-        print(
-            f'[train_vlm_dpo] dropped {dropped}/{before} {split_name} rows with '
-            f'prompt+chosen+rejected text longer than {max_text_chars} chars to avoid CUDA OOM.',
-            flush=True,
-        )
-    if len(filtered) == 0 and not allow_empty:
-        raise ValueError(
-            f'All {split_name} rows were filtered by --max-text-chars={max_text_chars}; '
-            'increase the limit or disable the guard with 0.'
-        )
-    return filtered, {"enabled": True, "max_text_chars": max_text_chars, "dropped_rows": dropped}
-
-
 def make_dpo_formatter(base_dir: Path):
     def format_dpo(example):
         images = []
-        for image in _normalize_image_list(example.get('images'), base_dir):
-            if image not in images:
-                images.append(image)
-        for image in _normalize_image_list(example.get('image'), base_dir):
-            if image not in images:
-                images.append(image)
+        images.extend(_normalize_image_list(example.get('images'), base_dir))
+        images.extend(_normalize_image_list(example.get('image'), base_dir))
         example['images'] = images
-        # The v2 builder stores prompt as chat messages and chosen/rejected as
-        # compact strings to keep JSONL readable.  TRL's conversational DPO
-        # format requires all three fields to be message lists, so normalize
-        # completions here rather than duplicating message wrappers in the data.
-        # For VLM rows, also make prompt image placeholders match the normalized
-        # image list before TRL's multimodal DPO collator validates the sample.
-        if isinstance(example.get('prompt'), list):
-            prompt = _ensure_image_placeholder(example.get('prompt') or [], bool(images))
-            example['prompt'] = _align_image_placeholders_to_images(prompt, len(images))
-            example['chosen'] = _assistant_completion_message(example.get('chosen', ''))
-            example['rejected'] = _assistant_completion_message(example.get('rejected', ''))
         return example
     return format_dpo
 
-
-
-def _read_json_records(path: str | Path) -> list[dict[str, Any]]:
-    path = Path(path)
-    text = path.read_text(encoding='utf-8')
-    if not text.strip():
-        return []
-    if path.suffix == '.jsonl':
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    obj = json.loads(text)
-    if isinstance(obj, list):
-        return obj
-    if isinstance(obj, dict):
-        for key in ('data', 'rows', 'examples'):
-            if isinstance(obj.get(key), list):
-                return obj[key]
-        return [obj]
-    raise ValueError(f'Unsupported JSON top-level value in {path}: {type(obj).__name__}')
-
-
-def _load_dpo_json_dataset_loose(path: str | Path, base_dir: Path):
-    """Load DPO JSONL through a stable preference-column projection.
-
-    Raw v2 rows may contain heterogeneous metadata dictionaries that break
-    Arrow schema inference in ``load_dataset('json')``.  DPOTrainer only needs
-    prompt/chosen/rejected plus optional image columns, so normalize those before
-    constructing the Dataset.
-    """
-    formatter = make_dpo_formatter(base_dir)
-    rows = []
-    for raw in _read_json_records(path):
-        if not isinstance(raw, dict):
-            continue
-        ex = formatter(dict(raw))
-        images = _normalize_image_list(ex.get('images'), Path('.'))
-        image = ex.get('image')
-        if image in (None, '', []):
-            image = images[0] if images else None
-        rows.append({
-            'prompt': ex.get('prompt') or [],
-            'chosen': ex.get('chosen') or '',
-            'rejected': ex.get('rejected') or '',
-            'images': images,
-            'image': image,
-        })
-    if not rows:
-        raise ValueError(f'No DPO rows found in {path}')
-    return Dataset.from_list(rows)
 
 def _value_has_image(value) -> bool:
     if value in (None, ''):
@@ -708,9 +393,6 @@ def cap_dpo_images_for_memory(ds, max_images_per_example: int, split_name: str):
             example['image'] = kept[0]
         elif 'image' in example:
             example['image'] = None
-        if isinstance(example.get('prompt'), list):
-            prompt = _ensure_image_placeholder(example.get('prompt') or [], bool(kept))
-            example['prompt'] = _align_image_placeholders_to_images(prompt, len(kept))
         return example
 
     capped = ds.map(_cap, desc=f'Capping {split_name} DPO rows to {max_images_per_example} images for GPU memory')
@@ -749,20 +431,7 @@ def maybe_prepare_dataset(ds, image_column: str, requested_mode: str):
 
     # Keep mixed text-only + image rows instead of filtering them out. This
     # matches the SFT/GRPO entrypoints and prevents silent loss of examples.
-    prepared = _cast_images_column(ds, detected_column)
-
-    # TRL's vision DPO collator treats a singleton ``image`` column as higher
-    # priority than the plural ``images`` column: when ``image`` is present it
-    # rewrites every example to ``example['images'] = [example.pop('image')]``.
-    # That collapses multi-image DPO rows to one provided image while our prompt
-    # correctly keeps multiple image placeholders after the memory cap, causing
-    # ``Number of images provided (1) does not match number of image placeholders``.
-    # For the plural-image path used by the DataSphere wrapper, drop the legacy
-    # singleton compatibility column before DPOTrainer sees the dataset.
-    if detected_column == 'images' and 'image' in getattr(prepared, 'column_names', []):
-        prepared = prepared.remove_columns(['image'])
-
-    return prepared, 'vlm'
+    return _cast_images_column(ds, detected_column), 'vlm'
 
 
 def main() -> None:
@@ -772,25 +441,21 @@ def main() -> None:
     if args.loss_weights is not None and len(args.loss_weights) != len(args.loss_type):
         raise ValueError('--loss-weights length must match --loss-type length')
 
-    train_ds = _load_dpo_json_dataset_loose(args.train_file, args.train_file.parent)
-    eval_ds = _load_dpo_json_dataset_loose(args.eval_file, args.eval_file.parent) if args.eval_file else None
+    data_files = {'train': str(args.train_file)}
+    if args.eval_file:
+        data_files['eval'] = str(args.eval_file)
+    ds = load_dataset('json', data_files=data_files)
+    train_ds = ds['train']
+    eval_ds = ds.get('eval')
 
-    train_text_filter_stats = {"enabled": False, "max_text_chars": int(args.max_text_chars or 0), "dropped_rows": 0}
-    eval_text_filter_stats = {"enabled": False, "max_text_chars": int(args.max_text_chars or 0), "dropped_rows": 0}
-    if args.max_text_chars and int(args.max_text_chars) > 0:
-        train_ds, train_text_filter_stats = filter_dpo_dataset_by_text_chars(train_ds, args.max_text_chars, 'train')
-        if eval_ds is not None:
-            eval_ds, eval_text_filter_stats = filter_dpo_dataset_by_text_chars(eval_ds, args.max_text_chars, 'eval', allow_empty=True)
-            if len(eval_ds) == 0:
-                if is_main_process():
-                    print('[train_vlm_dpo] eval split became empty after max-text-chars filtering; disabling eval.', flush=True)
-                eval_ds = None
-
+    train_ds = train_ds.map(make_dpo_formatter(args.train_file.parent))
     train_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     eval_image_cap_stats = {"enabled": False, "max_images_per_example": int(args.max_images_per_example or 0), "truncated_rows": 0, "dropped_image_refs": 0, "selection_policy": "evidence_aware_top_k_then_original_order"}
     if args.max_images_per_example and int(args.max_images_per_example) > 0:
         train_ds, train_image_cap_stats = cap_dpo_images_for_memory(train_ds, args.max_images_per_example, 'train')
     if eval_ds is not None:
+        eval_base_dir = args.eval_file.parent if args.eval_file else args.train_file.parent
+        eval_ds = eval_ds.map(make_dpo_formatter(eval_base_dir))
         if args.max_images_per_example and int(args.max_images_per_example) > 0:
             eval_ds, eval_image_cap_stats = cap_dpo_images_for_memory(eval_ds, args.max_images_per_example, 'eval')
 
@@ -837,8 +502,6 @@ def main() -> None:
     effective_loss_type = args.loss_type if len(args.loss_type) > 1 else args.loss_type[0]
     effective_loss_weights = args.loss_weights
 
-    effective_precompute_ref_log_probs = resolve_precompute_ref_log_probs(args, actual_mode)
-
     dpo_kwargs = dict(
         output_dir=str(args.output_dir),
         learning_rate=args.learning_rate,
@@ -855,24 +518,21 @@ def main() -> None:
         report_to=[] if args.report_to == 'none' else [args.report_to],
         remove_unused_columns=False,
         gradient_checkpointing=args.gradient_checkpointing,
-        gradient_checkpointing_kwargs={'use_reentrant': False},
         bf16=args.bf16,
         fp16=args.fp16,
         max_length=args.max_length,
         save_strategy='steps',
         eval_strategy='steps' if eval_ds is not None else 'no',
         logging_strategy='steps',
-        ddp_find_unused_parameters=resolve_ddp_find_unused_parameters(args, actual_mode),
         beta=args.beta,
         loss_type=effective_loss_type,
         loss_weights=effective_loss_weights,
         label_smoothing=args.label_smoothing,
         use_weighting=args.use_weighting,
-        precompute_ref_log_probs=effective_precompute_ref_log_probs,
-        precompute_ref_batch_size=args.precompute_ref_batch_size if effective_precompute_ref_log_probs else None,
+        precompute_ref_log_probs=args.precompute_ref_log_probs,
+        precompute_ref_batch_size=args.precompute_ref_batch_size,
         padding_free=args.padding_free,
         activation_offloading=args.activation_offloading,
-        torch_empty_cache_steps=args.torch_empty_cache_steps if args.torch_empty_cache_steps and args.torch_empty_cache_steps > 0 else None,
         load_best_model_at_end=should_native_load_best_model(args, eval_ds, model),
         metric_for_best_model=args.metric_for_best_model,
         greater_is_better=args.greater_is_better,
@@ -898,23 +558,19 @@ def main() -> None:
 
     run_config = vars(args).copy()
     run_config['resolved_mode'] = actual_mode
-    run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
-    run_config['precompute_ref_log_probs_resolved'] = effective_precompute_ref_log_probs
     run_config['train_examples'] = len(train_ds)
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['train_image_cap_stats'] = train_image_cap_stats
     run_config['eval_image_cap_stats'] = eval_image_cap_stats
-    run_config['train_text_filter_stats'] = train_text_filter_stats
-    run_config['eval_text_filter_stats'] = eval_text_filter_stats
     run_config['best_checkpoint_selection_enabled'] = bool(args.load_best_model_at_end and eval_ds is not None)
     run_config['native_best_checkpoint_reload_enabled'] = native_best_reload_enabled
     run_config['best_checkpoint_selection_mode'] = 'native_load' if native_best_reload_enabled else ('safe_checkpoint_file_copy' if args.load_best_model_at_end and eval_ds is not None else 'disabled')
     run_config['effective_loss_type'] = effective_loss_type
     run_config['effective_loss_weights'] = effective_loss_weights
-    (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
+    (args.output_dir / 'run_config.json').write_text(json.dumps(run_config, ensure_ascii=False, indent=2), encoding='utf-8')
 
     if args.dry_run:
-        print(json.dumps(run_config, ensure_ascii=False, indent=2, default=str))
+        print(json.dumps(run_config, ensure_ascii=False, indent=2))
         return
 
     train_result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
@@ -936,26 +592,5 @@ def main() -> None:
         print(f'[train_vlm_dpo] final save status: {save_manifest.get("status")}; best checkpoint: {save_manifest.get("best_model_checkpoint")}', flush=True)
 
 
-
-
-def cleanup_distributed_process_group() -> None:
-    """Best-effort DDP/NCCL shutdown to avoid noisy or hanging process teardown."""
-    try:
-        import torch
-        dist = getattr(torch, 'distributed', None)
-        if dist is not None and getattr(dist, 'is_available', lambda: False)() and dist.is_initialized():
-            dist.destroy_process_group()
-    except Exception as exc:
-        if is_main_process():
-            print(f'[train_vlm_dpo] warning: failed to destroy distributed process group: {exc}', flush=True)
-
-
-def main_with_distributed_cleanup() -> None:
-    try:
-        main()
-    finally:
-        cleanup_distributed_process_group()
-
-
 if __name__ == '__main__':
-    main_with_distributed_cleanup()
+    main()

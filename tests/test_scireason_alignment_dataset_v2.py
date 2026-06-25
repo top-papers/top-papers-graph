@@ -80,19 +80,3 @@ def test_dpo_rows_include_grpo_reward_target_bootstrap(monkeypatch):
     assert '"verdict": "reject"' in dpo[0]["chosen"]
     assert '"verdict": "accept"' in dpo[0]["rejected"]
     assert dpo[0]["metadata"]["preference_source"] == "grpo_target_bootstrap"
-
-
-def test_dpo_dedupe_merges_source_ids_for_full_data_audit(monkeypatch):
-    mod = _load_builder(monkeypatch)
-    rows = [
-        {"id": "dpo:sft-a:0", "prompt": "p", "chosen": "c", "rejected": "r", "metadata": {"source_id": "sft-a", "pair_type": "verdict_flip"}},
-        {"id": "dpo:sft-b:0", "prompt": "p", "chosen": "c", "rejected": "r", "metadata": {"source_id": "sft-b", "pair_type": "evidence_drop"}},
-    ]
-
-    out = mod.dedupe_dpo_rows(rows)
-
-    assert len(out) == 1
-    assert out[0]["metadata"]["source_id"] == "sft-a"
-    assert out[0]["metadata"]["source_ids"] == ["sft-a", "sft-b"]
-    assert out[0]["metadata"]["deduped_source_count"] == 2
-    assert set(out[0]["metadata"]["pair_types"]) == {"verdict_flip", "evidence_drop"}

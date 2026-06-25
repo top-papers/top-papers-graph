@@ -42,45 +42,6 @@ def count_jsonl(path: Path) -> int:
     return count
 
 
-def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
-    if not path.exists():
-        return
-    with path.open("r", encoding="utf-8") as f:
-        for line_no, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSONL at {path}:{line_no}: {exc}") from exc
-            if isinstance(obj, dict):
-                yield obj
-
-
-def _add_id_values(ids: set[str], value: Any) -> None:
-    if value in (None, "", [], {}):
-        return
-    if isinstance(value, (list, tuple, set)):
-        for item in value:
-            _add_id_values(ids, item)
-        return
-    ids.add(str(value))
-
-
-def source_ids_from_jsonl(path: Path, *, metadata: bool = False) -> set[str]:
-    ids: set[str] = set()
-    for row in iter_jsonl(path):
-        if metadata:
-            meta = row.get("metadata")
-            if isinstance(meta, Mapping):
-                _add_id_values(ids, meta.get("source_id"))
-                _add_id_values(ids, meta.get("source_ids"))
-        else:
-            _add_id_values(ids, row.get("id"))
-    return ids
-
-
 def add_check(checks: List[Dict[str, Any]], name: str, ok: bool, observed: Any, expected: Any, severity: str = "error", note: str = "") -> None:
     checks.append({
         "name": name,
@@ -146,35 +107,7 @@ def main() -> None:
     add_check(checks, "no_sft_row_subsampling", max_sft_samples == 0, max_sft_samples, 0)
     add_check(checks, "no_grpo_row_subsampling", max_grpo_samples == 0, max_grpo_samples, 0)
     add_check(checks, "sft_all_preserves_raw_sft_rows", counts["sft_all"] == raw_sft, counts["sft_all"], raw_sft)
-
-    # DPO rows are derived preference pairs, not a one-to-one mirror of SFT rows.
-    # With hard-negative mining and GRPO-target bootstrapping enabled, dpo_all is
-    # expected to be >= raw_sft and may also include GRPO-derived pairs.  The
-    # full-data audit should therefore verify coverage of SFT source rows rather
-    # than exact equality of pair count.  The old equality check rejected valid
-    # DPO-first runs where dpo_all contained SFT pairs plus GRPO-derived pairs.
-    sft_source_ids = source_ids_from_jsonl(data_dir / "sft_all.jsonl")
-    dpo_source_ids = source_ids_from_jsonl(data_dir / "dpo_all.jsonl", metadata=True)
-    covered_sft_sources = len(sft_source_ids & dpo_source_ids) if sft_source_ids and dpo_source_ids else -1
-    expected_sft_sources = len(sft_source_ids) if sft_source_ids else raw_sft
-    dpo_from_sft = int(nested(summary, "counts", "dpo_from_sft", default=-1) or -1)
-    dpo_count_ok = counts["dpo_all"] > 0 and (counts["dpo_all"] >= int(raw_sft or 0) or dpo_from_sft >= int(raw_sft or 0))
-    dpo_source_ok = covered_sft_sources == expected_sft_sources if covered_sft_sources >= 0 else dpo_from_sft >= int(raw_sft or 0)
-    add_check(
-        checks,
-        "dpo_all_covers_sft_sources",
-        dpo_count_ok and dpo_source_ok,
-        {
-            "dpo_all_pairs": counts["dpo_all"],
-            "sft_sources_covered": covered_sft_sources,
-            "dpo_from_sft_summary": dpo_from_sft,
-        },
-        {
-            "min_dpo_pairs": raw_sft,
-            "sft_sources": expected_sft_sources,
-        },
-        note="DPO hard-negative mining may create multiple pairs per SFT row and additional GRPO-derived pairs; audit coverage, not equality.",
-    )
+    add_check(checks, "dpo_all_covers_sft_rows", counts["dpo_all"] == raw_sft, counts["dpo_all"], raw_sft, note="Synthetic negatives should create one DPO pair per SFT row.")
     add_check(checks, "grpo_all_split_preserves_raw_grpo_rows", counts["grpo_all_split_sum"] == raw_grpo, counts["grpo_all_split_sum"], raw_grpo)
 
     if expected["sft"] > 0:

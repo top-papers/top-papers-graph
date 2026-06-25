@@ -32,14 +32,7 @@ case "$ACTION" in
     ;;
   hf-full-managed)
     need_project
-    # Production full managed pipeline: text-SFT -> VLM-SFT -> robust mixed DPO
-    # -> optional GRPO polish.  The default config is v2; override with
-    # HF_FULL_MANAGED_CONFIG=... only for explicit experiments.
-    HF_FULL_MANAGED_CONFIG="${HF_FULL_MANAGED_CONFIG:-experiments/vlm_finetuning/datasphere/job_configs/hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml}"
-    python experiments/vlm_finetuning/datasphere/run_full_pipeline.py \
-      --project-id "$PROJECT_ID" \
-      --config "$HF_FULL_MANAGED_CONFIG" \
-      "$@"
+    python experiments/vlm_finetuning/datasphere/run_full_pipeline.py --project-id "$PROJECT_ID" "$@"
     ;;
   hf-smoke-managed)
     need_project

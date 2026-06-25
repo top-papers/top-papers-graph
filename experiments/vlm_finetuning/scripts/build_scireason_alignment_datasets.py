@@ -688,51 +688,8 @@ def make_dpo_rows_from_grpo(rows: Sequence[Dict[str, Any]], synthetic_negatives:
     return dpo_rows
 
 
-def _as_string_list(value: Any) -> list[str]:
-    if value in (None, "", [], {}):
-        return []
-    if isinstance(value, (list, tuple, set)):
-        return [str(v) for v in value if v not in (None, "", [], {})]
-    return [str(value)]
-
-
-def _merge_dpo_source_metadata(target: Dict[str, Any], duplicate: Mapping[str, Any]) -> None:
-    """Preserve source coverage when multiple source rows produce the same pair.
-
-    Robust DPO mining can legitimately emit identical prompt/chosen/rejected
-    pairs for several SFT rows.  The old deduper kept the first row and dropped
-    later duplicates, which made strict full-data audits think those later SFT
-    sources were uncovered.  Keep one training pair, but merge all source ids into
-    metadata.source_ids so the audit can verify full coverage without duplicating
-    equivalent preference examples.
-    """
-    tmeta = target.setdefault("metadata", {})
-    if not isinstance(tmeta, dict):
-        tmeta = {}
-        target["metadata"] = tmeta
-    dmeta = duplicate.get("metadata") if isinstance(duplicate, Mapping) else None
-    if not isinstance(dmeta, Mapping):
-        dmeta = {}
-
-    merged: list[str] = []
-    for source in (tmeta.get("source_ids"), tmeta.get("source_id"), dmeta.get("source_ids"), dmeta.get("source_id")):
-        for item in _as_string_list(source):
-            if item not in merged:
-                merged.append(item)
-    if merged:
-        tmeta["source_ids"] = merged
-        tmeta.setdefault("source_id", merged[0])
-    tmeta["deduped_source_count"] = max(int(tmeta.get("deduped_source_count") or 1), len(merged) or 1)
-    pair_types = _as_string_list(tmeta.get("pair_types")) or _as_string_list(tmeta.get("pair_type"))
-    for item in _as_string_list(dmeta.get("pair_types")) + _as_string_list(dmeta.get("pair_type")):
-        if item not in pair_types:
-            pair_types.append(item)
-    if pair_types:
-        tmeta["pair_types"] = pair_types
-
-
 def dedupe_dpo_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    seen: dict[str, Dict[str, Any]] = {}
+    seen: set[str] = set()
     out: List[Dict[str, Any]] = []
     for row in rows:
         key = hashlib.sha1(stable_json({
@@ -742,12 +699,8 @@ def dedupe_dpo_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "images": row.get("images"),
         }).encode("utf-8", errors="ignore")).hexdigest()
         if key in seen:
-            _merge_dpo_source_metadata(seen[key], row)
             continue
-        seen[key] = row
-        # Normalize source_ids even for non-duplicates so downstream audits have
-        # one consistent field to read.
-        _merge_dpo_source_metadata(row, {})
+        seen.add(key)
         out.append(row)
     return out
 
