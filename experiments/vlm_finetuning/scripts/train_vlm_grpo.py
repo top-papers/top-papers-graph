@@ -779,6 +779,90 @@ def enforce_minimum_grpo_generations(args: argparse.Namespace) -> None:
         args.num_generations_eval = 2
 
 
+def _largest_divisor_at_most(value: int, limit: int, *, min_value: int = 2) -> Optional[int]:
+    """Return the largest divisor of ``value`` not larger than ``limit``.
+
+    GRPOConfig validates that generation group counts divide their corresponding
+    global batch sizes.  DataSphere job YAMLs are long-lived, so keep this helper
+    local to the training entrypoint rather than relying only on wrapper defaults.
+    """
+    value = int(value)
+    limit = int(limit)
+    for candidate in range(min(value, limit), min_value - 1, -1):
+        if candidate > 0 and value % candidate == 0:
+            return candidate
+    return None
+
+
+def resolve_grpo_generation_batch_divisibility(args: argparse.Namespace, *, eval_enabled: bool) -> Dict[str, Any]:
+    """Adjust GRPO generation counts to satisfy TRL batch divisibility checks.
+
+    TRL requires ``num_generations`` to divide the effective train batch size and
+    ``num_generations_eval`` to divide the global eval batch size.  This guard
+    protects old DataSphere configs such as ``per_device_eval_batch_size=1`` on
+    two GPUs with ``num_generations_eval=4``: the eval global batch is only 2, so
+    the safe value is 2.  Raw datasets and reward logic are unchanged.
+    """
+    world_size = max(1, get_world_size())
+    train_batch = max(1, int(getattr(args, 'per_device_train_batch_size', 1)))
+    eval_batch = max(1, int(getattr(args, 'per_device_eval_batch_size', 1)))
+    grad_accum = max(1, int(getattr(args, 'gradient_accumulation_steps', 1)))
+    train_global = world_size * train_batch * grad_accum
+    eval_global = world_size * eval_batch
+    original_train_generations = int(getattr(args, 'num_generations', 2))
+    original_eval_generations = int(getattr(args, 'num_generations_eval', 2))
+    stats: Dict[str, Any] = {
+        'world_size': world_size,
+        'train_global_batch_size_for_generations': train_global,
+        'eval_global_batch_size_for_generations': eval_global,
+        'num_generations_original': original_train_generations,
+        'num_generations_eval_original': original_eval_generations,
+        'num_generations_resolved': original_train_generations,
+        'num_generations_eval_resolved': original_eval_generations,
+        'eval_enabled_requested': bool(eval_enabled),
+        'eval_disabled_for_generation_batch': False,
+    }
+
+    if train_global % int(args.num_generations) != 0:
+        resolved = _largest_divisor_at_most(train_global, int(args.num_generations), min_value=2)
+        if resolved is None:
+            raise ValueError(
+                'GRPO train generation count cannot be resolved: '
+                f'effective train batch size is {train_global}, requested num_generations={args.num_generations}. '
+                'Increase per-device train batch size or gradient accumulation steps.'
+            )
+        print(
+            '[train_vlm_grpo] adjusted num_generations '
+            f'{args.num_generations} -> {resolved} so it divides effective train batch size {train_global}.',
+            flush=True,
+        )
+        args.num_generations = resolved
+        stats['num_generations_resolved'] = resolved
+
+    if eval_enabled:
+        if eval_global % int(args.num_generations_eval) != 0:
+            resolved_eval = _largest_divisor_at_most(eval_global, int(args.num_generations_eval), min_value=2)
+            if resolved_eval is None:
+                print(
+                    '[train_vlm_grpo] disabled eval split because global eval batch size '
+                    f'{eval_global} cannot support at least 2 GRPO generations per prompt.',
+                    flush=True,
+                )
+                stats['eval_disabled_for_generation_batch'] = True
+            else:
+                print(
+                    '[train_vlm_grpo] adjusted num_generations_eval '
+                    f'{args.num_generations_eval} -> {resolved_eval} so it divides global eval batch size {eval_global}.',
+                    flush=True,
+                )
+                args.num_generations_eval = resolved_eval
+                stats['num_generations_eval_resolved'] = resolved_eval
+
+    stats['num_generations_resolved'] = int(args.num_generations)
+    stats['num_generations_eval_resolved'] = int(args.num_generations_eval)
+    return stats
+
+
 def _supports_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Filter config kwargs for compatibility across TRL versions and lightweight tests."""
     try:
@@ -1569,6 +1653,10 @@ def main() -> None:
     if eval_ds is not None: 
         eval_ds, _ = maybe_prepare_dataset(eval_ds, args.image_column, actual_mode)
 
+    generation_batch_stats = resolve_grpo_generation_batch_divisibility(args, eval_enabled=eval_ds is not None)
+    if generation_batch_stats.get('eval_disabled_for_generation_batch'):
+        eval_ds = None
+
     processor = load_processor(args.model_id, args.min_pixels, args.max_pixels, args.trust_remote_code)
     tokenizer = getattr(processor, 'tokenizer', None) or AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code, **offline_pretrained_kwargs())
     tokenizer.padding_side = "left"
@@ -1662,6 +1750,7 @@ def main() -> None:
     run_config['eval_examples'] = len(eval_ds) if eval_ds is not None else 0
     run_config['ddp_find_unused_parameters_resolved'] = resolve_ddp_find_unused_parameters(args, actual_mode)
     run_config['kl_beta'] = args.beta
+    run_config['generation_batch_stats'] = generation_batch_stats
     run_config['train_image_cap_stats'] = train_image_cap_stats
     run_config['eval_image_cap_stats'] = eval_image_cap_stats
     

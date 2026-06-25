@@ -1,3 +1,11 @@
+
+## 2026-06-25 — DataSphere GRPO eval generation batch divisibility fix
+
+- Fixed a GRPO startup failure where `GRPO_NUM_GENERATIONS_EVAL=4` was incompatible with the g2.2 eval global batch size `1 * 2 = 2`.
+- Added `resolve_grpo_generation_batch_divisibility(...)` to `train_vlm_grpo.py` so stale DataSphere configs are adjusted before constructing `GRPOConfig`.
+- Changed the V2 DataSphere default/config to `GRPO_NUM_GENERATIONS_EVAL=2` while keeping train `GRPO_NUM_GENERATIONS=4`.
+- Added regression tests for GRPO eval generation divisibility and V2 wrapper/job config defaults.
+
 ## 2026-06-23 — DataSphere DPO image placeholder alignment fix
 
 ## 2026-06-24 — DataSphere DPO CUDA OOM memory guard fix

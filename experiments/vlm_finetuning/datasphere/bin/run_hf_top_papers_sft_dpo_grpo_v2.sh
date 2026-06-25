@@ -320,7 +320,7 @@ if [ "${ENABLE_GRPO_POLISH:-1}" = "1" ]; then
     --per-device-eval-batch-size 1 \
     --gradient-accumulation-steps "${GRPO_GRAD_ACCUM:-8}" \
     --num-generations "${GRPO_NUM_GENERATIONS:-4}" \
-    --num-generations-eval "${GRPO_NUM_GENERATIONS_EVAL:-4}" \
+    --num-generations-eval "${GRPO_NUM_GENERATIONS_EVAL:-2}" \
     --num-iterations "${GRPO_NUM_ITERATIONS:-2}" \
     --max-completion-length "${GRPO_MAX_COMPLETION_LENGTH:-640}" \
     --temperature "${GRPO_TEMPERATURE:-0.85}" \

@@ -291,3 +291,22 @@ def test_full_dpo_configs_use_memory_safe_vlm_projection() -> None:
     assert 'DPO_MAX_PIXELS:-501760' in script
     assert '--max-text-chars "${DPO_MAX_TEXT_CHARS:-12000}"' in script
     assert '--torch-empty-cache-steps "${DPO_TORCH_EMPTY_CACHE_STEPS:-5}"' in script
+
+
+def test_v2_grpo_eval_generations_divide_two_gpu_eval_batch() -> None:
+    path = DATASPHERE_DIR / "job_configs" / "hf_top_papers_sft_dpo_grpo_v2_g2_2.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vars_list = cfg.get("env", {}).get("vars", [])
+    env = {next(iter(item)): next(iter(item.values())) for item in vars_list if isinstance(item, dict) and item}
+
+    # The g2.2 wrapper runs torchrun with 2 processes and passes
+    # --per-device-eval-batch-size 1 to GRPO, so the global eval batch is 2.
+    assert int(env["GRPO_NUM_GENERATIONS_EVAL"]) == 2
+    assert 2 % int(env["GRPO_NUM_GENERATIONS_EVAL"]) == 0
+
+
+def test_v2_wrapper_defaults_to_grpo_eval_generations_compatible_with_g2_2() -> None:
+    script = (DATASPHERE_DIR / "bin" / "run_hf_top_papers_sft_dpo_grpo_v2.sh").read_text(encoding="utf-8")
+    assert "--per-device-eval-batch-size 1" in script
+    assert "GRPO_NUM_GENERATIONS_EVAL:-2" in script
+    assert "GRPO_NUM_GENERATIONS_EVAL:-4" not in script

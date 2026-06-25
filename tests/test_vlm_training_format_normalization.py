@@ -768,3 +768,53 @@ def test_dpo_installs_fsdpmodule_alias_before_trl_import(monkeypatch):
 
     assert mod.install_torch_fsdp_module_import_compat() is False
     assert fsdp.FSDPModule is LegacyFullyShardedDataParallel
+
+
+def test_grpo_resolves_eval_generation_count_to_divide_global_eval_batch(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    mod = _load_script(
+        "experiments/vlm_finetuning/scripts/train_vlm_grpo.py",
+        "train_vlm_grpo_eval_generation_divisibility_test",
+    )
+
+    args = types.SimpleNamespace(
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=8,
+        num_generations=4,
+        num_generations_eval=4,
+    )
+
+    stats = mod.resolve_grpo_generation_batch_divisibility(args, eval_enabled=True)
+
+    assert args.num_generations == 4
+    assert args.num_generations_eval == 2
+    assert stats["eval_global_batch_size_for_generations"] == 2
+    assert stats["num_generations_eval_original"] == 4
+    assert stats["num_generations_eval_resolved"] == 2
+    assert stats["eval_disabled_for_generation_batch"] is False
+
+
+def test_grpo_disables_eval_when_global_eval_batch_cannot_support_group(monkeypatch):
+    _install_training_stubs(monkeypatch)
+    monkeypatch.setenv("WORLD_SIZE", "1")
+    mod = _load_script(
+        "experiments/vlm_finetuning/scripts/train_vlm_grpo.py",
+        "train_vlm_grpo_eval_disable_generation_divisibility_test",
+    )
+
+    args = types.SimpleNamespace(
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=8,
+        num_generations=4,
+        num_generations_eval=2,
+    )
+
+    stats = mod.resolve_grpo_generation_batch_divisibility(args, eval_enabled=True)
+
+    assert args.num_generations == 4
+    assert args.num_generations_eval == 2
+    assert stats["eval_global_batch_size_for_generations"] == 1
+    assert stats["eval_disabled_for_generation_batch"] is True
