@@ -1,7 +1,46 @@
-data/neo4j
+# Local environment and secrets
+.env
+.venv/
+venv/
 
-__pycache__
-data/derived/ebaq_weights.json
-data/derived/assertion_scorer_weights.json
-data/derived/critic_evaluation_results.json
+# Python build and caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebook and editor state
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+
+# Frontend build artifacts
+node_modules/
+scripts/healthboard/frontend/output/
+
+# Runtime output
+runs/
+outputs/
+*.log
+tmp_*
+
+reports/*
+!reports/README.md
+results/*
+!results/README.md
+!results/hypotheses/
+results/hypotheses/*
+!results/hypotheses/README.md
+
+# Local data stores and derived datasets
+data/neo4j/
+data/qdrant/
+data/derived/
 data/experts/trajectories/.cache/

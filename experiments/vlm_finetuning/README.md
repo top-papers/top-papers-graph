@@ -80,4 +80,4 @@ The job uses DataSphere `g2.2` (2 × A100 80 GB) and 1 TB SSD working storage, t
 
 ## DataSphere Jobs fixes
 
-This archive also includes compatibility fixes for DataSphere Jobs configs and launchers: correct repository root resolution in shell wrappers, `local-paths` without conflicting `root-path`, explicit SSD working storage sizes, robust VLM image/message normalization, and a streaming managed launcher for long job logs. See `../../DATASPHERE_VLM_JOBS_FIX_REPORT_RU.md` for the patch report.
+This archive also includes compatibility fixes for DataSphere Jobs configs and launchers: correct repository root resolution in shell wrappers, `local-paths` without conflicting `root-path`, explicit SSD working storage sizes, robust VLM image/message normalization, and a streaming managed launcher for long job logs. The durable operational details are documented in `datasphere/CLI_ADAPTATION_RU.md` and `datasphere/TUTORIAL_FULL_EXPERIMENT_RU.md`.

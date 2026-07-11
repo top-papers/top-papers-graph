@@ -46,9 +46,9 @@ def _template_assets_for_expert_bundle() -> List[Tuple[Path, str]]:
     for path in sorted(template_dir.rglob("*")):
         if path.is_file():
             out.append((path, f"templates/{path.relative_to(template_dir).as_posix()}"))
-    tutorial = repo_root / "docs" / "TASK3_AB_HARD_SUBSET_TUTORIAL_RU.md"
+    tutorial = repo_root / "docs" / "course" / "tasks" / "task3_ab_hard_subset.md"
     if tutorial.exists() and tutorial.is_file():
-        out.append((tutorial, "docs/TASK3_AB_HARD_SUBSET_TUTORIAL_RU.md"))
+        out.append((tutorial, "docs/course/tasks/task3_ab_hard_subset.md"))
     return out
 
 
@@ -1086,7 +1086,7 @@ def build_task3_dual_model_expert_bundle(
         "- variant_alpha/* и variant_beta/* : анонимизированные гипотезы\n"
         "- expert_review/task3_dual_local_model_review_manifest.json\n"
         "- templates/* : шаблоны для эксперта\n"
-        "- docs/TASK3_AB_HARD_SUBSET_TUTORIAL_RU.md : пошаговый туториал\n"
+        "- docs/course/tasks/task3_ab_hard_subset.md : пошаговый туториал\n"
         "\n"
         "Важно: файл с ключом соответствия владельца намеренно исключён, чтобы сохранить слепое ревью.\n"
         "Рекомендуется оценивать сначала evidence/time correctness, а не только стиль итоговой гипотезы.\n"

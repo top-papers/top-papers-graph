@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "top-papers-graph"
 version = "0.4.3"
-description = "top-papers-graph: scientific paper discovery + temporal knowledge graphs + hypothesis generation (course-ready)"
+description = "Open-source course and toolkit for scientific literature analysis, temporal knowledge graphs and hypothesis generation"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

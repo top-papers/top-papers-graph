@@ -1,3 +1,13 @@
+# Changelog
+
+## 2026-07-11 - Course-first repository structure
+
+- Reframed the main README around the open-source course and contributor model.
+- Added contributor onboarding, instructor guidance, community rules, issue/PR templates and the missing MIT license.
+- Separated course task guides from technical documentation and added navigation indexes.
+- Removed generated logs, validation runs, package metadata, temporary files, root notebook copies and obsolete patch reports.
+- Kept one canonical notebook per workflow and stripped runtime outputs for reproducibility.
+- Added the MIPT "Education after ChatGPT" deck to the conference archive.
 
 ## 2026-06-19 — SciReason fine-tuning v2 pipeline
 

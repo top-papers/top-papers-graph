@@ -1,217 +1,124 @@
-# top-papers-graph — генерация научных гипотез из графа знаний, который создается на основе научных публикаций и подходит для *любой* тематики
+# «Анализ данных в научной литературе» — open-source курс и общий исследовательский инструмент
 
-Проект собирает публикации из нескольких крупных источников, нормализует метаданные в единый формат и помогает строить **проверяемый** граф знаний (KG) и evidence‑based синтез по вашей теме.
+Этот репозиторий — прежде всего **открытый учебный курс**, в котором слушатели не выполняют одноразовые домашние задания, а становятся участниками проекта. Каждый вклад — код, разметка, проверка научного утверждения, документация, тест или помощь другому участнику — улучшает общий инструмент анализа научной литературы.
 
-> CLI: `top-papers-graph ...` (алиас `scireason ...` сохранён для обратной совместимости)
+Параллельно здесь развивается `top-papers-graph`: воспроизводимый пайплайн, который находит научные публикации, извлекает из них структурированные свидетельства, строит темпоральный граф знаний и помогает формулировать проверяемые гипотезы.
 
-## Возможности
-- **Источники публикаций**: arXiv, PubMed (NCBI), Europe PMC, bioRxiv/medRxiv, Crossref, OpenAlex, Semantic Scholar.
-- **Единая схема метаданных**: `PaperMetadata` (Pydantic) + нормализация ответов всех источников.
-- **Resolver идентификаторов**: DOI ⇄ PMID ⇄ arXivID ⇄ OpenAlexID.
-- **Кеширование и rate-limit** на уровне HTTP‑клиента (особенно полезно для NCBI/Crossref).
-- **CLI**, **FastAPI** (наружный API) и **MCP‑сервер** (интеграции с AI‑сервисами).
+> **Главная идея:** курс = проект. Мы учимся машинному обучению и исследовательской инженерии, создавая полезный открытый результат вместе.
 
-## Быстрый старт
+## Что создают участники
 
-### Student quickstart (3 команды)
+Общий цикл проекта:
 
-**Linux/macOS:**
-```bash
-./scripts/bootstrap.sh
-top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
-top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
+```text
+научный вопрос -> статьи -> PDF/метаданные -> структурированные факты
+-> темпоральный граф знаний -> гипотезы -> экспертная проверка
+-> открытые данные, код, тесты и улучшенная модель
 ```
 
-**Windows (PowerShell):**
-```powershell
-.\scripts\bootstrap.ps1
-top-papers-graph demo-run --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
-top-papers-graph smoke-all --agent-backend smolagents --llm-provider mock --smol-model-backend scireason
-```
+Результат занятия не исчезает после проверки. Он остаётся в репозитории или в опубликованном наборе данных и может быть проверен, переиспользован и улучшен следующими участниками.
 
-> Здесь используется **smolagents CodeAgent** (агент пишет и исполняет Python‑код) — это основной режим курса.
+## Как участвовать
 
-### 1) Установка
+В проекте нет единственной «правильной» роли.
+
+| Роль | Типичный вклад |
+|---|---|
+| **Исследователь** | выбирает тему, читает статьи, формулирует вопросы и критерии проверки |
+| **Эксперт** | проверяет факты, связи, временные привязки и гипотезы |
+| **Разработчик / ML-инженер** | улучшает ingest, граф, поиск, модели, CLI, тесты и инфраструктуру |
+| **Координатор / автор документации** | помогает с онбордингом, задачами, ревью, примерами и воспроизводимостью |
+
+Начать можно с малого: исправить инструкцию, проверить десять связей, добавить тест, описать научную статью или воспроизвести пример. См. [CONTRIBUTING.md](CONTRIBUTING.md) и [путь первого вклада](course/CONTRIBUTOR_GUIDE.md).
+
+## Быстрый старт для слушателя
+
+1. Прочитайте [описание курса](course/README.md).
+2. Подготовьте окружение и запустите офлайн-демо:
+
 ```bash
-# Вариант 1 (рекомендуется для курса): одна команда
 ./scripts/bootstrap.sh  # Windows: .\scripts\bootstrap.ps1
-
-# Вариант 2 (ручной):
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e ".[dev,agents]"
-```
-
-> `g4f` теперь ставится автоматически вместе с `.[task2_notebook]`, `.[mm]`, `.[multimodal]` и `.[fullstack]`.
-> Для третьего задания добавлен отдельный extra `.[task3]` (multimodal + Annoy + temporal GNN runtime).
-> Отдельный extra `.[g4f]` сохранён для явной установки только g4f.
-
-### 2) Настройка
-Скопируйте `.env.example` → `.env`.  
-По умолчанию используется домен `science` (`configs/domains/science.yaml`).
-
-### 3) Полностью автоматический пайплайн (рекомендуется)
-Одна команда:
-```bash
-top-papers-graph run --query "graph neural network survey" --sources all --top-papers 20
-```
-
-#### Оффлайн демонстрация (без интернета и сервисов)
-```bash
-top-papers-graph demo-run --edge-mode cooccurrence
+top-papers-graph demo-run --llm-provider mock
 top-papers-graph smoke-all
 ```
 
-#### Запуск в Docker (из коробки)
+3. Откройте созданные артефакты в `runs/` и выберите первый вклад.
+4. Создайте issue или возьмите существующую задачу, затем отправьте pull request.
 
-В репозитории есть Dockerfile для CLI/API и `docker-compose.yml`, который поднимает **всю инфраструктуру**, используемую проектом:
-**Neo4j** (графовая БД), **Qdrant** (векторное хранилище для demo‑few‑shot) и **GROBID** (парсинг PDF).
+Для старта не нужны платные API и внешние сервисы: базовый учебный сценарий работает в офлайн-режиме.
+
+## Курс: 12 недель через вклад в проект
+
+| Этап | Недели | Что изучаем | Что остаётся в проекте |
+|---|---:|---|---|
+| Вход в проект | 1–2 | воспроизводимость, поиск статей, PDF -> чанки | рабочее окружение, исправления ingest, примеры данных |
+| Извлечение знаний | 3–5 | термины, связи, время | словари, тесты, проверенные утверждения и temporal KG |
+| Графовые методы | 6–8 | пути, сообщества, link prediction, embeddings | новые метрики, кандидаты связей, сравнение baseline |
+| Агенты и human-in-the-loop | 9–10 | code agents, экспертная проверка, data flywheel | инструменты, ревью, обучающие и оценочные данные |
+| Оценка и релиз | 11–12 | GNN/TGNN, метрики, воспроизводимость, демонстрация | итоговый PR, отчёт, датасет или релизный артефакт |
+
+Полная программа и материалы: [course/README.md](course/README.md).
+
+## Инструмент `top-papers-graph`
+
+Техническая часть репозитория поддерживает:
+
+- поиск публикаций в arXiv, PubMed, Europe PMC, bioRxiv/medRxiv, Crossref, OpenAlex и Semantic Scholar;
+- единую схему метаданных и разрешение DOI / PMID / arXiv / OpenAlex ID;
+- PDF-ingestion с локальными fallback-механизмами;
+- извлечение текстовых и мультимодальных свидетельств;
+- темпоральный граф знаний, GraphRAG и генерацию проверяемых гипотез;
+- экспертные артефакты: reasoning trajectories, graph reviews, hypothesis reviews и temporal corrections;
+- CLI, FastAPI, MCP и опциональный Docker-стек.
+
+### Технический запуск
 
 ```bash
-# 1) Собрать образ и поднять стек
-docker compose up -d --build
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[dev,agents]"
 
-# 2) Запустить пайплайн внутри контейнера
-docker compose exec app top-papers-graph run \
+top-papers-graph run \
   --query "graph neural network survey" \
   --sources all \
   --top-papers 20
-
-# 3) Остановить и удалить тома (опционально)
-docker compose down -v
 ```
 
-Подсказки:
-- GROBID доступен на `http://localhost:8070` (проверка: `/api/isalive`). Если он недоступен, пайплайн автоматически
-  переключится на локальный PDF‑парсер.
-- Neo4j Browser: `http://localhost:7474`.
-- Qdrant: `http://localhost:6333`.
-- Для локального Ollama на хосте используйте `OLLAMA_BASE_URL` (по умолчанию `http://host.docker.internal:11434`).
+Полная техническая документация начинается с [docs/README.md](docs/README.md) и [docs/quickstart.md](docs/quickstart.md).
 
-По умолчанию LLM = **auto/auto**: проект пробует локальный Ollama (если доступен), иначе g4f (если установлен), иначе включает оффлайн `mock`.
+## Карта репозитория
 
-Вы можете явно переопределить модель в команде:
-```bash
-# g4f (ставится по умолчанию в task2/mm/multimodal/fullstack; отдельно: pip install -e '.[g4f]')
-top-papers-graph run --query "..." --g4f-model deepseek-r1
+| Путь | Назначение |
+|---|---|
+| `course/` | программа курса, недельные модули, путь участника и руководство преподавателя |
+| `notebooks/` | канонические учебные блокноты без сохранённых runtime-выводов |
+| `data/experts/` | шаблоны и примеры вкладов экспертов и слушателей |
+| `src/scireason/` | основной Python-код инструмента |
+| `tests/` | автоматические проверки и регрессионные тесты |
+| `docs/course/` | подробные инструкции к заданиям и экспертному треку |
+| `docs/` | архитектура, данные, интеграции и технические руководства |
+| `experiments/` | воспроизводимые исследовательские и fine-tuning эксперименты |
+| `conferences/` | презентации о методике и развитии проекта |
+| `results/`, `reports/` | локальные генерируемые результаты; в Git хранится только описание структуры |
 
-# (опционально) попробовать в первую очередь конкретные модели (если они есть в g4f/models.py)
-G4F_MODEL_PREFER="gpt-4o-mini,deepseek-r1" top-papers-graph run --query "..."
+## Открытые артефакты
 
-# (опционально) ограничить число попыток автоподбора (по умолчанию 25)
-G4F_AUTO_MAX_MODELS=10 top-papers-graph run --query "..."
+- Репозиторий: https://github.com/top-papers/top-papers-graph
+- Мультимодальный benchmark: https://huggingface.co/datasets/top-papers/top-papers-graph-benchmark
+- Презентации и история курса: [conferences/README.md](conferences/README.md)
 
-# (опционально) форсировать список провайдеров g4f (RetryProvider)
-G4F_PROVIDERS="Phind,FreeChatgpt,Liaobots" top-papers-graph run --query "..."
+## Правила качества
 
-# локальная модель через Ollama
-top-papers-graph run --query "..." --local-model llama3.2
+- Каждое научное утверждение должно иметь источник или явно отмеченную неопределённость.
+- Автоматически сгенерированный результат проверяется человеком до включения в gold-данные.
+- Использование ИИ разрешено, но автор вклада отвечает за проверку кода, чисел, ссылок и лицензий.
+- В репозиторий нельзя добавлять закрытые статьи, персональные данные, секреты и материалы без права распространения.
+- Изменение должно быть воспроизводимым: команда запуска, тест или понятная инструкция обязательны.
 
-# универсальный формат (provider:model)
-top-papers-graph run --query "..." --llm g4f:gpt-4o-mini
-top-papers-graph run --query "..." --llm ollama:llama3.2
-```
+## Для преподавателей
 
-Артефакты появятся в `runs/<timestamp>_<slug>/`:
-- `temporal_kg.json` — темпоральный граф знаний (термы/связи/временные счётчики)
-- `hypotheses.json` + `hypotheses.md` — ранжированный набор проверяемых гипотез
-- `review_queue/` — шаблоны для экспертной разметки (hypothesis_reviews)
-
-> Пайплайн старается скачать PDF (если доступен OA) и распарсить его через GROBID.
-> Если GROBID не запущен, будет fallback‑парсинг PDF через `pypdf` (по умолчанию).
-> Для более качественного парсинга установите опциональные зависимости: `pip install -e ".[mm]"` или `pip install -e ".[multimodal]"` (алиас для того же стека).
-> Если PDF недоступен, пайплайн продолжит работу по абстрактам.
-
-> **Опционально (GNN mode):** для “более взрослого” режима генерации гипотез через
-> PyTorch Geometric (GNN link prediction) установите `pip install -e ".[gnn]"` и включите
-> `HYP_GNN_ENABLED=1`. Подробности: `docs/gnn.md`.
-
-> **Опционально (smolagents):** чтобы использовать Hugging Face **smolagents CodeAgent** вместо
-> встроенного агента, установите `pip install -e ".[agents]"` и включите
-> `HYP_AGENT_BACKEND=smolagents`.
-> Для **локальных HF моделей**: `pip install -e ".[agents_hf]"`.
-> Подробности: `docs/smolagents.md`.
-
-### Task 3 — мультимодальные темпоральные гипотезы
-```bash
-pip install -e ".[task3]"
-top-papers-graph task3-bundle --query "temporal knowledge graph multimodal hypothesis generation" --top-papers 12
-```
-
-Подробности: `README_TASK3_HYPOTHESES.md`.
-
-### 4) Поиск статей по вашей теме (отдельный шаг)
-```bash
-top-papers-graph fetch "graph neural network survey" --source arxiv --limit 10 --out data/papers/arxiv.json
-top-papers-graph fetch "graph neural network survey" --source pubmed --limit 10 --out data/papers/pubmed.json
-```
-
-### 5) Наружный API (FastAPI)
-```bash
-pip install -e ".[api]"
-top-papers-graph-api
-```
-
-### 6) MCP‑сервер
-```bash
-pip install -e ".[mcp]"
-top-papers-graph-mcp
-```
-
-## Конфиг домена (topic‑agnostic)
-- Домен настраивается YAML‑файлом в `configs/domains/<DOMAIN_ID>.yaml`.
-- “Скептик” (критический чек‑лист) задаётся файлом в `configs/checklists/`.
-
-Смотрите: `docs/quickstart.md`, `docs/architecture.md`, `docs/sources.md`.
-
-## Примеры
-- `examples/battery_fastcharge/` — пример домена “быстрая зарядка батарей” с PyBaMM и профилями зарядки.
-  - Чтобы включить пример, укажите `DOMAIN_ID=ied_fastcharge` и пути на конфиги из `examples/...`.
+Курс можно повторить или адаптировать под другую предметную область. План, роли, задания, критерии и ритуалы сопровождения описаны в [course/INSTRUCTOR_GUIDE.md](course/INSTRUCTOR_GUIDE.md).
 
 ## Лицензия
-См. `LICENSE`.
 
-
-## Full-stack OCR -> Temporal KG -> Multimodal verification
-
-This repository now supports a staged full-stack pipeline aligned with the uploaded architecture notes:
-
-- **Step 1 / OCR + document structure**: PaddleOCR + PP-Structure/PP-StructureV3 ingestion with a richer `ChunkRecord` contract and automatic fallback to GROBID / PyMuPDF.
-- **Step 2 / unified PyTorch contour**: optional PyTorch Geometric TGN memory backend for temporal link prediction, Neo4j temporal KG, Qdrant dense+sparse hybrid retrieval, and Qwen2.5-VL-ready multimodal verification hooks.
-- **Step 3 / Memgraph-centric analytics**: optional Memgraph + MAGE dual-write for temporal events/assertions/chunks, plus best-effort MAGE analytics snapshots.
-
-### Docker stack
-
-By default, `docker-compose.yml` builds the app with the `fullstack` extra and starts:
-
-- Qdrant
-- Neo4j
-- Memgraph (MAGE image)
-- GROBID
-- the application container
-
-Example:
-
-```bash
-docker compose up --build
-```
-
-### Key environment switches
-
-- `OCR_BACKEND=auto|paddleocr|grobid|pymupdf`
-- `GRAPH_BACKEND=dual|neo4j|memgraph|none`
-- `QDRANT_RETRIEVAL_MODE=hybrid|dense`
-- `HYP_TGNN_BACKEND=auto|pyg|heuristic`
-- `VLM_BACKEND=none|qwen2_vl|g4f`
-
-### Product contracts
-
-The main product artifact chain is now explicitly modeled as:
-
-`ChunkRecord -> TemporalEvent -> Hypothesis`
-
-`ChunkRecord` is stored in `chunks.jsonl`, reused for Qdrant payloads, temporal graph provenance, and downstream multimodal verification.
-
-## SciReason alignment improvement
-
-See `SCIREASON_ALIGNMENT_IMPROVEMENT_REPORT_RU.md` for the latest DPO-first, reward-audited fine-tuning pipeline patch after the June 2026 DataSphere runs.
+Код и материалы репозитория распространяются по лицензии [MIT](LICENSE), если в конкретном файле или наборе данных не указано иное. Для внешних статей, моделей и датасетов действуют их собственные лицензии.
