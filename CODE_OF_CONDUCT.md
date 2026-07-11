@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Правила сообщества
 
 Мы строим учебный open-source проект, в котором люди приходят с разным опытом: от первого знакомства с Git до профессиональной научной экспертизы.

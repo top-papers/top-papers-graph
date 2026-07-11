@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Прогон генерации гипотез по фиксированному набору кейсов на ТЕКУЩЕЙ версии кода.
 
 Используется как одна половина side-by-side демонстрации: один и тот же кейс-файл

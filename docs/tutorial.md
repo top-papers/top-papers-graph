@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Туториал проекта SciReason: что делать каждому участнику (очень пошагово)
 
 Этот документ — “инструкция к настольной игре” для проекта на ≈80 человек.

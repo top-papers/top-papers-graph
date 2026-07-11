@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Week 12 — Интеграция, релиз и продолжение
 
 ## Результат недели

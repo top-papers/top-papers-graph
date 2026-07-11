@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: sft_dpo_grpo_v2_qwen3vl_8b_lora
 stage: text_sft_then_vlm_sft_then_dpo_optional_grpo
 model_id: Qwen/Qwen3-VL-8B-Instruct

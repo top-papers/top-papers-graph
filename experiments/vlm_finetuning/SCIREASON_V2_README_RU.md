@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Рекомендуемый v2-пайплайн дообучения SciReason
 
 Этот пайплайн заменяет прямой `SFT -> GRPO` запуск на более устойчивую схему:

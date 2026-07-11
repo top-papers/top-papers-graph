@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # smolagents: поддержка агентного режима (код-агент) с локальными HF и g4f
 
 В проекте есть **два** варианта «код‑агента» (агента, который решает задачу написанием Python‑кода):

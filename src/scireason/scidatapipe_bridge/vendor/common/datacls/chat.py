@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Chat aggregate — an ordered list of messages."""
 from __future__ import annotations
 

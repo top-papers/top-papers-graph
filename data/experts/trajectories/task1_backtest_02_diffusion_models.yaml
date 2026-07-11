@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Эволюция диффузионных моделей для генерации изображений: от вероятностных моделей шумоподавления (DDPM) через объединение с SDE к латентным диффузионным моделям, значительно снизившим вычислительные затраты.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Конфиг утилиты-сборщика диагностического набора Task 3 (A/B).
 # Заполните два списка ниже и выполните:  python3 scripts/build.py

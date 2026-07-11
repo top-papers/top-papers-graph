@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3 — Dual Local Models Blind A/B
 
 Этот сценарий предназначен для сравнения двух локальных модельных конфигураций на одном и том же Task 3 pipeline:

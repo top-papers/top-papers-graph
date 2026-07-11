@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Side-by-side рендер двух прогонов генерации гипотез.
 
 Никаких метрик и скоринга — просто кладёт результат версии A и версии B рядом по каждому

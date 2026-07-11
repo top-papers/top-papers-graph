@@ -1,9 +1,13 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Changelog
 
 ## 2026-07-11 - Course-first repository structure
 
+- Relicensed all original project code, course materials, documentation, notebooks and contributor-created artifacts under GNU GPL v3 or later; added SPDX notices and an explicit license-scope document.
 - Reframed the main README around the open-source course and contributor model.
-- Added contributor onboarding, instructor guidance, community rules, issue/PR templates and the missing MIT license.
+- Added contributor onboarding, instructor guidance, community rules and issue/PR templates.
 - Separated course task guides from technical documentation and added navigation indexes.
 - Removed generated logs, validation runs, package metadata, temporary files, root notebook copies and obsolete patch reports.
 - Kept one canonical notebook per workflow and stripped runtime outputs for reproducibility.

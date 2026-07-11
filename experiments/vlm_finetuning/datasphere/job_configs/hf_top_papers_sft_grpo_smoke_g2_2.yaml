@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: hf-top-papers-qwen3vl-8b-sft-grpo-smoke-g2-2
 desc: Smoke test for Qwen3-VL-8B SFT+GRPO DataSphere pipeline with CUDA/BF16 preflight,
   tiny steps and no Hugging Face upload.

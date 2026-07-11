@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Полный tutorial: VLM SFT + GRPO + auto-upload на Hugging Face через Yandex DataSphere Jobs
 
 Дата ревизии: 2026-05-16.

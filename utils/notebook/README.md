@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # notebook/
 
 Исходный Colab-блокнот Task 3 для эксперта-создателя набора.

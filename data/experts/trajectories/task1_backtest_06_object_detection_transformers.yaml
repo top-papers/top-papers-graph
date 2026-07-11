@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие детекции объектов на основе трансформеров: от базовой архитектуры DETR через деформируемое внимание (Deformable DETR) к ускорению обучения через денойзинг запросов (DN-DETR).

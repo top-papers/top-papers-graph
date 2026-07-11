@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие методов обучения с малым числом примеров: от метрического обучения с прототипами (Prototypical Networks) через model-agnostic мета-обучение (MAML) к адаптации эмбеддингов для конкретных задач (FEAT).

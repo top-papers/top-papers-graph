@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -8,8 +11,11 @@ version = "0.4.3"
 description = "Open-source course and toolkit for scientific literature analysis, temporal knowledge graphs and hypothesis generation"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 authors = [{name="top-papers-graph contributors"}]
+classifiers = [
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
 dependencies = [
   "pydantic>=2.6",
   "pydantic-settings>=2.2",

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """GRPO / RL sample pydantic model.
 
 Only Task 2 auto-assertions that received a non-empty expert verdict are

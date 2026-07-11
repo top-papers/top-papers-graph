@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Как подготовить публикацию для Agents4Science (domain case study) — пошагово
 
 > “Точно приняли” гарантировать нельзя. Но можно закрыть формальные требования и сделать

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3 A/B: подробный туториал для эксперта-создателя тестового набора
 
 ## 1. Новая схема ролей

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: An et al. 2019 G9 multi-stage fast charge 0-80% SOC
 source: An et al. 2019
 chemistry: Li-ion

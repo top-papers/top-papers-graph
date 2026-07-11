@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Week 04 — Встреча синка (60 минут)
 **Тема недели:** Debates v1 + Red Teaming v1
 

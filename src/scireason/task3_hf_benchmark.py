@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Build a Hugging Face-ready Task 3 VLM generation benchmark dataset.
 
 The builder converts Task 3 creator manifests into model-facing generation

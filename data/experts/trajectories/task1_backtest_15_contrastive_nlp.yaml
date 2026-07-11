@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие контрастного обучения для представлений предложений в NLP: от простого контрастного метода с dropout (SimCSE) через аугментации для трансфера представлений (ConSERT) к устранению смещения при выборке негативов (DCLR).

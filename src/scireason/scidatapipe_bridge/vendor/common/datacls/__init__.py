@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Pydantic data classes shared across the pipeline."""
 from scireason.scidatapipe_bridge.vendor.common.datacls.chat import Chat
 from scireason.scidatapipe_bridge.vendor.common.datacls.content import (

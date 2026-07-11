@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';

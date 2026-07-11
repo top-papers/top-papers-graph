@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Пайплайн качества: архитектура Propose-Verify + оценка качества утверждений
 
 ## Обзор

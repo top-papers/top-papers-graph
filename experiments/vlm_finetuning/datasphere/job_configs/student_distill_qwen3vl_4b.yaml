@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: student-distill-qwen3vl-4b
 desc: Student distillation SFT run for Qwen3-VL-4B-Instruct on gold plus silver corpus
 cmd: bash experiments/vlm_finetuning/datasphere/bin/run_student_distill_4b.sh

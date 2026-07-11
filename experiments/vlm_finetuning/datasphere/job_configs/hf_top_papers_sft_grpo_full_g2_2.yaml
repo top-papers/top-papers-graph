@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: hf-top-papers-qwen3vl-8b-sft-grpo-g2-2
 desc: 'Budget-guarded full SFT plus GRPO VLM fine-tuning for Qwen3-VL-8B-Instruct
   on top-papers/top-papers-graph-experts-data export exports/colab-run-001, DataSphere

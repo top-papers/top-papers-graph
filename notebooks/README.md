@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Учебные notebooks
 
 Здесь хранятся только канонические версии блокнотов. Сохранённые outputs и execution counts удалены: блокнот должен воспроизводить результат при повторном запуске, а не хранить состояние чужой среды.

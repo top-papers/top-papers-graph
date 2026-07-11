@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # -*- coding: utf-8 -*-
 """
 Telegram-бот создателя диагностического набора Task 3 (A/B, top-papers-graph).

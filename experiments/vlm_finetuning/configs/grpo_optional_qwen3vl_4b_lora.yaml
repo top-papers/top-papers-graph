@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: grpo_optional_qwen3vl_4b_lora
 stage: grpo
 base_checkpoint: outputs/dpo_pilot_qwen3vl_4b_lora

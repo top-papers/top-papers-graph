@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Normalize legacy Task 1 trajectory YAMLs to the frozen v4 schema.
 
 Input: any YAML with ``artifact_version: 2`` or ``3`` (including the

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3 → Hugging Face VLM benchmark dataset
 
 Этот патч добавляет отдельный пайплайн для выгрузки экспертных Task 3 case manifests из Google Sheets в Hugging Face dataset repository `top-papers/top-papers-graph-benchmark`.

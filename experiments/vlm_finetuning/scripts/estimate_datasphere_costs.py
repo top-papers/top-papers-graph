@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Estimate Yandex DataSphere compute costs in RUB for VLM experiments.
 
 The prices are intentionally stored in RUB/hour and match the public DataSphere

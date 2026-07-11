@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """JSON Schemas for the unified Task 1 trajectory + Task 2 assertion bundle.
 
 Task 1 is frozen at ``artifact_version: 4``; Task 2 uses a flat ``assertions``

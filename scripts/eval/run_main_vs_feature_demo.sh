@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Side-by-side демонстрация генерации гипотез: две явно заданные ветки.
 #
 # Прогоняет один и тот же набор кейсов (data/demo/hypothesis_demo_cases.json) на двух ветках:

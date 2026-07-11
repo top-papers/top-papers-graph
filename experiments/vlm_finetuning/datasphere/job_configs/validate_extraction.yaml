@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: vlm-validate-extraction
 desc: Offline validation for predicted versus gold scientific assertions
 cmd: bash experiments/vlm_finetuning/datasphere/bin/run_validate_extraction.sh

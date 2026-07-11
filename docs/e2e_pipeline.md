@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # E2E пайплайн: query → статьи → темпоральный KG → гипотезы
 
 Команда для запуска:

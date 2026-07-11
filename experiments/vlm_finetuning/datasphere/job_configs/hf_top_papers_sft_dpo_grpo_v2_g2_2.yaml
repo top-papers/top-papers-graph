@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: hf-top-papers-qwen3vl-8b-sft-dpo-grpo-v2-g2-2
 desc: >-
   Recommended v2 SciReason fine-tuning pipeline for Qwen3-VL-8B-Instruct:

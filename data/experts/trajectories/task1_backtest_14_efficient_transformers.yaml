@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие эффективных трансформеров: от линейного внимания через ядерную аппроксимацию (Performers) к аппаратно-оптимизированному точному вниманию (FlashAttention), решающему проблему квадратичной сложности.

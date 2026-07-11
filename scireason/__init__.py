@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Compatibility shim for running notebooks and scripts from a source checkout.
 
 This makes ``import scireason`` work even before ``pip install -e .`` completes,

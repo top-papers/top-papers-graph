@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from pathlib import Path
 from scireason.integrations.top_papers_import import export_meta_files
 

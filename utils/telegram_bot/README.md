@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Telegram-бот создателя набора Task 3 (A/B)
 
 Альтернатива офлайн веб-форме `task3_ab_creator_offline_form_ru.html`. Бот ведёт

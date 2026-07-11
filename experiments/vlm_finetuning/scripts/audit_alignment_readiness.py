@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Preflight quality gates for the SciReason SFT/DPO/GRPO pipeline.
 
 The audit report for Qwen3-VL-8B-Instruct-scireason identified three costly

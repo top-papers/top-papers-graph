@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # web_form/
 
 GUI-форма создателя набора Task 3. **Пуста по умолчанию**; кейсы приходят из

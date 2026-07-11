@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # top-papers-graph — план-график на 12 недель (temporal graphs + multimodal VL)
 
 **Контекст:** курс/проект по научным агентам для *любой* научной тематики (домен выбираете вы).  

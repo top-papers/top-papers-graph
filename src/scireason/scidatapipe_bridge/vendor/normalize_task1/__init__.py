@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Task 1 trajectory normalizer (legacy YAMLs -> v4 schema)."""
 from scireason.scidatapipe_bridge.vendor.normalize_task1.normalizer import (
     main,

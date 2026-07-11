@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3: как провести A/B тест так, чтобы разница baseline VLM vs SFT/DPO VLM проявилась
 
 ## Коротко

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # VLM fine-tuning bundle for temporal scientific KG extraction
 
 This bundle extends the repository with a practical plan for fine-tuning a vision-language model

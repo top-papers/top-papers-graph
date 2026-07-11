@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Первый вклад слушателя
 
 Цель первого вклада — пройти полный цикл open-source работы на небольшой безопасной задаче.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """SFT sample pydantic model.
 
 One JSONL row corresponds to one :class:`SFTSample`. Two task families are

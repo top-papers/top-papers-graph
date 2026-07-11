@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Normalize Task 2 expert validation bundles to a single unified format.
 
 Input: a directory containing one or more bundle subdirectories. A bundle is

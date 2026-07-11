@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 model_id: Qwen/Qwen2.5-VL-3B-Instruct
 trainer: sft
 mode: text

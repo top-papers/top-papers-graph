@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Презентации о курсе и проекте
 
 - [`datafest_2026/kostin_aa_open_course_datafest_2026.pdf`](datafest_2026/kostin_aa_open_course_datafest_2026.pdf) — «Изучаем ML в open-source проекте»: история курса, роли, data flywheel и публичные артефакты.

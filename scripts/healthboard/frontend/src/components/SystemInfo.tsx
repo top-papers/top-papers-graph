@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import React, { useCallback, useMemo, useState } from 'react';
 import { Card, Row, Col, Statistic, Spin, Alert, Button, Space, Tag, Table } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, StopOutlined, FolderAddOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';

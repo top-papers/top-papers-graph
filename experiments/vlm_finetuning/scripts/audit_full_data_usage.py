@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Audit that the SciReason builder did not silently drop available data.
 
 The training export contains instruction/alignment JSONL files plus assets.  The

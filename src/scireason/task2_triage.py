@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Автоматический triage триплетов Task 2 на корзины accept / reject / review.
 
 Модуль содержит rule-based эвристики, классифицирующие каждый извлечённый

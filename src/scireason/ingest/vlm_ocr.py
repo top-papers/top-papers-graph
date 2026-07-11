@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from __future__ import annotations
 
 """Compatibility VLM-OCR helpers for Task 2 temporal KG repair.

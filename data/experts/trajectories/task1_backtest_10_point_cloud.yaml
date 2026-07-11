@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие методов обработки облаков точек: от прямой обработки неупорядоченных множеств (PointNet) через динамические графовые свёртки (DGCNN) к трансформерам для 3D-точек (Point Transformer).

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Подробная инструкция и пошаговый туториал для эксперта-участника A/B теста Task 3
 
 ## Для чего нужна работа эксперта-участника

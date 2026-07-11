@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3 case-based A/B assets
 
 Новые артефакты для переработанного дизайна эксперимента:

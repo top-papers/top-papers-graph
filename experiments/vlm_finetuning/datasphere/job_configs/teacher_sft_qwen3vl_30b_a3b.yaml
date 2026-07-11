@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: teacher-sft-qwen3vl-30b-a3b
 desc: Large-teacher SFT run for Qwen3-VL-30B-A3B-Instruct plus LoRA
 cmd: bash experiments/vlm_finetuning/datasphere/bin/run_teacher_sft_30b_a3b.sh

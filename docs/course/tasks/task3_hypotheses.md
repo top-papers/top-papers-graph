@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3 — multimodal temporal hypothesis generation
 
 This repository snapshot adds a dedicated Task 3 pipeline for **vision-language assisted, evidence-grounded hypothesis generation** over a **temporal knowledge graph**.

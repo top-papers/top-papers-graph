@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие методов adversarial robustness: от PGD-атаки и adversarial training (Madry) через теоретически обоснованный компромисс робастности и точности (TRADES) к систематическому изучению пределов adversarial training.

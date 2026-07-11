@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Content blocks inside a chat message.
 
 A message carries a list of content blocks. For the pipeline MVP we only

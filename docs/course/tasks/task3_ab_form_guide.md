@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Пошаговый туториал по заполнению офлайн-формы Task 3 для эксперта-создателя
 
 Этот документ относится к обновлённой русской офлайн-форме для эксперта-создателя набора A/B теста в Task 3.

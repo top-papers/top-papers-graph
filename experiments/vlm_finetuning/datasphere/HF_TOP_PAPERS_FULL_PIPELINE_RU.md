@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Полный DataSphere Jobs pipeline для `top-papers/top-papers-graph-experts-data`
 
 Этот модуль запускает полный цикл VLM fine-tuning через DataSphere Jobs:

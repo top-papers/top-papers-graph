@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие нейронных полей излучения: от оригинального NeRF для синтеза новых ракурсов через расширение на неограниченные сцены (Mip-NeRF 360) к рендерингу в реальном времени через 3D Gaussian Splatting.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from __future__ import annotations
 
 from .pipeline.task3_hypothesis_generation import Task3BundleResult, prepare_task3_hypothesis_bundle

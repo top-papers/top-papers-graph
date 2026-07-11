@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Temporal GNN / temporal link prediction helpers.
 
 The implementation is deliberately lightweight and course-friendly:

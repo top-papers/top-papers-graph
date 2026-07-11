@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # scidatapipe bridge for top-papers-graph
 
 Новый модуль добавляет в `top-papers-graph` экспорт в совместимый со `scidatapipe` формат датасетов.

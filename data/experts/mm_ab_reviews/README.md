@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3 multimodal hard-subset A/B review templates
 
 Эта папка содержит шаблоны для слепого A/B теста baseline VLM vs SFT/DPO VLM в Task 3.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: task3-case-based-blind-ab
 desc: Run Task 3 case-based blind A/B on curated creator-defined cases
 cmd: >

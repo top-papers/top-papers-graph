@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Build leakage-safe SFT/DPO/GRPO datasets for SciReason VLM fine-tuning.
 
 This v2 builder deliberately uses the prepared HF export files

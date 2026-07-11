@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Масштабирование на ≈80 участников
 
 Этот документ — практический “операционный” план, как организовать работу студентов и аспирантов

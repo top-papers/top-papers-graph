@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Shared utility helpers used across the scidatapipe stages."""
 from scireason.scidatapipe_bridge.vendor.common.utils.io import (
     count_lines,

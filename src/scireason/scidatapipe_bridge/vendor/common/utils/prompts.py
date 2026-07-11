@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Shared prompt serialisation helpers for the SFT/GRPO builders."""
 from __future__ import annotations
 

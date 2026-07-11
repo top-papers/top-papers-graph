@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Run adversarial LLM evaluation on expert trajectory triplets.
 
 Builds a test set from expert trajectories + synthetic noise,

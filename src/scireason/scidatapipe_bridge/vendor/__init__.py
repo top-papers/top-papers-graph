@@ -1,1 +1,4 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Vendored scidatapipe normalizers and shared schemas."""

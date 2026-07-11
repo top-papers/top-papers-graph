@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Task 3 A/B — утилита-сборщик диагностического набора (top-papers-graph)
 
 Инструмент для подготовки диагностического набора кейсов A/B-теста Task 3: где

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Canonical paper-id resolver.
 
 Handles the messy raw identifiers that appear in Task 1 YAMLs:

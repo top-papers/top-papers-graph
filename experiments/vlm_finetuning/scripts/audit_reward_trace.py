@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Post-run reward trace audit for GRPO.
 
 Use this after train_vlm_grpo.py or as a standalone check on grpo_reward_trace.jsonl.

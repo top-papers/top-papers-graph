@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Скоринг качества утверждений — взвешенная оценочная функция на 10 признаках.
 
 Заменяет ненадёжную LLM-confidence (почти всегда ≈ 1.0) на вычисляемую

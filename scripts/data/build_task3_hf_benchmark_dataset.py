@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """CLI wrapper for building the Task 3 Hugging Face VLM benchmark dataset."""
 from __future__ import annotations
 

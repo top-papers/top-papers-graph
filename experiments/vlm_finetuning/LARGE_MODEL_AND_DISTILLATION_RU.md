@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Схема дообучения большой Qwen3-VL и дистилляции в маленькую модель
 
 ## 1. Какие крупные модели стоит рассматривать

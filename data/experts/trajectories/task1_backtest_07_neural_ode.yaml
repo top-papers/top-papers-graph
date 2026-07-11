@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 artifact_version: 3
 topic: >-
   Развитие моделей с непрерывной глубиной: от нейронных обыкновенных дифференциальных уравнений (Neural ODE) через управляемые дифференциальные уравнения для нерегулярных временных рядов к систематическому анализу динамики Neural ODE.

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Задания и практические руководства
 
 Этот раздел хранит подробные инструкции к учебным артефактам. Канонические notebooks находятся в [`notebooks/`](../../../notebooks/).

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Prepare and upload fine-tuned VLM artifacts to a Hugging Face Hub model repo."""
 from __future__ import annotations
 

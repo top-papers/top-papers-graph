@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 top-papers-graph contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Week 11 — Встреча синка (60 минут)
 **Тема недели:** Writing sprint v2 (rigor)
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from .decorators import scireason_mcp_tool
 from .runtime import create_mcp_server
 
