@@ -1,0 +1,4 @@
+# Hash-bound publication contracts must retain repository LF bytes on every platform.
+experiments/vlm_ab_evaluation/configs/*.yaml text eol=lf
+experiments/vlm_ab_evaluation/schemas/*.json text eol=lf
+experiments/vlm_ab_evaluation/*baseline*.json text eol=lf

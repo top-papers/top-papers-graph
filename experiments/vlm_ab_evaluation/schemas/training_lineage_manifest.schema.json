@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://top-papers.example/schemas/vlm-ab-training-lineage-v1.json",
+  "title": "Training contamination lineage manifest",
+  "description": "The evaluation config pins the separate immutable revision containing this attestation. training_sources identifies audited input revisions and must not identify that attestation revision in the same repository.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "training_sources",
+    "coverage",
+    "paper_ids",
+    "source_document_ids",
+    "creator_group_ids",
+    "image_sha256s",
+    "prompt_sha256s"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "training_sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["repo_id", "repo_type", "revision", "files"],
+        "properties": {
+          "repo_id": {"type": "string", "minLength": 1},
+          "repo_type": {"enum": ["model", "dataset"]},
+          "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "sha256", "row_count"],
+              "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "row_count": {"type": "integer", "minimum": 0}
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["paper_ids", "source_documents", "creator_groups", "image_bytes", "prompts"],
+      "properties": {
+        "paper_ids": {"const": true},
+        "source_documents": {"const": true},
+        "creator_groups": {"const": true},
+        "image_bytes": {"const": true},
+        "prompts": {"const": true}
+      }
+    },
+    "paper_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "source_document_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "creator_group_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "image_sha256s": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+      "uniqueItems": true
+    },
+    "prompt_sha256s": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+      "uniqueItems": true
+    }
+  }
+}

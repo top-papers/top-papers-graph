@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://top-papers.example/schemas/vlm-ab-publication-benchmark-row-v1.json",
+  "title": "Publication VLM benchmark row",
+  "type": "object",
+  "additionalProperties": true,
+  "$defs": {
+    "nonBlankString": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "trimmedIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S(?:.*\\S)?$"
+    },
+    "reviewerIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._:@/+ -]*[A-Za-z0-9])?$"
+    },
+    "substantiveEntry": {
+      "anyOf": [
+        {"$ref": "#/$defs/nonBlankString"},
+        {"type": "object", "minProperties": 1}
+      ]
+    }
+  },
+  "required": [
+    "sample_id",
+    "paper_id",
+    "stratum",
+    "primary_endpoint",
+    "model_task_prompt",
+    "messages",
+    "images",
+    "split_provenance"
+  ],
+  "properties": {
+    "sample_id": {"$ref": "#/$defs/trimmedIdentifier"},
+    "paper_id": {"$ref": "#/$defs/trimmedIdentifier"},
+    "stratum": {
+      "type": "string",
+      "enum": ["multimodal_hard", "temporal_hard", "easy_control"]
+    },
+    "primary_endpoint": {"type": "boolean"},
+    "model_task_prompt": {"type": "string", "minLength": 1},
+    "messages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "content"],
+        "properties": {
+          "role": {"enum": ["system", "user", "assistant"]},
+          "content": {
+            "oneOf": [
+              {"$ref": "#/$defs/nonBlankString"},
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["type", "text"],
+                      "properties": {
+                        "type": {"const": "text"},
+                        "text": {"$ref": "#/$defs/nonBlankString"}
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["type"],
+                      "properties": {"type": {"const": "image"}}
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "images": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "split_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paper_holdout",
+        "source_holdout",
+        "creator_holdout",
+        "training_overlap_checked",
+        "source_document_id",
+        "creator_group_id"
+      ],
+      "properties": {
+        "paper_holdout": {"const": true},
+        "source_holdout": {"const": true},
+        "creator_holdout": {"const": true},
+        "training_overlap_checked": {"const": true},
+        "source_document_id": {"$ref": "#/$defs/trimmedIdentifier"},
+        "creator_group_id": {"$ref": "#/$defs/trimmedIdentifier"}
+      }
+    },
+    "gold_answer": {
+      "type": "object",
+      "required": [
+        "answer",
+        "evidence_used",
+        "visual_facts",
+        "temporal_facts",
+        "uncertainty",
+        "missing_evidence"
+      ],
+      "properties": {
+        "answer": {"$ref": "#/$defs/nonBlankString"},
+        "evidence_used": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/substantiveEntry"}
+        },
+        "visual_facts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/substantiveEntry"}
+        },
+        "temporal_facts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/substantiveEntry"}
+        },
+        "uncertainty": {"type": ["string", "array", "object", "null"]},
+        "missing_evidence": {"type": ["string", "array", "object", "null"]}
+      }
+    },
+    "rubric": {
+      "type": "object",
+      "required": ["criteria", "adjudicators"],
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/substantiveEntry"}
+        },
+        "adjudicators": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/reviewerIdentifier"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+numpy>=1.26,<2
+PyYAML>=6.0
+huggingface_hub>=0.34.0,<1.0
+hf-xet>=1.1.0,<2
+jsonschema>=4.22,<5
+transformers>=4.57.0,<4.58
+accelerate>=1.8.0,<2
+peft>=0.19.0,<0.20
+qwen-vl-utils>=0.0.14,<0.1
+pillow>=10.0
+safetensors>=0.4.3
+torch>=2.2
+torchvision>=0.17

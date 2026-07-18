@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: qwen3vl-scireason-publication-ab
+desc: Pinned, gated base-vs-SciReason Qwen3-VL evaluation and blind review packaging.
+cmd: bash experiments/vlm_ab_evaluation/datasphere/run_evaluation.sh
+env:
+  python:
+    type: manual
+    version: '3.10'
+    requirements-file: experiments/vlm_ab_evaluation/datasphere/requirements.txt
+    local-paths:
+      - experiments/vlm_ab_evaluation/
+      - src/
+      - pyproject.toml
+    pip:
+      extra-index-urls:
+        - https://download.pytorch.org/whl/cu121
+  vars:
+    - VLM_AB_CONFIG: experiments/vlm_ab_evaluation/configs/qwen3vl_scireason_publication.yaml
+    - VLM_AB_EXPLORATORY: '0'
+    - HF_HUB_DISABLE_TELEMETRY: '1'
+    - HF_HUB_DOWNLOAD_TIMEOUT: '120'
+    - TOKENIZERS_PARALLELISM: 'false'
+    - PYTHONUNBUFFERED: '1'
+    - PYTHONUTF8: '1'
+    - PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+inputs:
+  - .git/
+  - experiments/vlm_ab_evaluation/
+  - src/
+  - pyproject.toml
+outputs:
+  - runs/
+  - experiments/vlm_ab_evaluation/
+  - src/scireason/__init__.py
+  - src/scireason/vlm_ab/
+  - pyproject.toml
+cloud-instance-types:
+  - g2.2
+working-storage:
+  type: SSD
+  size: 512Gb
+graceful-shutdown:
+  signal: SIGTERM
+  timeout: 1800s

@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "baseline_id": "qwen3vl-scireason-remote-audit-20260717",
+  "recorded_at": "2026-07-17",
+  "scope": "authenticated read-only audit of pinned public releases",
+  "sources": {
+    "benchmark": {
+      "repo_id": "top-papers/top-papers-graph-benchmark",
+      "revision": "33ccc5ed08e314c6457dcaa23e7f7508406cb4f8",
+      "data_file": "data/task3_vlm_generation.jsonl",
+      "sha256": "313c0ad53e987278acbfbf69f665305faab1d8c1ae3e343789c3472e74ed628b",
+      "row_count": 386
+    },
+    "provenance": {
+      "repo_id": "top-papers/top-papers-graph-benchmark",
+      "revision": "33ccc5ed08e314c6457dcaa23e7f7508406cb4f8",
+      "data_file": "article_image_sources.jsonl",
+      "sha256": "667b9f65e10de4bab5270109489009ee90e466b5a2b68042c4e16adbf0ca3e04",
+      "row_count": 1496
+    },
+    "adapter": {
+      "repo_id": "top-papers/Qwen3-VL-8B-Instruct-scireason",
+      "revision": "45936868f4b2acdbbc4245044137072411fd11cc",
+      "training_files": [
+        {
+          "path": "artifacts/data/sft_all.jsonl",
+          "sha256": "6d32ba9920ba6eb7a5ec468f982fc76d4bf9136b0168985536edff265bb7265c",
+          "row_count": 2548
+        },
+        {
+          "path": "artifacts/data/grpo_all.jsonl",
+          "sha256": "75a014b5fa710e14db0c53252695205a1c108ab05fa519fbcebd9a208aa0328a",
+          "row_count": 1960
+        }
+      ]
+    },
+    "audit_report_sha256": "fbecac7188897a6ee6ad50f6b7d1beda859fbef56fb1aed7ca0f13c6581a370a",
+    "prepare_manifest_sha256": "a9c45567eea2f43845b5dc4da149746dfc0aa300859e44084df36d58bedc7c9a"
+  },
+  "gate": {
+    "audit_status": "fail",
+    "publication_ready": false,
+    "input_rows": 386,
+    "excluded_rows": 386,
+    "frozen_rows": 0,
+    "eligible_unique_samples": 0
+  },
+  "population": {
+    "benchmark_rows": 386,
+    "unique_sample_ids": 360,
+    "image_references": 1544,
+    "unique_image_paths": 1488,
+    "unique_image_sha256": 30,
+    "provenance_rows": 1496
+  },
+  "critical_findings": {
+    "cross_paper_image_reuse": {
+      "findings": 29,
+      "affected_unique_sample_ids": 360,
+      "affected_rows": 386
+    },
+    "duplicate_sample_id": {
+      "findings": 20,
+      "affected_unique_sample_ids": 20,
+      "affected_rows": 46
+    },
+    "likely_answer_leakage": {
+      "findings": 342,
+      "affected_unique_sample_ids": 319,
+      "affected_rows": 342
+    },
+    "missing_training_lineage": {
+      "findings": 1,
+      "scope": "global"
+    },
+    "provenance_mismatch": {
+      "findings": 360,
+      "affected_unique_sample_ids": 360,
+      "affected_rows": 386
+    },
+    "residual_comparison_prompt": {
+      "findings": 386,
+      "affected_unique_sample_ids": 360,
+      "affected_rows": 386
+    },
+    "schema_error": {
+      "findings": 386,
+      "affected_unique_sample_ids": 360,
+      "affected_rows": 386
+    },
+    "training_paper_overlap": {
+      "findings": 22,
+      "affected_unique_sample_ids": 70,
+      "affected_rows": 71
+    }
+  },
+  "warning_findings": {
+    "duplicate_normalized_prompt": {
+      "findings": 17,
+      "affected_unique_sample_ids": 24
+    },
+    "missing_gold": {
+      "findings": 386,
+      "affected_unique_sample_ids": 360,
+      "affected_rows": 386
+    },
+    "within_row_duplicate_image_bytes": {
+      "findings": 535,
+      "affected_unique_sample_ids": 360,
+      "affected_rows": 386
+    }
+  },
+  "diagnostics": {
+    "universal_critical_codes": [
+      "cross_paper_image_reuse",
+      "provenance_mismatch",
+      "residual_comparison_prompt",
+      "schema_error"
+    ],
+    "duplicate_ids": {
+      "groups": 20,
+      "rows_in_groups": 46,
+      "extra_rows": 26,
+      "group_size_distribution": {"2": 15, "3": 4, "4": 1},
+      "all_rows_distinct_full_json": true
+    },
+    "schema_error_patterns": {
+      "model_task_prompt_mismatch": 386,
+      "missing_split_provenance": 386,
+      "primary_endpoint_inconsistent_with_primary_strata": 29,
+      "missing_canonical_paper_id": 1
+    },
+    "provenance_issue_patterns": {
+      "missing_image_sha256_events": 1488,
+      "image_mapping_mismatch_samples": 12,
+      "samples_missing_complete_provenance_fields": 360,
+      "samples_without_exactly_one_complete_provenance_row": 360
+    },
+    "leakage_reason_patterns": {
+      "evaluation_material_verbatim_rows": 340,
+      "evaluation_material_verbatim_unique_samples": 317,
+      "answer_key_language_rows": 25,
+      "answer_key_language_unique_samples": 25,
+      "rows_with_both_reasons": 23
+    },
+    "training_overlap": {
+      "canonical_paper_ids": 22,
+      "benchmark_unique_sample_ids": 70,
+      "benchmark_rows": 71,
+      "unique_training_rows": 576
+    }
+  },
+  "remediation_ownership": {
+    "deterministic": [
+      "recompute and verify file hashes, row counts, image-byte groups, and schema results",
+      "populate image SHA256 values after curators select the correct source bytes",
+      "synchronize the finalized model_task_prompt with the canonical user message",
+      "align primary_endpoint with the preregistered primary_strata policy"
+    ],
+    "curator_or_adjudicator": [
+      "resolve every duplicate sample_id group; all 46 rows are distinct and none is safe to drop automatically",
+      "rewrite comparison prompts and remove answer or evaluation leakage",
+      "verify each image against the cited paper, page, and locator and replace relabelled or duplicate bytes",
+      "supply license, source URL, and two independent verifier identifiers per image",
+      "create independent gold answers and rubrics before claiming automatic semantic metrics"
+    ],
+    "release_owner": [
+      "exclude all overlapping evaluation papers or retrain and republish the adapter",
+      "publish the complete training-lineage manifest at a distinct immutable attestation revision in the evaluated adapter repository",
+      "attest paper, source-document, creator-group, image-byte, and prompt holdouts",
+      "publish corrected benchmark and adapter revisions without rewriting the audited releases"
+    ]
+  },
+  "release_acceptance": {
+    "benchmark_contract": "schemas/publication_benchmark_row.schema.json",
+    "provenance_contract": "schemas/publication_provenance_row.schema.json",
+    "training_lineage_contract": "schemas/training_lineage_manifest.schema.json",
+    "requires_new_immutable_benchmark_revision": true,
+    "requires_new_immutable_adapter_revision": true,
+    "required_machine_results": {
+      "critical_finding_count": 0,
+      "eligible_sample_count_equals_unique_sample_ids": true,
+      "duplicate_sample_ids": 0,
+      "cross_paper_image_reuse_groups": 0,
+      "image_placeholder_mismatches": 0,
+      "missing_images": 0,
+      "provenance_mismatches": 0,
+      "residual_comparison_prompts": 0,
+      "training_paper_overlap_ids": 0,
+      "training_prompt_overlap_groups": 0,
+      "unsafe_image_paths": 0
+    },
+    "warning_policy": {
+      "duplicate_normalized_prompt": 0,
+      "within_row_duplicate_image_bytes": 0,
+      "missing_gold": "permitted only when benchmark.require_gold is false and no automatic semantic claim is made"
+    },
+    "preregistered_minimum_primary_papers": 240,
+    "requires_new_experiment_id_public_id_and_output_dir": true
+  }
+}

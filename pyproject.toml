@@ -239,6 +239,21 @@ task3_hf_benchmark = [
   "pymupdf>=1.24",
 ]
 
+# Publication-grade paired evaluation of the base and SciReason Qwen3-VL models.
+vlm_ab = [
+  "numpy>=1.26,<2",
+  "pillow>=10.0",
+  "torch>=2.2",
+  "torchvision>=0.17",
+  "transformers>=4.57.0,<4.58",
+  "accelerate>=1.8.0,<2",
+  "peft>=0.19.0,<0.20",
+  "qwen-vl-utils>=0.0.14,<0.1",
+  "safetensors>=0.4.3",
+  "hf-xet>=1.1.0,<2",
+  "jsonschema>=4.22,<5",
+]
+
 # OCR / layout extraction (PaddleOCR full-stack).
 ocr = [
   "paddleocr[doc-parser]>=3.0.0",
@@ -339,6 +354,7 @@ top-papers-graph = "scireason.cli:app"
 scireason = "scireason.cli:app"
 top-papers-graph-api = "scireason.api.main:main"
 top-papers-graph-mcp = "scireason.mcp.server:main"
+top-papers-vlm-ab = "scireason.vlm_ab.cli:main"
 
 [tool.ruff]
 line-length = 100

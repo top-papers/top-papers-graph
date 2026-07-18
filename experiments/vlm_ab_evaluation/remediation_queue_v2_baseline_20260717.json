@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-07-18",
+  "scope": "authenticated deterministic human-remediation queue under the hardened publication contract",
+  "source_audit_baseline": "remote_audit_baseline_20260717.json",
+  "source_reaudit": {
+    "config_file": "configs/qwen3vl_scireason_remediation_audit_v2.yaml",
+    "config_file_sha256": "15c850fcf99de4e9740a90df75771be7a3327e6e3a027fe49d09911fe07c1334",
+    "config_fingerprint": "d8ade7893438e360c06dc1282066d7b351e4ab9728df71a15be755b65b85f0a1",
+    "prepare_manifest_sha256": "c52fe431c63cb0e9d27f5d8133c9639942e8bfc66c24549beb07b2895f6e02d3",
+    "audit_json_sha256": "a409b86cf7e50611b923ff83b7c28211a40f55ff0e7946b57eef081689b1e05f",
+    "audit_markdown_sha256": "70e18b1ceaec85e6e4f76f269449e2412db97fa79d3ec671e05ab7d50679c0aa",
+    "original_baseline_audit_json_sha256": "fbecac7188897a6ee6ad50f6b7d1beda859fbef56fb1aed7ca0f13c6581a370a",
+    "audit_matches_original_baseline": false,
+    "audit_invariants_match_original_baseline": true,
+    "difference_reason": "security-hardening diagnostics changed while population and finding-count invariants remained unchanged"
+  },
+  "queue": {
+    "artifact_version": 2,
+    "directory": "runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/curation_queue_v2_524cbc2d_hardened",
+    "queue_fingerprint": "bc15c288024c6c40a6a9274c13d26ea1e675994f7353bd98a6c35c072364cf25",
+    "queue_manifest_sha256": "37449b411cb729f0fb2f4afbbf95998249e68a0a7d51c1794d9eb4d504416caf",
+    "tasks_sha256": "55445796b8deca312f2795721d6b45e0d4960afc506dc224572893901f596780",
+    "decision_template_sha256": "4a5c5a6468f3bd6b7461a771e22af61741d39ac18a3d0b18015722d38069528e",
+    "benchmark_schema_sha256": "524cbc2d9988289563777448180b19ccbb49b3861050169d12d1281a60dbcb27",
+    "provenance_schema_sha256": "1e61e374c83a2f967a5bb243af311aaf3d43113da763f1f415c0b666be2f54d7"
+  },
+  "invariants": {
+    "tasks": 386,
+    "unique_task_ids": 386,
+    "audited_image_references": 1544,
+    "training_overlap_paper_ids": 22,
+    "training_overlap_rows": 71,
+    "training_overlap_unique_samples": 70,
+    "queue_tasks_with_training_overlap": 74,
+    "pending_decisions": 386,
+    "blank_replacement_records": 386,
+    "minimum_primary_papers": 240
+  },
+  "status": "human_curation_required",
+  "assembly_completed": false,
+  "publication_ready": false
+}
