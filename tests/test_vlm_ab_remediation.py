@@ -173,6 +173,7 @@ def _prepare_bundle(
     duplicate_prompts: bool = False,
     contaminated_training: bool = False,
     require_gold: bool = False,
+    shared_image_bytes: bool = False,
 ) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     config = _config(n_items=n_items, require_gold=require_gold)
@@ -188,7 +189,11 @@ def _prepare_bundle(
             for image_index in range(images_per_row)
         ]
         for image_index, image in enumerate(images):
-            payload = f"image-{row_index}-{image_index}".encode()
+            payload = (
+                b"shared-image"
+                if shared_image_bytes
+                else f"image-{row_index}-{image_index}".encode()
+            )
             image_bytes[image] = payload
             (dataset / image).write_bytes(payload)
         rows.append(

@@ -5,6 +5,7 @@
 
 from .audit import audit_benchmark
 from .blind import build_blind_review_packages, deblind_reviews
+from .curator import generate_curator_workspace
 from .inference import run_inference
 from .stats import summarize_reviews
 
@@ -12,6 +13,7 @@ __all__ = [
     "audit_benchmark",
     "build_blind_review_packages",
     "deblind_reviews",
+    "generate_curator_workspace",
     "run_inference",
     "summarize_reviews",
 ]

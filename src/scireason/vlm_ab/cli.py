@@ -22,6 +22,7 @@ from typing import Any
 from .audit import canonical_paper_id, load_jsonl
 from .blind import build_blind_review_packages, deblind_reviews
 from .config import config_fingerprint, load_experiment_config
+from .curator import generate_curator_workspace
 from .inference import manifest_path_for, run_inference
 from .prepare import (
     PublicationGateError,
@@ -328,6 +329,19 @@ def command_curate_queue(
             root,
             "publication_provenance_row.schema.json",
         ),
+    )
+
+
+def command_curate_forms(
+    args: argparse.Namespace, config: dict[str, Any], root: Path
+) -> dict[str, Any]:
+    return generate_curator_workspace(
+        config,
+        args.prepare_manifest,
+        args.queue_manifest,
+        args.output_dir,
+        benchmark_schema=_remediation_schema(root, "publication_benchmark_row.schema.json"),
+        provenance_schema=_remediation_schema(root, "publication_provenance_row.schema.json"),
     )
 
 
@@ -1063,6 +1077,14 @@ def _parser() -> argparse.ArgumentParser:
     curate_queue.add_argument("--prepare-manifest", type=Path, required=True)
     curate_queue.add_argument("--output-dir", type=Path, required=True)
 
+    curate_forms = subparsers.add_parser(
+        "curate-forms",
+        help="Build a verified standalone offline curator form workspace.",
+    )
+    curate_forms.add_argument("--prepare-manifest", type=Path, required=True)
+    curate_forms.add_argument("--queue-manifest", type=Path, required=True)
+    curate_forms.add_argument("--output-dir", type=Path, required=True)
+
     curate_assemble = subparsers.add_parser(
         "curate-assemble",
         help="Validate complete curator decisions and stage a corrected release candidate.",
@@ -1115,6 +1137,7 @@ def main(argv: list[str] | None = None) -> int:
             "plan": command_plan,
             "prepare": command_prepare,
             "curate-queue": command_curate_queue,
+            "curate-forms": command_curate_forms,
             "curate-assemble": command_curate_assemble,
             "infer": command_infer,
             "blind": command_blind,

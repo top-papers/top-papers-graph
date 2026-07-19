@@ -155,6 +155,57 @@ decisions JSONL while leaving the queue directory unchanged. Every source row re
 retain/exclude disposition and two independent reviewer IDs. Retained records require complete
 replacement benchmark and provenance objects; patches and inferred defaults are rejected.
 
+Build the primary offline curator UI in a directory that is separate from, outside, and does not
+contain the immutable queue:
+
+```bash
+python experiments/vlm_ab_evaluation/run_pipeline.py \
+  --config experiments/vlm_ab_evaluation/configs/qwen3vl_scireason_remediation_audit_v2.yaml \
+  curate-forms \
+  --prepare-manifest runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/prepare_manifest.json \
+  --queue-manifest runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/curation_queue_v2_524cbc2d_hardened/queue_manifest.json \
+  --output-dir runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/curator_workspace_v2
+```
+
+Before distribution or first opening, run the exact `curate-forms` command above again. Idempotent
+generation accepts a byte-identical workspace; edited HTML, manifest, or copied images cause an
+error. Then record and distribute the expected integrity values:
+
+```bash
+sha256sum \
+  runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/curator_workspace_v2/workspace_manifest.json \
+  runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/curator_workspace_v2/curator.html
+python -c "import json; print(json.load(open('runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/curator_workspace_v2/workspace_manifest.json', encoding='utf-8'))['queue_fingerprint'])"
+```
+
+Experts compare those expected hashes and fingerprint with their handoff; the fingerprint is visibly
+printed in the HTML header. This is an external integrity procedure, not browser self-verification.
+Open `curator_workspace_v2/curator.html` directly in a browser. The workspace is fully offline, uses
+queue-fingerprint-bound local autosave, and previews copied audited source images without embedding
+their bytes in HTML. If local storage fails, the form remains usable in that tab and warns the expert
+to export drafts regularly.
+
+Each replacement-image section can select a verified local image and calculate lowercase SHA256 via
+Web Crypto while showing an in-tab preview. Selection never derives `image_path` from the filename
+and does not persist file bytes in local storage, drafts, HTML, or final JSONL. The curator must enter
+the canonical `assets/images/...` path and separately copy the exact selected bytes into
+`curated_dataset` at that path. If Web Crypto is unavailable, enter SHA256 manually; in every case
+`curate-assemble` remains responsible for matching the declaration to the staged file bytes.
+
+Assign disjoint `task_id` subsets to experts. Each expert completes only the assigned subset and uses
+**Export draft**. In one master workspace, the owner sequentially uses **Merge draft** for every
+received envelope. Blank incoming tasks do not erase work, equal nonblank tasks are no-ops, and a
+different nonblank task stops the entire merge without partial changes. Resolve conflicts with the
+experts before proceeding. The form intentionally does not import completed decisions JSONL because
+reconstructing form fields could lose arbitrary valid benchmark/provenance properties.
+
+After all subsets are merged, complete every task, confirm the independent-expert attestation for
+each decision, click **Export completed_decisions.jsonl**, and save that export as
+`runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2/completed_decisions.jsonl`. Manual editing of a
+copy of `decision_template.jsonl` is a fallback only. In both workflows the queue itself remains
+byte-identical, and `curate-assemble` below is the final authority for schemas, image bytes, and the
+scientific release gates; browser validation does not replace it.
+
 After curators stage verified image bytes under a separate dataset root:
 
 ```bash

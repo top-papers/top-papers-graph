@@ -66,6 +66,7 @@ python -m pip install -e ".[vlm_ab,dev]"
 $Config = "experiments/vlm_ab_evaluation/configs/qwen3vl_scireason_remediation_audit_v2.yaml"
 $Run = "runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2"
 $Queue = "$Run/curation_queue_v2_524cbc2d_hardened"
+$Forms = "$Run/curator_workspace_v2"
 $Decisions = "$Run/completed_decisions.jsonl"
 $Curated = "$Run/curated_dataset"
 $Candidate = "$Run/release_candidate"
@@ -95,21 +96,67 @@ Get-ChildItem -LiteralPath $Queue -Force
 `queue_manifest.json`, `tasks.jsonl`, `decision_template.jsonl`. Любое расхождение означает, что
 курацию нужно остановить и восстановить byte-identical очередь из доверенного архива.
 
-## 5. Создание отдельного файла решений
+## 5. Создание offline curator workspace
 
-Эта операция выполняется один раз. Она создает рабочую копию пустого шаблона вне queue directory.
+Основной путь курации -- автономная HTML-форма. Команда повторно проверяет prepare bundle и все три
+неизменяемых queue-файла, затем атомарно создает отдельный workspace с HTML и дедуплицированными
+копиями доступных audited source images:
 
 ```powershell
-if (Test-Path -LiteralPath $Decisions) {
-    throw "completed_decisions.jsonl already exists; do not overwrite curator work"
-}
-Copy-Item -LiteralPath "$Queue/decision_template.jsonl" -Destination $Decisions
+python experiments/vlm_ab_evaluation/run_pipeline.py `
+  --config $Config `
+  curate-forms `
+  --prepare-manifest "$Run/prepare_manifest.json" `
+  --queue-manifest "$Queue/queue_manifest.json" `
+  --output-dir $Forms
+
+# Перед раздачей или каждым первым открытием повторить буквально ту же команду.
+python experiments/vlm_ab_evaluation/run_pipeline.py `
+  --config $Config `
+  curate-forms `
+  --prepare-manifest "$Run/prepare_manifest.json" `
+  --queue-manifest "$Queue/queue_manifest.json" `
+  --output-dir $Forms
+
+(Get-FileHash -Algorithm SHA256 "$Forms/workspace_manifest.json").Hash.ToLowerInvariant()
+(Get-FileHash -Algorithm SHA256 "$Forms/curator.html").Hash.ToLowerInvariant()
+Get-Content -Raw "$Forms/workspace_manifest.json"
+
+Start-Process "$Forms/curator.html"
 New-Item -ItemType Directory -Path $Curated
 ```
 
-При параллельной работе curator assignments следует вести по `task_id` во внешнем журнале. Нельзя
-разрешать нескольким людям одновременно перезаписывать общий JSONL. Перед assembly все решения
-объединяются в один файл: одна строка на каждый из 386 `task_id`, без дубликатов и пропусков.
+Повторная генерация принимает только byte-identical workspace. Любое изменение HTML, manifest или
+скопированного изображения приводит к ошибке; такой workspace нельзя раздавать или открывать до
+восстановления в новом чистом каталоге. Release owner передает экспертам ожидаемые SHA256 manifest и
+HTML, а также `queue_fingerprint` из manifest. Тот же fingerprint виден в header HTML для сверки.
+Это внешняя сверка: browser сам криптографически workspace не проверяет.
+
+HTML не обращается к сети. Он сохраняет draft в browser `localStorage`, связанный с queue fingerprint;
+если storage недоступен, форма продолжает работать в текущей вкладке и требует регулярно нажимать
+**Export draft**. Каждый эксперт заполняет только назначенное ему подмножество `task_id` и передает
+owner свой draft envelope. Owner в одном master workspace последовательно выбирает **Merge draft**.
+Пустые записи не стирают работу, одинаковые непустые записи являются no-op, а разные непустые записи
+для одного `task_id` останавливают весь import без частичных изменений. Конфликт нужно разрешить
+экспертами, а не перезаписью.
+
+После merge всех subsets и заполнения всех 386 задач owner нажимает
+**Export completed_decisions.jsonl** и помещает файл в `$Decisions`. Форма не импортирует final JSONL:
+такое обратное преобразование потеряло бы произвольные допустимые benchmark/provenance поля.
+Финальный export содержит строки в исходном порядке и все immutable bindings. Browser validation не
+заменяет серверную проверку последующим `curate-assemble`.
+
+В секции каждого изображения кнопка **Выбрать проверенный файл и вычислить SHA256** читает выбранный
+локальный файл через Web Crypto, заполняет lowercase SHA256 и показывает локальный preview. Bytes и
+сам файл не сохраняются в draft или JSONL, а имя файла никогда не подставляется в `image_path`.
+Эксперт отдельно задаёт canonical `assets/images/...` path и отдельно копирует ровно выбранные bytes
+в `$Curated` по этому пути. Если Web Crypto недоступен, SHA256 вводится вручную и затем всё равно
+проверяется `curate-assemble` по файлу в `$Curated`.
+
+Assignments следует вести по `task_id` во внешнем журнале. Нельзя разрешать нескольким людям
+одновременно перезаписывать общий JSONL. Ручное копирование `decision_template.jsonl` и редактирование
+JSONL остается только аварийным fallback; при нем итог также должен содержать ровно 386 задач без
+дубликатов и пропусков, а queue directory не изменяется.
 
 ## 6. Как читать задачу curator
 
@@ -284,6 +331,8 @@ Curators изменяют только `status`, `disposition`, `exclusion_reaso
 - Каждый path начинается с `assets/images/`, является POSIX-normalized и не содержит `..`, drive,
   URI, backslash или Windows aliases.
 - Файл находится в `$Curated` по этому относительному path.
+- Автоматический SHA256 в форме не копирует файл: выбранные bytes нужно отдельно поместить в
+  `$Curated` по введённому `image_path`.
 - `sha256` вычислен по фактическим bytes и записан lowercase.
 - `page` и `locator` позволяют независимо найти evidence в статье.
 - `source_url` является проверенным HTTP(S) URL конкретного источника.
@@ -302,7 +351,7 @@ Curators изменяют только `status`, `disposition`, `exclusion_reaso
 
 ## 9. Контроль прогресса и assembly
 
-Сводка по рабочему decisions JSONL:
+После browser export можно проверить сводку decisions JSONL:
 
 ```powershell
 python -c "import collections,json,pathlib,sys; rows=[json.loads(x) for x in pathlib.Path(sys.argv[1]).read_text(encoding='utf-8').splitlines() if x.strip()]; print('rows',len(rows)); print('status',collections.Counter(r['status'] for r in rows)); print('disposition',collections.Counter(str(r['disposition']) for r in rows))" $Decisions
@@ -545,6 +594,7 @@ source tree, power assumptions или inputs меняются после `plan`,
 
 ```powershell
 python -m pytest `
+  tests/test_vlm_ab_curator.py `
   tests/test_vlm_ab_audit.py `
   tests/test_vlm_ab_blind.py `
   tests/test_vlm_ab_inference.py `
@@ -553,6 +603,7 @@ python -m pytest `
   tests/test_vlm_ab_stats.py -q
 
 python -m ruff check src/scireason/vlm_ab `
+  tests/test_vlm_ab_curator.py `
   tests/test_vlm_ab_audit.py `
   tests/test_vlm_ab_blind.py `
   tests/test_vlm_ab_inference.py `
@@ -725,6 +776,6 @@ analysis/deblinded_reviews.jsonl
 
 ## 20. Фактический следующий шаг
 
-Сейчас нужно открыть `tasks.jsonl`, распределить 386 задач между curators и начать заполнять
-отдельный `completed_decisions.jsonl`. До завершения human curation, успешного `curate-assemble` и
-публикации `B`, `R`, `M` strict inference запускать нельзя.
+Сейчас нужно сгенерировать `curate-forms` workspace, открыть `curator.html`, распределить 386 задач
+между curators и экспортировать полный `completed_decisions.jsonl`. До завершения human curation,
+успешного `curate-assemble` и публикации `B`, `R`, `M` strict inference запускать нельзя.
