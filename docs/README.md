@@ -33,4 +33,5 @@
 - [GNN](gnn.md)
 - [SciDataPipe bridge](scidatapipe_bridge.md)
 - [Agents4Science submission](agents4science_submission_tutorial.md)
+- [Capacity-150: заполнение enrichment-форм](vlm_ab_capacity_enrichment_tutorial_ru.md)
 - [Масштабирование экспертного участия](expert_scaling_playbook.md)
