@@ -1,0 +1,1251 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+"""Rendered Kaggle script for one verified FP16-primary or NF4-sensitivity arm."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import traceback
+import zipfile
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+
+ARM = __ARM_JSON__
+WORKFLOW_MODE = __WORKFLOW_MODE_JSON__
+PAYLOAD_DATASET_SLUG = __PAYLOAD_DATASET_SLUG_JSON__
+STATE_DATASET_SLUG = __STATE_DATASET_SLUG_JSON__
+PAYLOAD_MANIFEST_SHA256 = __PAYLOAD_MANIFEST_SHA256_JSON__
+STATE_MANIFEST_SHA256 = __STATE_MANIFEST_SHA256_JSON__
+EXECUTION_LOCK_SHA256 = __EXECUTION_LOCK_SHA256_JSON__
+CONFIG_RELATIVE = __CONFIG_RELATIVE_JSON__
+INPUT_ROOT = Path("/kaggle/input")
+WORKING_ROOT = Path("/kaggle/working")
+REPO_ROOT = WORKING_ROOT / "top-papers-graph"
+EXPORT_ROOT = WORKING_ROOT / "kaggle_export"
+CACHE_ROOT = WORKING_ROOT / "hf-cache"
+MATERIALIZED_ROOT = WORKING_ROOT / "verified-inputs"
+MAX_ARCHIVE_BYTES = 50 * 1024 * 1024 * 1024
+MAX_ARCHIVE_FILES = 100_000
+MAX_COMPRESSION_RATIO = 1_000
+MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+PRECISION_MODES = {"fp16-primary", "nf4-sensitivity"}
+
+if WORKFLOW_MODE not in PRECISION_MODES:
+    raise RuntimeError(f"unsupported Kaggle precision mode: {WORKFLOW_MODE!r}")
+if re.fullmatch(r"[0-9a-f]{64}", PAYLOAD_MANIFEST_SHA256) is None:
+    raise RuntimeError("rendered payload manifest SHA256 is invalid")
+if re.fullmatch(r"[0-9a-f]{64}", EXECUTION_LOCK_SHA256) is None:
+    raise RuntimeError("rendered execution-lock SHA256 is invalid")
+if ARM == "base" and (STATE_DATASET_SLUG or STATE_MANIFEST_SHA256):
+    raise RuntimeError("base kernel must not configure a parent state")
+if ARM == "tuned" and (
+    not STATE_DATASET_SLUG or re.fullmatch(r"[0-9a-f]{64}", STATE_MANIFEST_SHA256) is None
+):
+    raise RuntimeError("tuned kernel requires an exact parent-state manifest SHA256")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON number is forbidden: {value}")
+
+
+def _object_without_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def strict_json_loads(text: str) -> Any:
+    return json.loads(
+        text,
+        object_pairs_hook=_object_without_duplicate_keys,
+        parse_constant=_reject_json_constant,
+    )
+
+
+def read_object(path: Path) -> dict[str, Any]:
+    value = strict_json_loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise RuntimeError(f"JSON object required: {path}")
+    return value
+
+
+def _safe_relative(relative: str) -> PurePosixPath:
+    if not isinstance(relative, str) or not relative or "\\" in relative:
+        raise RuntimeError(f"unsafe manifest/archive path: {relative!r}")
+    path = PurePosixPath(relative)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or "." in path.parts
+        or any(":" in part for part in path.parts)
+    ):
+        raise RuntimeError(f"unsafe manifest/archive path: {relative!r}")
+    if path.as_posix() != relative or any(not part for part in path.parts):
+        raise RuntimeError(f"non-canonical manifest/archive path: {relative!r}")
+    return path
+
+
+def safe_file(root: Path, relative: str) -> Path:
+    relative_path = _safe_relative(relative)
+    current = root
+    for part in relative_path.parts:
+        current = current / part
+        if current.is_symlink():
+            raise RuntimeError(f"path traverses a symlink: {relative}")
+    candidate = current.resolve(strict=True)
+    try:
+        candidate.relative_to(root.resolve(strict=True))
+    except ValueError as exc:
+        raise RuntimeError(f"path escapes root: {relative}") from exc
+    if not candidate.is_file():
+        raise RuntimeError(f"path is not a regular file: {relative}")
+    return candidate
+
+
+def inventory_map(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries or len(entries) > MAX_ARCHIVE_FILES:
+        raise RuntimeError("manifest inventory is empty or too large")
+    declared: dict[str, dict[str, Any]] = {}
+    total = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError("malformed inventory entry")
+        relative = entry.get("path")
+        expected_hash = entry.get("sha256")
+        size = entry.get("size")
+        if not isinstance(relative, str):
+            raise RuntimeError("inventory path must be a string")
+        _safe_relative(relative)
+        if relative in declared:
+            raise RuntimeError(f"duplicate inventory path: {relative}")
+        if (
+            not isinstance(expected_hash, str)
+            or len(expected_hash) != 64
+            or any(char not in "0123456789abcdef" for char in expected_hash)
+        ):
+            raise RuntimeError(f"invalid inventory SHA256: {relative}")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise RuntimeError(f"invalid inventory size: {relative}")
+        total += size
+        if total > MAX_ARCHIVE_BYTES:
+            raise RuntimeError("declared inventory exceeds extraction limit")
+        declared[relative] = entry
+    paths = set(declared)
+    for relative in paths:
+        parts = PurePosixPath(relative).parts
+        for index in range(1, len(parts)):
+            ancestor = "/".join(parts[:index])
+            if ancestor in paths:
+                raise RuntimeError(
+                    f"manifest file path is also an ancestor of another file: {ancestor}"
+                )
+    return declared
+
+
+def verify_inventory(root: Path, manifest: dict[str, Any]) -> None:
+    declared = inventory_map(manifest)
+    all_paths = list(root.rglob("*"))
+    if any(path.is_symlink() for path in all_paths):
+        raise RuntimeError("materialized input contains a symlink")
+    actual = {path.relative_to(root).as_posix() for path in all_paths if path.is_file()}
+    if actual != set(declared):
+        raise RuntimeError("materialized input differs from the full manifest inventory")
+    for relative, entry in declared.items():
+        path = safe_file(root, relative)
+        if path.stat().st_size != entry["size"] or sha256_file(path) != entry["sha256"]:
+            raise RuntimeError(f"materialized inventory mismatch: {relative}")
+
+
+def _write_verified_stream(source: Any, destination: Path, entry: dict[str, Any]) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    written = 0
+    with destination.open("xb") as output:
+        while True:
+            block = source.read(1024 * 1024)
+            if not block:
+                break
+            written += len(block)
+            if written > entry["size"]:
+                raise RuntimeError(f"extracted file exceeds declared size: {entry['path']}")
+            digest.update(block)
+            output.write(block)
+    if written != entry["size"] or digest.hexdigest() != entry["sha256"]:
+        raise RuntimeError(f"extracted file mismatch: {entry['path']}")
+
+
+def extract_verified_zip(
+    archive: Path,
+    destination: Path,
+    declared: dict[str, dict[str, Any]],
+    prefix: str = "",
+) -> None:
+    seen_raw: set[str] = set()
+    seen_files: set[str] = set()
+    expected_ancestors = {
+        ancestor
+        for relative in declared
+        for ancestor in [
+            "/".join(PurePosixPath(relative).parts[:index])
+            for index in range(1, len(PurePosixPath(relative).parts))
+        ]
+    }
+    with zipfile.ZipFile(archive) as bundle:
+        infos = bundle.infolist()
+        if len(infos) > MAX_ARCHIVE_FILES * 2:
+            raise RuntimeError(f"archive has too many entries: {archive}")
+        validated_files: list[tuple[zipfile.ZipInfo, str, dict[str, Any]]] = []
+        for info in infos:
+            raw = info.filename
+            if raw in seen_raw:
+                raise RuntimeError(f"duplicate ZIP entry: {raw}")
+            seen_raw.add(raw)
+            canonical_raw = raw[:-1] if info.is_dir() and raw.endswith("/") else raw
+            raw_path = _safe_relative(canonical_raw)
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == stat.S_IFLNK:
+                raise RuntimeError(f"ZIP symlink is forbidden: {raw}")
+            if info.flag_bits & 0x1:
+                raise RuntimeError(f"encrypted ZIP entry is forbidden: {raw}")
+            relative = PurePosixPath(prefix, *raw_path.parts).as_posix() if prefix else raw_path.as_posix()
+            if info.is_dir():
+                if relative not in expected_ancestors:
+                    raise RuntimeError(f"undeclared ZIP directory: {relative}")
+                continue
+            entry = declared.get(relative)
+            if entry is None:
+                raise RuntimeError(f"undeclared ZIP file: {relative}")
+            if relative in seen_files:
+                raise RuntimeError(f"duplicate materialized path: {relative}")
+            if info.file_size != entry["size"]:
+                raise RuntimeError(f"ZIP size differs from manifest: {relative}")
+            if (
+                info.file_size > 1024 * 1024
+                and info.file_size > max(info.compress_size, 1) * MAX_COMPRESSION_RATIO
+            ):
+                raise RuntimeError(f"suspicious ZIP compression ratio: {relative}")
+            validated_files.append((info, relative, entry))
+            seen_files.add(relative)
+        if seen_files != set(declared):
+            raise RuntimeError(f"ZIP inventory is incomplete: {archive}")
+        total_size = sum(info.file_size for info, _relative, _entry in validated_files)
+        total_compressed = sum(
+            max(info.compress_size, 1) for info, _relative, _entry in validated_files
+        )
+        if total_size > MAX_ARCHIVE_BYTES:
+            raise RuntimeError(f"archive exceeds extraction limit: {archive}")
+        if total_size > 1024 * 1024 and total_size > total_compressed * MAX_COMPRESSION_RATIO:
+            raise RuntimeError(f"suspicious aggregate ZIP compression ratio: {archive}")
+        for info, relative, entry in validated_files:
+            with bundle.open(info) as source:
+                _write_verified_stream(source, destination / relative, entry)
+
+
+def copy_verified_directory(
+    source_root: Path,
+    destination: Path,
+    declared: dict[str, dict[str, Any]],
+    prefix: str = "",
+) -> None:
+    all_paths = list(source_root.rglob("*"))
+    if any(path.is_symlink() for path in all_paths):
+        raise RuntimeError(f"unpacked input contains a symlink: {source_root}")
+    actual: dict[str, Path] = {}
+    for source in all_paths:
+        if not source.is_file():
+            continue
+        raw = source.relative_to(source_root).as_posix()
+        relative = PurePosixPath(prefix, raw).as_posix() if prefix else raw
+        if relative in actual:
+            raise RuntimeError(f"duplicate unpacked path: {relative}")
+        actual[relative] = source
+    if set(actual) != set(declared):
+        raise RuntimeError(f"unpacked directory differs from manifest: {source_root}")
+    for relative, source in actual.items():
+        entry = declared[relative]
+        if source.stat().st_size != entry["size"] or sha256_file(source) != entry["sha256"]:
+            raise RuntimeError(f"unpacked file mismatch: {relative}")
+        destination_path = destination / relative
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        with source.open("rb") as input_file:
+            _write_verified_stream(input_file, destination_path, entry)
+
+
+def _materialize_group(
+    dataset_root: Path,
+    group: str,
+    destination: Path,
+    declared: dict[str, dict[str, Any]],
+    prefix: str = "",
+) -> None:
+    archive = dataset_root / f"{group}.zip"
+    directory = dataset_root / group
+    if archive.exists() and directory.exists():
+        raise RuntimeError(f"ambiguous zip and unpacked layouts for {group}")
+    if archive.is_symlink() or directory.is_symlink():
+        raise RuntimeError(f"input layout uses a symlink: {group}")
+    if archive.is_file():
+        extract_verified_zip(archive, destination, declared, prefix)
+    elif directory.is_dir():
+        copy_verified_directory(directory, destination, declared, prefix)
+    else:
+        raise RuntimeError(f"missing zip/unpacked input group: {group}")
+
+
+def materialize_payload(manifest_path: Path, manifest: dict[str, Any]) -> Path:
+    dataset_root = manifest_path.parent
+    allowed = {"payload_manifest.json", "dataset-metadata.json", "payload.zip", "payload"}
+    physical = {path.name for path in dataset_root.iterdir()}
+    if not physical.issubset(allowed):
+        raise RuntimeError("payload dataset contains undeclared top-level files")
+    destination = MATERIALIZED_ROOT / "payload"
+    destination.mkdir(parents=True)
+    _materialize_group(dataset_root, "payload", destination, inventory_map(manifest))
+    verify_inventory(destination, manifest)
+    return destination
+
+
+def materialize_state(manifest_path: Path, manifest: dict[str, Any]) -> Path:
+    dataset_root = manifest_path.parent
+    destination = MATERIALIZED_ROOT / "state"
+    destination.mkdir(parents=True)
+    declared = inventory_map(manifest)
+    grouped: set[str] = set()
+    for group in ("predictions", "runtime"):
+        subset = {path: entry for path, entry in declared.items() if path.startswith(f"{group}/")}
+        if subset:
+            _materialize_group(dataset_root, group, destination, subset, group)
+            grouped.update(subset)
+        elif (dataset_root / group).exists() or (dataset_root / f"{group}.zip").exists():
+            raise RuntimeError(f"state contains undeclared group: {group}")
+    for relative, entry in declared.items():
+        if relative in grouped:
+            continue
+        if "/" in relative:
+            raise RuntimeError(f"state path has no controlled archive group: {relative}")
+        source = safe_file(dataset_root, relative)
+        if source.stat().st_size != entry["size"] or sha256_file(source) != entry["sha256"]:
+            raise RuntimeError(f"state root file mismatch: {relative}")
+        with source.open("rb") as input_file:
+            _write_verified_stream(input_file, destination / relative, entry)
+    allowed_top = {
+        "state_manifest.json",
+        "dataset-metadata.json",
+        "predictions.zip",
+        "predictions",
+        "runtime.zip",
+        "runtime",
+        "inference_summary.json",
+    }
+    physical_entries = {path.name for path in dataset_root.iterdir()}
+    if not physical_entries.issubset(allowed_top):
+        raise RuntimeError("state dataset contains undeclared top-level files")
+    verify_inventory(destination, manifest)
+    return destination
+
+
+def find_unique_manifest(name: str, expected_slug: str, expected_sha256: str) -> Path:
+    valid = []
+    for path in sorted(INPUT_ROOT.glob(f"*/{name}")):
+        try:
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or path.stat().st_size > MAX_MANIFEST_BYTES
+                or sha256_file(path) != expected_sha256
+            ):
+                continue
+        except OSError:
+            continue
+        if read_object(path).get("dataset_slug") == expected_slug:
+            valid.append(path)
+    if len(valid) != 1:
+        raise RuntimeError(
+            f"expected exactly one hash-locked {name} for {expected_slug}, found {len(valid)}"
+        )
+    return valid[0]
+
+
+def check_t4x2() -> dict[str, Any]:
+    result = subprocess.run(
+        ["nvidia-smi", "--query-gpu=name,uuid", "--format=csv,noheader"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout, flush=True)
+    rows = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    names = [line.split(",", 1)[0].strip() for line in rows]
+    if len(names) != 2 or any(
+        re.fullmatch(r"(?:NVIDIA )?(?:TESLA )?T4", name.upper()) is None for name in names
+    ):
+        raise RuntimeError(f"runtime requires exactly two NVIDIA T4 GPUs, got {names}")
+    import torch
+
+    if torch.cuda.device_count() != 2:
+        raise RuntimeError(f"torch sees {torch.cuda.device_count()} GPUs instead of two")
+    return {
+        "torch": torch.__version__,
+        "cuda": torch.version.cuda,
+        "gpu_names": names,
+        "gpu_count": torch.cuda.device_count(),
+    }
+
+
+def state_path_allowed(relative: str) -> bool:
+    path = Path(relative)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    if len(path.parts) == 2 and path.parts[0] == "predictions":
+        return path.name.endswith((".jsonl", ".manifest.json", ".summary.json"))
+    if relative == "inference_summary.json":
+        return True
+    return len(path.parts) == 2 and path.parts[0] == "runtime" and path.suffix in {
+        ".json",
+        ".log",
+        ".txt",
+    }
+
+
+def expected_result_scope() -> str:
+    return (
+        "publication_candidate"
+        if WORKFLOW_MODE == "fp16-primary"
+        else "automatic_sensitivity_only"
+    )
+
+
+def required_complete_paths(arm: str) -> set[str]:
+    arms = ("base",) if arm == "base" else ("base", "tuned")
+    paths = {"inference_summary.json"}
+    for selected in arms:
+        paths.update(
+            {
+                f"predictions/{selected}.jsonl",
+                f"predictions/{selected}.jsonl.manifest.json",
+                f"predictions/{selected}.summary.json",
+            }
+        )
+    paths.update(
+        {
+            "runtime/environment.json",
+            "runtime/pip-freeze.txt",
+            "runtime/install.log",
+            "runtime/editable-install.log",
+            "runtime/pip-check.log",
+            f"runtime/infer-{arm}.log",
+        }
+    )
+    return paths
+
+
+def validate_complete_sidecar(
+    output_root: Path,
+    arm: str,
+    *,
+    expected_predictions: dict[tuple[str, str], dict[str, Any]],
+    expected_rows: int | None = None,
+    expected_run_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    sidecar_path = output_root / "predictions" / f"{arm}.jsonl.manifest.json"
+    output_path = output_root / "predictions" / f"{arm}.jsonl"
+    sidecar = read_object(sidecar_path)
+    expected = sidecar.get("expected_rows")
+    if (
+        sidecar.get("status") != "complete"
+        or sidecar.get("arm") != arm
+        or sidecar.get("backend") != "transformers"
+        or sidecar.get("result_scope") != expected_result_scope()
+        or sidecar.get("limit") is not None
+        or isinstance(expected, bool)
+        or not isinstance(expected, int)
+        or expected <= 0
+        or (expected_rows is not None and expected != expected_rows)
+        or isinstance(sidecar.get("completed_rows"), bool)
+        or not isinstance(sidecar.get("completed_rows"), int)
+        or isinstance(sidecar.get("successful_rows"), bool)
+        or not isinstance(sidecar.get("successful_rows"), int)
+        or isinstance(sidecar.get("error_rows"), bool)
+        or not isinstance(sidecar.get("error_rows"), int)
+        or sidecar.get("completed_rows") != expected
+        or sidecar.get("successful_rows") != expected
+        or sidecar.get("error_rows") != 0
+        or not output_path.is_file()
+        or output_path.is_symlink()
+        or sha256_file(output_path) != sidecar.get("output_sha256")
+    ):
+        raise RuntimeError(f"{arm} prediction sidecar is not complete and error-free")
+    for field in (
+        "experiment_fingerprint",
+        "input_fingerprint",
+        "protocol_fingerprint",
+        "config_fingerprint",
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", str(sidecar.get(field) or "")) is None:
+            raise RuntimeError(f"{arm} prediction sidecar has invalid {field}")
+    if (
+        expected_run_fingerprint is not None
+        and sidecar.get("experiment_fingerprint") != expected_run_fingerprint
+    ):
+        raise RuntimeError(f"{arm} prediction sidecar belongs to another prepared run")
+    if len(expected_predictions) != expected:
+        raise RuntimeError(f"{arm} expected prediction key set has the wrong size")
+    from scireason.vlm_ab.inference import _validate_existing_row
+
+    seen: set[tuple[str, str]] = set()
+    conditions = sidecar.get("conditions")
+    if (
+        not isinstance(conditions, list)
+        or not conditions
+        or any(not isinstance(value, str) or not value for value in conditions)
+        or len(set(conditions)) != len(conditions)
+        or expected % len(conditions) != 0
+    ):
+        raise RuntimeError(f"{arm} prediction sidecar has invalid conditions")
+    samples: dict[str, set[str]] = {}
+    row_count = 0
+    with output_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                raise RuntimeError(f"{arm} prediction JSONL has a blank row at {line_number}")
+            try:
+                row = strict_json_loads(line)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"{arm} prediction JSONL has invalid JSON at row {line_number}"
+                ) from exc
+            if not isinstance(row, dict):
+                raise RuntimeError(f"{arm} prediction row {line_number} is not an object")
+            try:
+                _validate_existing_row(
+                    row,
+                    line_number,
+                    expected_predictions,
+                    arm,
+                    str(sidecar["backend"]),
+                    str(sidecar["protocol_fingerprint"]),
+                    str(sidecar["config_fingerprint"]),
+                )
+            except (RuntimeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"{arm} prediction row {line_number} violates the strict output schema: {exc}"
+                ) from exc
+            sample_id = row.get("sample_id")
+            condition = row.get("condition")
+            if not isinstance(sample_id, str) or not sample_id or not isinstance(condition, str) or not condition:
+                raise RuntimeError(f"{arm} prediction row {line_number} has no sample/condition key")
+            key = (sample_id, condition)
+            if key in seen:
+                raise RuntimeError(f"{arm} prediction JSONL contains a duplicate key: {key}")
+            if condition not in conditions:
+                raise RuntimeError(f"{arm} prediction row {line_number} has an unknown condition")
+            seen.add(key)
+            samples.setdefault(sample_id, set()).add(condition)
+            if (
+                row.get("arm") != arm
+                or row.get("backend") != sidecar.get("backend")
+                or row.get("status") != "success"
+                or row.get("error") is not None
+                or row.get("protocol_fingerprint") != sidecar.get("protocol_fingerprint")
+                or row.get("config_fingerprint") != sidecar.get("config_fingerprint")
+            ):
+                raise RuntimeError(f"{arm} prediction row {line_number} differs from its sidecar")
+            row_count += 1
+    if row_count != expected:
+        raise RuntimeError(f"{arm} prediction JSONL row count differs from its sidecar")
+    expected_conditions = set(conditions)
+    if len(samples) != expected // len(conditions) or any(
+        observed != expected_conditions for observed in samples.values()
+    ):
+        raise RuntimeError(f"{arm} prediction JSONL does not cover every sample/condition pair")
+    return sidecar
+
+
+def validate_arm_summary(
+    output_root: Path,
+    arm: str,
+    sidecar: dict[str, Any],
+    embedded: Any,
+) -> dict[str, Any]:
+    summary = read_object(output_root / "predictions" / f"{arm}.summary.json")
+    if embedded != summary:
+        raise RuntimeError(f"{arm} arm summary differs from inference_summary.json")
+    expected = sidecar["expected_rows"]
+    existing = summary.get("existing_rows")
+    written = summary.get("written_rows")
+    summary_expected = summary.get("expected_rows")
+    successful = summary.get("successful_rows")
+    errors = summary.get("error_rows")
+    if (
+        summary.get("config_fingerprint") != sidecar.get("config_fingerprint")
+        or summary.get("protocol_fingerprint") != sidecar.get("protocol_fingerprint")
+        or isinstance(summary_expected, bool)
+        or not isinstance(summary_expected, int)
+        or summary_expected != expected
+        or isinstance(successful, bool)
+        or not isinstance(successful, int)
+        or successful != expected
+        or isinstance(errors, bool)
+        or not isinstance(errors, int)
+        or errors != 0
+        or summary.get("output_sha256") != sidecar.get("output_sha256")
+        or isinstance(existing, bool)
+        or not isinstance(existing, int)
+        or existing < 0
+        or isinstance(written, bool)
+        or not isinstance(written, int)
+        or written < 0
+        or existing + written != expected
+    ):
+        raise RuntimeError(f"{arm} arm summary differs from its complete prediction sidecar")
+    return summary
+
+
+def validate_inference_summary(
+    output_root: Path,
+    arm: str,
+    config_fingerprint: str,
+    run_fingerprint: str,
+    protocol_fingerprint: str,
+    sidecars: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    summary = read_object(output_root / "inference_summary.json")
+    expected_arms = {"base"} if arm == "base" else {"base", "tuned"}
+    arms = summary.get("arms")
+    if (
+        summary.get("experiment_config_fingerprint") != config_fingerprint
+        or summary.get("run_fingerprint") != run_fingerprint
+        or summary.get("protocol_fingerprint") != protocol_fingerprint
+        or summary.get("precision_mode") != WORKFLOW_MODE
+        or summary.get("result_scope") != expected_result_scope()
+        or summary.get("exploratory") is not False
+        or not isinstance(arms, dict)
+        or set(arms) != expected_arms
+        or set(sidecars) != expected_arms
+        or (arm == "tuned" and not isinstance(summary.get("automatic_metrics"), dict))
+    ):
+        raise RuntimeError("inference summary is not bound to the exact completed workflow")
+    for selected in sorted(expected_arms):
+        validate_arm_summary(output_root, selected, sidecars[selected], arms[selected])
+    if arm == "tuned":
+        rows = []
+        for selected in ("base", "tuned"):
+            path = output_root / "predictions" / f"{selected}.jsonl"
+            with path.open("r", encoding="utf-8") as handle:
+                rows.extend(strict_json_loads(line) for line in handle if line.strip())
+        from scireason.vlm_ab.reporting import automatic_output_metrics
+
+        if summary["automatic_metrics"] != automatic_output_metrics(rows):
+            raise RuntimeError("automatic metrics differ from the completed prediction rows")
+    return summary
+
+
+def validate_runtime_environment(
+    state_root: Path,
+    arm: str,
+    config_fingerprint: str,
+    execution_lock_sha256: str,
+    state_manifest_sha256: str | None,
+) -> dict[str, Any]:
+    runtime = read_object(state_root / "runtime" / "environment.json")
+    expected_state_slug = STATE_DATASET_SLUG if arm == "tuned" else ""
+    expected_bitsandbytes = "0.48.1" if WORKFLOW_MODE == "nf4-sensitivity" else None
+    names = runtime.get("gpu_names")
+    if (
+        runtime.get("arm") != arm
+        or runtime.get("workflow_mode") != WORKFLOW_MODE
+        or runtime.get("payload_dataset_slug") != PAYLOAD_DATASET_SLUG
+        or runtime.get("state_dataset_slug") != expected_state_slug
+        or runtime.get("config_fingerprint") != config_fingerprint
+        or runtime.get("payload_manifest_sha256") != PAYLOAD_MANIFEST_SHA256
+        or runtime.get("state_manifest_sha256") != state_manifest_sha256
+        or runtime.get("execution_lock_sha256") != execution_lock_sha256
+        or runtime.get("gpu_count") != 2
+        or not isinstance(names, list)
+        or len(names) != 2
+        or any(
+            re.fullmatch(r"(?:NVIDIA )?(?:TESLA )?T4", str(name).upper()) is None
+            for name in names
+        )
+        or not isinstance(runtime.get("torch"), str)
+        or not isinstance(runtime.get("torch_after_install"), str)
+        or runtime.get("bitsandbytes") != expected_bitsandbytes
+    ):
+        raise RuntimeError(f"{arm} runtime environment is not bound to the exact execution")
+    return runtime
+
+
+def compare_base_runtime(
+    state_root: Path,
+    current_runtime: dict[str, Any],
+    current_runtime_dir: Path,
+) -> None:
+    base_runtime = read_object(safe_file(state_root, "runtime/environment.json"))
+    for key in (
+        "torch",
+        "cuda",
+        "gpu_names",
+        "gpu_count",
+        "torch_after_install",
+        "bitsandbytes",
+        "workflow_mode",
+    ):
+        if base_runtime.get(key) != current_runtime.get(key):
+            raise RuntimeError(f"base/tuned runtime mismatch: {key}")
+    base_freeze = safe_file(state_root, "runtime/pip-freeze.txt")
+    current_freeze = safe_file(current_runtime_dir, "pip-freeze.txt")
+    if base_freeze.read_bytes() != current_freeze.read_bytes():
+        raise RuntimeError("base/tuned transitive package environments differ")
+
+
+def overlay_state(
+    output_dir: Path,
+    config_fingerprint: str,
+    current_runtime: dict[str, Any],
+    current_runtime_dir: Path,
+    expected_rows: int,
+    expected_run_fingerprint: str,
+    expected_predictions: dict[tuple[str, str], dict[str, Any]],
+) -> str | None:
+    if not STATE_DATASET_SLUG:
+        return None
+    if ARM != "tuned":
+        raise RuntimeError("base partial-state resume is not supported by this workflow")
+    manifest_path = find_unique_manifest(
+        "state_manifest.json", STATE_DATASET_SLUG, STATE_MANIFEST_SHA256
+    )
+    manifest = read_object(manifest_path)
+    if (
+        manifest.get("artifact_version") != 4
+        or manifest.get("dataset_slug") != STATE_DATASET_SLUG
+        or manifest.get("config_fingerprint") != config_fingerprint
+        or manifest.get("complete") is not True
+        or manifest.get("kernel_succeeded") is not True
+        or manifest.get("base_state_complete") is not True
+        or manifest.get("arm") != "base"
+        or manifest.get("workflow_mode") != WORKFLOW_MODE
+        or manifest.get("payload_manifest_sha256") != PAYLOAD_MANIFEST_SHA256
+        or manifest.get("parent_state_manifest_sha256") is not None
+        or manifest.get("run_fingerprint") != expected_run_fingerprint
+        or manifest.get("result_scope") != expected_result_scope()
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(manifest.get("execution_lock_sha256") or "")
+        )
+        is None
+    ):
+        raise RuntimeError("tuned arm requires the exact complete base state dataset")
+    if set(inventory_map(manifest)) != required_complete_paths("base"):
+        raise RuntimeError("base state manifest does not declare the exact complete inventory")
+    state_root = materialize_state(manifest_path, manifest)
+    validate_runtime_environment(
+        state_root,
+        "base",
+        config_fingerprint,
+        str(manifest["execution_lock_sha256"]),
+        None,
+    )
+    base_sidecar = validate_complete_sidecar(
+        state_root,
+        "base",
+        expected_predictions=expected_predictions,
+        expected_rows=expected_rows,
+        expected_run_fingerprint=expected_run_fingerprint,
+    )
+    if (
+        manifest.get("protocol_fingerprint") != base_sidecar.get("protocol_fingerprint")
+        or manifest.get("input_fingerprint") != base_sidecar.get("input_fingerprint")
+    ):
+        raise RuntimeError("base state semantic fingerprints differ from its prediction sidecar")
+    validate_inference_summary(
+        state_root,
+        "base",
+        config_fingerprint,
+        expected_run_fingerprint,
+        str(base_sidecar["protocol_fingerprint"]),
+        {"base": base_sidecar},
+    )
+    compare_base_runtime(state_root, current_runtime, current_runtime_dir)
+    for entry in inventory_map(manifest).values():
+        relative = entry["path"]
+        if not state_path_allowed(relative):
+            raise RuntimeError(f"state contains a non-allowlisted path: {relative}")
+        if relative.startswith("runtime/"):
+            continue
+        source = safe_file(state_root, relative)
+        destination = output_dir / relative
+        if destination.exists() or destination.is_symlink():
+            raise RuntimeError(f"refusing to overwrite existing run state: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    return sha256_file(manifest_path)
+
+
+def run_logged(command: list[str], log_path: Path, env: dict[str, str]) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("x", encoding="utf-8", newline="\n") as log:
+        process = subprocess.Popen(
+            command,
+            cwd=REPO_ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            log.write(line)
+            log.flush()
+        return_code = process.wait()
+    if return_code:
+        raise subprocess.CalledProcessError(return_code, command)
+
+
+def check_installed_runtime() -> dict[str, Any]:
+    import torch
+
+    numeric = tuple(int(part) for part in torch.__version__.split("+", 1)[0].split(".")[:2])
+    if numeric < (2, 3):
+        raise RuntimeError(f"Kaggle base image torch>=2.3 is required, got {torch.__version__}")
+    bitsandbytes_version = None
+    if WORKFLOW_MODE == "nf4-sensitivity":
+        import bitsandbytes
+
+        bitsandbytes_version = bitsandbytes.__version__
+        if bitsandbytes_version != "0.48.1":
+            raise RuntimeError(f"bitsandbytes 0.48.1 is required, got {bitsandbytes_version}")
+    return {"torch_after_install": torch.__version__, "bitsandbytes": bitsandbytes_version}
+
+
+def export_state(
+    output_dir: Path,
+    config_fingerprint: str,
+    parent_state_hash: str | None,
+    runtime_dir: Path,
+    run_succeeded: bool,
+    expected_rows: int | None,
+    expected_run_fingerprint: str | None,
+    expected_predictions: dict[tuple[str, str], dict[str, Any]],
+) -> None:
+    if EXPORT_ROOT.exists():
+        shutil.rmtree(EXPORT_ROOT)
+    EXPORT_ROOT.mkdir()
+    predictions = output_dir / "predictions"
+    required_paths = required_complete_paths(ARM)
+    candidates = list(predictions.iterdir()) if predictions.is_dir() else []
+    summary = output_dir / "inference_summary.json"
+    if summary.is_file():
+        candidates.append(summary)
+    for source in candidates:
+        if not source.is_file() or source.is_symlink():
+            continue
+        relative = source.relative_to(output_dir).as_posix()
+        if not state_path_allowed(relative) or (not run_succeeded and relative not in required_paths):
+            continue
+        destination = EXPORT_ROOT / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    if runtime_dir.is_dir():
+        for source in runtime_dir.iterdir():
+            relative = f"runtime/{source.name}"
+            if (
+                source.is_file()
+                and not source.is_symlink()
+                and state_path_allowed(relative)
+                and (run_succeeded or relative in required_paths or source.name == "error.log")
+            ):
+                destination = EXPORT_ROOT / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+
+    files = [
+        {
+            "path": path.relative_to(EXPORT_ROOT).as_posix(),
+            "sha256": sha256_file(path),
+            "size": path.stat().st_size,
+        }
+        for path in sorted(EXPORT_ROOT.rglob("*"))
+        if path.is_file() and path.name != "state_manifest.json"
+    ]
+    current_complete = False
+    base_complete = False
+    run_fingerprint = expected_run_fingerprint
+    protocol_fingerprint = None
+    input_fingerprint = None
+    if run_succeeded:
+        if expected_rows is None or expected_run_fingerprint is None:
+            raise RuntimeError("successful export lacks expected protocol fingerprints")
+        if ARM == "tuned" and parent_state_hash != STATE_MANIFEST_SHA256:
+            raise RuntimeError("tuned export parent state differs from the rendered state lock")
+        validate_runtime_environment(
+            EXPORT_ROOT,
+            ARM,
+            config_fingerprint,
+            EXECUTION_LOCK_SHA256,
+            STATE_MANIFEST_SHA256 or None,
+        )
+        current_sidecar = validate_complete_sidecar(
+            EXPORT_ROOT,
+            ARM,
+            expected_predictions=expected_predictions,
+            expected_rows=expected_rows,
+            expected_run_fingerprint=expected_run_fingerprint,
+        )
+        base_sidecar = validate_complete_sidecar(
+            EXPORT_ROOT,
+            "base",
+            expected_predictions=expected_predictions,
+            expected_rows=expected_rows,
+            expected_run_fingerprint=expected_run_fingerprint,
+        )
+        for field in ("experiment_fingerprint", "protocol_fingerprint", "input_fingerprint"):
+            if current_sidecar.get(field) != base_sidecar.get(field):
+                raise RuntimeError(f"base/tuned sidecars differ in {field}")
+        protocol_fingerprint = str(current_sidecar["protocol_fingerprint"])
+        input_fingerprint = str(current_sidecar["input_fingerprint"])
+        validate_inference_summary(
+            EXPORT_ROOT,
+            ARM,
+            config_fingerprint,
+            expected_run_fingerprint,
+            protocol_fingerprint,
+            {"base": base_sidecar, **({"tuned": current_sidecar} if ARM == "tuned" else {})},
+        )
+        actual_paths = {entry["path"] for entry in files}
+        if actual_paths != required_complete_paths(ARM):
+            raise RuntimeError("successful state export does not have the exact required inventory")
+        current_complete = True
+        base_complete = True
+    manifest = {
+        "artifact_version": 4,
+        "dataset_slug": "__OUTPUT_DATASET_SLUG__",
+        "arm": ARM,
+        "workflow_mode": WORKFLOW_MODE,
+        "kernel_succeeded": run_succeeded,
+        "complete": run_succeeded and current_complete and base_complete,
+        "base_state_complete": base_complete,
+        "config_fingerprint": config_fingerprint,
+        "payload_manifest_sha256": PAYLOAD_MANIFEST_SHA256,
+        "execution_lock_sha256": EXECUTION_LOCK_SHA256,
+        "parent_state_manifest_sha256": parent_state_hash,
+        "run_fingerprint": run_fingerprint,
+        "protocol_fingerprint": protocol_fingerprint,
+        "input_fingerprint": input_fingerprint,
+        "result_scope": expected_result_scope(),
+        "files": files,
+    }
+    (EXPORT_ROOT / "state_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def write_error(runtime_dir: Path) -> None:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    with (runtime_dir / "error.log").open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(traceback.format_exc())
+
+
+def fallback_export(runtime_dir: Path, fingerprint: str, parent_state_hash: str | None) -> None:
+    if EXPORT_ROOT.exists():
+        shutil.rmtree(EXPORT_ROOT)
+    (EXPORT_ROOT / "runtime").mkdir(parents=True)
+    if runtime_dir.is_dir():
+        allowed_runtime = {
+            Path(relative).name
+            for relative in required_complete_paths(ARM)
+            if relative.startswith("runtime/")
+        }
+        allowed_runtime.add("error.log")
+        for source in runtime_dir.iterdir():
+            if source.name in allowed_runtime and source.is_file() and not source.is_symlink():
+                shutil.copyfile(source, EXPORT_ROOT / "runtime" / source.name)
+    files = [
+        {
+            "path": path.relative_to(EXPORT_ROOT).as_posix(),
+            "sha256": sha256_file(path),
+            "size": path.stat().st_size,
+        }
+        for path in sorted((EXPORT_ROOT / "runtime").iterdir())
+        if path.is_file()
+    ]
+    (EXPORT_ROOT / "state_manifest.json").write_text(
+        json.dumps(
+            {
+                "artifact_version": 4,
+                "dataset_slug": "__OUTPUT_DATASET_SLUG__",
+                "arm": ARM,
+                "workflow_mode": WORKFLOW_MODE,
+                "kernel_succeeded": False,
+                "complete": False,
+                "base_state_complete": False,
+                "config_fingerprint": fingerprint,
+                "payload_manifest_sha256": PAYLOAD_MANIFEST_SHA256,
+                "execution_lock_sha256": EXECUTION_LOCK_SHA256,
+                "parent_state_manifest_sha256": parent_state_hash or STATE_MANIFEST_SHA256 or None,
+                "run_fingerprint": None,
+                "protocol_fingerprint": None,
+                "input_fingerprint": None,
+                "result_scope": expected_result_scope(),
+                "files": files,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def main() -> int:
+    runtime_dir = WORKING_ROOT / "kaggle_runtime"
+    runtime_dir.mkdir(exist_ok=True)
+    empty_output = WORKING_ROOT / "empty-output"
+    empty_output.mkdir(exist_ok=True)
+    output_dir: Path = empty_output
+    fingerprint = "unavailable"
+    parent_state_hash: str | None = None
+    expected_rows: int | None = None
+    expected_run_fingerprint: str | None = None
+    expected_predictions: dict[tuple[str, str], dict[str, Any]] = {}
+    failed = False
+    run_succeeded = False
+    try:
+        runtime = check_t4x2()
+        payload_manifest_path = find_unique_manifest(
+            "payload_manifest.json", PAYLOAD_DATASET_SLUG, PAYLOAD_MANIFEST_SHA256
+        )
+        payload_manifest = read_object(payload_manifest_path)
+        if (
+            payload_manifest.get("artifact_version") != 3
+            or payload_manifest.get("workflow_mode") != WORKFLOW_MODE
+        ):
+            raise RuntimeError("payload precision mode differs from rendered kernel mode")
+        payload_root = materialize_payload(payload_manifest_path, payload_manifest)
+        source_repo = payload_root / "top-papers-graph"
+        if REPO_ROOT.exists():
+            raise RuntimeError(f"refusing to overwrite worktree: {REPO_ROOT}")
+        shutil.copytree(source_repo, REPO_ROOT, symlinks=False)
+        source_root = REPO_ROOT / "src"
+        if not source_root.is_dir():
+            raise RuntimeError("payload worktree has no src directory")
+        # The editable install below runs in a child process; expose this verified snapshot now.
+        sys.path.insert(0, str(source_root))
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONHASHSEED": "0",
+                "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+                "TOKENIZERS_PARALLELISM": "false",
+                "CUDA_VISIBLE_DEVICES": "0,1",
+                "HF_HOME": str(CACHE_ROOT),
+                "HUGGINGFACE_HUB_CACHE": str(CACHE_ROOT / "hub"),
+                "TRANSFORMERS_CACHE": str(CACHE_ROOT / "transformers"),
+            }
+        )
+        requirements_name = (
+            "requirements-kaggle-nf4.txt"
+            if WORKFLOW_MODE == "nf4-sensitivity"
+            else "requirements-kaggle.txt"
+        )
+        requirements = REPO_ROOT / "experiments/vlm_ab_evaluation/kaggle" / requirements_name
+        run_logged(
+            [sys.executable, "-m", "pip", "install", "-r", str(requirements)],
+            runtime_dir / "install.log",
+            env,
+        )
+        run_logged(
+            [sys.executable, "-m", "pip", "install", "--no-deps", "-e", str(REPO_ROOT)],
+            runtime_dir / "editable-install.log",
+            env,
+        )
+        run_logged(
+            [sys.executable, "-m", "pip", "check"],
+            runtime_dir / "pip-check.log",
+            env,
+        )
+        run_logged(
+            [sys.executable, "-m", "pip", "freeze"],
+            runtime_dir / "pip-freeze.txt",
+            env,
+        )
+        runtime.update(check_installed_runtime())
+
+        from scireason.vlm_ab.config import (
+            config_fingerprint,
+            load_experiment_config,
+            validate_kaggle_precision_contract,
+        )
+
+        config_path = safe_file(REPO_ROOT, CONFIG_RELATIVE)
+        config = load_experiment_config(config_path)
+        validate_kaggle_precision_contract(config, WORKFLOW_MODE)
+        fingerprint = config_fingerprint(config)
+        if fingerprint != payload_manifest.get("config_fingerprint"):
+            raise RuntimeError("installed project config fingerprint differs from payload manifest")
+        if config["experiment"]["id"] != payload_manifest.get("experiment_id"):
+            raise RuntimeError("payload config identity mismatch")
+        output_dir = REPO_ROOT / config["experiment"]["output_dir"]
+        output_dir.resolve(strict=True).relative_to(REPO_ROOT.resolve(strict=True))
+        runtime.update(
+            {
+                "arm": ARM,
+                "workflow_mode": WORKFLOW_MODE,
+                "payload_dataset_slug": PAYLOAD_DATASET_SLUG,
+                "state_dataset_slug": STATE_DATASET_SLUG,
+                "config_fingerprint": fingerprint,
+                "payload_manifest_sha256": PAYLOAD_MANIFEST_SHA256,
+                "state_manifest_sha256": STATE_MANIFEST_SHA256 or None,
+                "execution_lock_sha256": EXECUTION_LOCK_SHA256,
+            }
+        )
+        from scireason.vlm_ab.cli import _run_fingerprint
+        from scireason.vlm_ab.prepare import resolve_prepare_manifest
+
+        prepare_manifest = read_object(output_dir / "prepare_manifest.json")
+        prepared = resolve_prepare_manifest(prepare_manifest, output_dir)
+        expected_run_fingerprint = _run_fingerprint(config, prepared)
+        from scireason.vlm_ab.inference import build_condition_rows
+
+        benchmark = []
+        with Path(prepared["frozen_benchmark"]).open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    raise RuntimeError(f"frozen benchmark has a blank row at {line_number}")
+                value = strict_json_loads(line)
+                if not isinstance(value, dict):
+                    raise RuntimeError(f"frozen benchmark row {line_number} is not an object")
+                benchmark.append(value)
+        condition_rows = build_condition_rows(
+            benchmark,
+            prepared["dataset_root"],
+            config["conditions"],
+            config["experiment"]["seed"],
+        )
+        expected_predictions = {
+            (row["sample_id"], row["condition"]): row for row in condition_rows
+        }
+        expected_rows = len(expected_predictions)
+        if (
+            expected_rows != len(condition_rows)
+            or payload_manifest.get("n_items") != 150
+            or payload_manifest.get("conditions") != config["conditions"]
+            or payload_manifest.get("expected_rows") != expected_rows
+        ):
+            raise RuntimeError("payload sample/condition protocol differs from verified inputs")
+        parent_state_hash = overlay_state(
+            output_dir,
+            fingerprint,
+            runtime,
+            runtime_dir,
+            expected_rows,
+            expected_run_fingerprint,
+            expected_predictions,
+        )
+        (runtime_dir / "environment.json").write_text(
+            json.dumps(runtime, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        run_logged(
+            [
+                sys.executable,
+                "experiments/vlm_ab_evaluation/run_pipeline.py",
+                "--config",
+                CONFIG_RELATIVE,
+                "--repo-root",
+                str(REPO_ROOT),
+                "infer",
+                "--arm",
+                ARM,
+                "--backend",
+                "transformers",
+            ],
+            runtime_dir / f"infer-{ARM}.log",
+            env,
+        )
+        current_sidecar = validate_complete_sidecar(
+            output_dir,
+            ARM,
+            expected_predictions=expected_predictions,
+            expected_rows=expected_rows,
+            expected_run_fingerprint=expected_run_fingerprint,
+        )
+        if ARM == "tuned":
+            base_sidecar = validate_complete_sidecar(
+                output_dir,
+                "base",
+                expected_predictions=expected_predictions,
+                expected_rows=expected_rows,
+                expected_run_fingerprint=expected_run_fingerprint,
+            )
+            for field in ("experiment_fingerprint", "protocol_fingerprint", "input_fingerprint"):
+                if current_sidecar.get(field) != base_sidecar.get(field):
+                    raise RuntimeError(f"base/tuned sidecars differ in {field}")
+        validate_inference_summary(
+            output_dir,
+            ARM,
+            fingerprint,
+            expected_run_fingerprint,
+            str(current_sidecar["protocol_fingerprint"]),
+            {"base": base_sidecar, "tuned": current_sidecar}
+            if ARM == "tuned"
+            else {"base": current_sidecar},
+        )
+        run_succeeded = True
+        return 0
+    except BaseException:
+        failed = True
+        write_error(runtime_dir)
+        raise
+    finally:
+        try:
+            export_state(
+                output_dir,
+                fingerprint,
+                parent_state_hash,
+                runtime_dir,
+                run_succeeded,
+                expected_rows,
+                expected_run_fingerprint,
+                expected_predictions,
+            )
+        except BaseException:
+            write_error(runtime_dir)
+            fallback_export(runtime_dir, fingerprint, parent_state_hash)
+            if not failed:
+                raise
+        finally:
+            for path in (REPO_ROOT, CACHE_ROOT, MATERIALIZED_ROOT, runtime_dir, empty_output):
+                if path.exists() and path.parent == WORKING_ROOT:
+                    shutil.rmtree(path, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

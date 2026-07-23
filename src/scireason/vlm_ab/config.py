@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -17,10 +18,205 @@ from .identities import normalize_identity
 
 CONFIG_VERSION = 1
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+NF4_CONFIG_FIELDS = frozenset(
+    {
+        "load_in_4bit",
+        "load_in_8bit",
+        "bnb_4bit_quant_type",
+        "bnb_4bit_compute_dtype",
+        "bnb_4bit_use_double_quant",
+    }
+)
+KAGGLE_PRECISION_MODES = frozenset({"fp16-primary", "nf4-sensitivity"})
+FP16_PRIMARY_MODEL_KWARGS = {
+    "torch_dtype": "float16",
+    "device_map": "balanced",
+    "low_cpu_mem_usage": True,
+    "attn_implementation": "sdpa",
+    "trust_remote_code": False,
+}
+NF4_SENSITIVITY_MODEL_KWARGS = {
+    **FP16_PRIMARY_MODEL_KWARGS,
+    "quantization_config": {
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_compute_dtype": "float16",
+        "bnb_4bit_use_double_quant": True,
+    },
+}
+FP32_LORA_ADAPTER_KWARGS = {"autocast_adapter_dtype": True}
+
+
+def _typed_equal(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, Mapping):
+        return isinstance(actual, Mapping) and set(actual) == set(expected) and all(
+            _typed_equal(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return isinstance(actual, list) and len(actual) == len(expected) and all(
+            _typed_equal(left, right) for left, right in zip(actual, expected, strict=True)
+        )
+    return type(actual) is type(expected) and actual == expected
 
 
 class ExperimentConfigError(ValueError):
     """Raised when an experiment configuration is incomplete or unsafe."""
+
+
+class _DuplicateConfigKeyError(ValueError):
+    pass
+
+
+def _object_without_duplicate_keys(pairs: list[tuple[Any, Any]]) -> dict[Any, Any]:
+    result: dict[Any, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateConfigKeyError(str(key))
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant {value}")
+
+
+def _reject_non_finite_numbers(value: Any) -> None:
+    pending = [value]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if isinstance(current, float) and not math.isfinite(current):
+            raise ValueError("non-finite number")
+        if isinstance(current, Mapping):
+            identity = id(current)
+            if identity not in seen:
+                seen.add(identity)
+                pending.extend(current.values())
+        elif isinstance(current, (list, tuple)):
+            identity = id(current)
+            if identity not in seen:
+                seen.add(identity)
+                pending.extend(current)
+
+
+def validate_nf4_model_kwargs(
+    model_kwargs: Mapping[str, Any],
+    *,
+    label: str = "model_kwargs",
+    error_type: type[ValueError] = ExperimentConfigError,
+) -> dict[str, Any] | None:
+    """Validate the sole publication-supported quantization contract without imports."""
+
+    legacy = sorted({"load_in_4bit", "load_in_8bit"} & set(model_kwargs))
+    if legacy:
+        raise error_type(
+            f"{label} contains unsupported legacy top-level quantization flags: {legacy}"
+        )
+    if "quantization_config" not in model_kwargs:
+        return None
+
+    raw = model_kwargs["quantization_config"]
+    if not isinstance(raw, Mapping):
+        raise error_type(f"{label}.quantization_config must be an object")
+    config = dict(raw)
+    if not all(isinstance(key, str) for key in config):
+        raise error_type(f"{label}.quantization_config field names must be strings")
+    unknown = sorted(set(config) - NF4_CONFIG_FIELDS)
+    if unknown:
+        raise error_type(f"{label}.quantization_config contains unknown fields: {unknown}")
+    if config.get("load_in_4bit") is not True:
+        raise error_type(f"{label}.quantization_config.load_in_4bit must be true")
+    if "load_in_8bit" in config and config["load_in_8bit"] is not False:
+        raise error_type(f"{label}.quantization_config.load_in_8bit must be false or absent")
+    quant_type = config.get("bnb_4bit_quant_type")
+    if not isinstance(quant_type, str) or quant_type != "nf4":
+        raise error_type(f"{label}.quantization_config.bnb_4bit_quant_type must be 'nf4'")
+    compute_dtype = config.get("bnb_4bit_compute_dtype")
+    if not isinstance(compute_dtype, str) or compute_dtype not in ("float16", "torch.float16"):
+        raise error_type(
+            f"{label}.quantization_config.bnb_4bit_compute_dtype must be "
+            "'float16' or 'torch.float16'"
+        )
+    if not isinstance(config.get("bnb_4bit_use_double_quant"), bool):
+        raise error_type(f"{label}.quantization_config.bnb_4bit_use_double_quant must be boolean")
+    return config
+
+
+def validate_kaggle_precision_contract(
+    config: Mapping[str, Any],
+    mode: str,
+    *,
+    require_capacity: bool = True,
+    error_type: type[Exception] = ExperimentConfigError,
+) -> str:
+    """Require one exact, symmetric Kaggle T4x2 precision contract."""
+
+    if mode not in KAGGLE_PRECISION_MODES:
+        raise error_type(
+            f"unsupported Kaggle precision mode {mode!r}; expected one of "
+            f"{sorted(KAGGLE_PRECISION_MODES)}"
+        )
+    experiment = config.get("experiment")
+    if not isinstance(experiment, Mapping) or experiment.get("precision_mode") != mode:
+        raise error_type(f"experiment.precision_mode must equal {mode!r}")
+    if (
+        experiment.get("require_clean_code") is not True
+        or experiment.get("require_preregistered_plan") is not True
+    ):
+        raise error_type(
+            "Kaggle precision contracts require require_clean_code=true and "
+            "require_preregistered_plan=true"
+        )
+    if require_capacity:
+        power = config.get("power")
+        if (
+            not isinstance(power, Mapping)
+            or power.get("n_items") != 150
+            or power.get("require_exact_n_items") is not True
+            or power.get("reviews_per_item") != 2
+        ):
+            raise error_type(
+                "Kaggle precision contracts require exact power.n_items=150, "
+                "require_exact_n_items=true, and reviews_per_item=2"
+            )
+    review = config.get("review")
+    if (
+        not isinstance(review, Mapping)
+        or len(review.get("reviewer_ids", [])) != 2
+        or review.get("reviews_per_item") != 2
+    ):
+        raise error_type("Kaggle precision contracts require exactly two full-overlap reviewers")
+    models = config.get("models")
+    if not isinstance(models, Mapping):
+        raise error_type("configuration.models must be an object")
+    expected = FP16_PRIMARY_MODEL_KWARGS if mode == "fp16-primary" else NF4_SENSITIVITY_MODEL_KWARGS
+    for arm_name in ("base", "tuned"):
+        arm = models.get(arm_name)
+        if not isinstance(arm, Mapping):
+            raise error_type(f"configuration.models.{arm_name} must be an object")
+        model_kwargs = arm.get("model_kwargs")
+        if not _typed_equal(model_kwargs, expected):
+            raise error_type(
+                f"models.{arm_name}.model_kwargs does not match the exact {mode} contract"
+            )
+
+    tuned = models["tuned"]
+    assert isinstance(tuned, Mapping)
+    adapter = tuned.get("adapter")
+    if not isinstance(adapter, Mapping):
+        raise error_type("configuration.models.tuned.adapter must be an object")
+    if "adapter_kwargs" in adapter:
+        raise error_type(
+            "models.tuned.adapter.adapter_kwargs is forbidden; use the audited top-level "
+            "models.tuned.adapter_kwargs contract"
+        )
+    adapter_kwargs = tuned.get("adapter_kwargs")
+    if not _typed_equal(adapter_kwargs, FP32_LORA_ADAPTER_KWARGS):
+        raise error_type(
+            "models.tuned.adapter_kwargs must explicitly set "
+            "autocast_adapter_dtype=true for the native FP32 LoRA contract"
+        )
+    return mode
 
 
 def _strict_json(value: Any) -> str:
@@ -66,15 +262,39 @@ def _load_document(path: Path) -> Any:
         raise ExperimentConfigError(f"cannot read configuration {path}: {exc}") from exc
     if path.suffix.lower() == ".json":
         try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
+            value = json.loads(
+                text,
+                object_pairs_hook=_object_without_duplicate_keys,
+                parse_constant=_reject_json_constant,
+            )
+            _reject_non_finite_numbers(value)
+            return value
+        except _DuplicateConfigKeyError as exc:
+            raise ExperimentConfigError(
+                f"invalid JSON configuration: duplicate JSON key {exc.args[0]!r}"
+            ) from exc
+        except (json.JSONDecodeError, ValueError) as exc:
             raise ExperimentConfigError(f"invalid JSON configuration: {exc}") from exc
     try:
         import yaml  # type: ignore
     except ImportError as exc:  # pragma: no cover - base project depends on PyYAML
         raise ExperimentConfigError("PyYAML is required for YAML experiment configs") from exc
     try:
-        return yaml.safe_load(text)
+        class UniqueKeyLoader(yaml.SafeLoader):
+            pass
+
+        def construct_mapping(loader: Any, node: Any, deep: bool = False) -> dict[Any, Any]:
+            return _object_without_duplicate_keys(loader.construct_pairs(node, deep=deep))
+
+        UniqueKeyLoader.add_constructor(
+            yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+            construct_mapping,
+        )
+        value = yaml.load(text, Loader=UniqueKeyLoader)
+        _reject_non_finite_numbers(value)
+        return value
+    except _DuplicateConfigKeyError as exc:
+        raise ExperimentConfigError(f"invalid YAML configuration: duplicate key {exc.args[0]!r}") from exc
     except Exception as exc:
         raise ExperimentConfigError(f"invalid YAML configuration: {exc}") from exc
 
@@ -96,6 +316,10 @@ def _validate_model_arm(name: str, value: Any) -> dict[str, Any]:
     base["id"] = _text(base, "id", f"models.{name}.base_model.id")
     base["revision"] = _revision(base, "revision", f"models.{name}.base_model.revision")
     arm["base_model"] = base
+    if "model_kwargs" in arm:
+        model_kwargs = _mapping(arm["model_kwargs"], f"models.{name}.model_kwargs")
+        validate_nf4_model_kwargs(model_kwargs, label=f"models.{name}.model_kwargs")
+        arm["model_kwargs"] = model_kwargs
     if name == "base":
         if arm.get("adapter"):
             raise ExperimentConfigError("models.base must not contain an adapter")
@@ -133,6 +357,11 @@ def validate_experiment_config(value: Any) -> dict[str, Any]:
         raise ExperimentConfigError("experiment.require_clean_code must be boolean")
     if not isinstance(experiment.get("require_preregistered_plan", False), bool):
         raise ExperimentConfigError("experiment.require_preregistered_plan must be boolean")
+    precision_mode = experiment.get("precision_mode")
+    if precision_mode is not None and precision_mode not in KAGGLE_PRECISION_MODES:
+        raise ExperimentConfigError(
+            f"experiment.precision_mode must be one of {sorted(KAGGLE_PRECISION_MODES)}"
+        )
     output_dir = _text(experiment, "output_dir", "experiment.output_dir")
     output_path = Path(output_dir)
     if (
@@ -162,6 +391,38 @@ def validate_experiment_config(value: Any) -> dict[str, Any]:
         )
     if not isinstance(benchmark.get("require_split_provenance", False), bool):
         raise ExperimentConfigError("benchmark.require_split_provenance must be boolean")
+    assembly_file = benchmark.get("assembly_manifest_file")
+    assembly_sha256 = benchmark.get("assembly_manifest_sha256")
+    if (assembly_file is None) != (assembly_sha256 is None):
+        raise ExperimentConfigError(
+            "benchmark assembly_manifest_file and assembly_manifest_sha256 must be set together"
+        )
+    if assembly_file is not None:
+        if not isinstance(assembly_file, str) or not assembly_file.strip():
+            raise ExperimentConfigError(
+                "benchmark.assembly_manifest_file must be a non-empty string"
+            )
+        assembly_path = Path(assembly_file)
+        if assembly_path.is_absolute() or assembly_path.drive or ".." in assembly_path.parts:
+            raise ExperimentConfigError("benchmark.assembly_manifest_file must be a safe relative path")
+        if not isinstance(assembly_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", assembly_sha256
+        ):
+            raise ExperimentConfigError(
+                "benchmark.assembly_manifest_sha256 must be a lowercase SHA256"
+            )
+    if (
+        power := config.get("power")
+    ) and (
+        isinstance(power, Mapping)
+        and power.get("require_exact_n_items") is True
+        and experiment.get("require_clean_code") is True
+        and experiment.get("require_preregistered_plan") is True
+        and assembly_file is None
+    ):
+        raise ExperimentConfigError(
+            "strict exact protocols require a reviewed benchmark assembly manifest binding"
+        )
     config["benchmark"] = benchmark
 
     training = _mapping(config.get("training_audit", {}), "training_audit")
@@ -221,6 +482,14 @@ def validate_experiment_config(value: Any) -> dict[str, Any]:
         raise ExperimentConfigError("both arms must use the same pinned base model")
     if models["base"].get("model_kwargs", {}) != models["tuned"].get("model_kwargs", {}):
         raise ExperimentConfigError("both arms must use identical model_kwargs")
+    has_quantization = any(
+        "quantization_config" in models[arm_name].get("model_kwargs", {})
+        for arm_name in ("base", "tuned")
+    )
+    if precision_mode is None and has_quantization:
+        raise ExperimentConfigError(
+            "quantized evaluation requires experiment.precision_mode='nf4-sensitivity'"
+        )
     if training.get("require_lineage_manifest", False) or raw_lineage is not None:
         adapter = models["tuned"]["adapter"]
         adapter_identity = (adapter["id"], adapter["revision"])
@@ -326,7 +595,17 @@ def validate_experiment_config(value: Any) -> dict[str, Any]:
     if isinstance(n_items, bool) or not isinstance(n_items, int) or n_items <= 0:
         raise ExperimentConfigError("power.n_items must be a positive integer")
     power["n_items"] = n_items
+    require_exact_n_items = power.get("require_exact_n_items", False)
+    if not isinstance(require_exact_n_items, bool):
+        raise ExperimentConfigError("power.require_exact_n_items must be boolean")
     config["power"] = power
+    if precision_mode is not None:
+        validate_kaggle_precision_contract(
+            config,
+            precision_mode,
+            require_capacity=False,
+            error_type=ExperimentConfigError,
+        )
     try:
         _strict_json(config)
     except (TypeError, ValueError) as exc:
@@ -344,7 +623,14 @@ def load_experiment_config(path: str | Path) -> dict[str, Any]:
 __all__ = [
     "CONFIG_VERSION",
     "ExperimentConfigError",
+    "FP16_PRIMARY_MODEL_KWARGS",
+    "FP32_LORA_ADAPTER_KWARGS",
+    "KAGGLE_PRECISION_MODES",
+    "NF4_CONFIG_FIELDS",
+    "NF4_SENSITIVITY_MODEL_KWARGS",
     "config_fingerprint",
     "load_experiment_config",
+    "validate_kaggle_precision_contract",
+    "validate_nf4_model_kwargs",
     "validate_experiment_config",
 ]

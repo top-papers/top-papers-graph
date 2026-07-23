@@ -1151,6 +1151,7 @@ def audit_benchmark(
     require_citation: bool = False,
     blocked_warning_codes: Sequence[str] = (),
     minimum_primary_papers: int = 0,
+    exact_primary_papers: int | None = None,
     primary_strata: Sequence[str] = ("multimodal_hard", "temporal_hard"),
     audit_version: int = AUDIT_VERSION,
 ) -> dict[str, Any]:
@@ -1187,6 +1188,12 @@ def audit_benchmark(
         or minimum_primary_papers < 0
     ):
         raise BenchmarkAuditError("minimum_primary_papers must be a non-negative integer")
+    if exact_primary_papers is not None and (
+        isinstance(exact_primary_papers, bool)
+        or not isinstance(exact_primary_papers, int)
+        or exact_primary_papers <= 0
+    ):
+        raise BenchmarkAuditError("exact_primary_papers must be a positive integer or None")
     if training_lineage is not None and not isinstance(training_lineage, Mapping):
         raise BenchmarkAuditError("training_lineage must be an object")
     normalized_primary_strata = set(primary_strata)
@@ -2056,6 +2063,27 @@ def audit_benchmark(
                     [sample_id],
                     detail,
                 )
+
+    if exact_primary_papers is not None:
+        primary_items = [item for item in prepared if item["row"].get("primary_endpoint") is True]
+        valid_primary_papers = {
+            canonical_paper_id(item["row"].get("paper_id"))
+            for item in primary_items
+            if not paper_identity_errors(item["row"])
+        }
+        valid_primary_papers.discard("")
+        if len(valid_primary_papers) != exact_primary_papers:
+            add_finding(
+                "critical",
+                "primary_paper_count_mismatch",
+                "The benchmark does not contain exactly the preregistered number of unique "
+                "valid primary papers.",
+                [item["sample_key"] for item in primary_items],
+                {
+                    "actual": len(valid_primary_papers),
+                    "required": exact_primary_papers,
+                },
+            )
 
     if minimum_primary_papers:
         primary_items = [item for item in prepared if item["row"].get("primary_endpoint") is True]

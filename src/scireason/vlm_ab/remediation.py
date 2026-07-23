@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from urllib.parse import urlsplit
 
 from .audit import (
     BenchmarkAuditError,
@@ -23,6 +24,7 @@ from .audit import (
     paper_identity_errors,
     write_audit_report,
 )
+from .capacity import is_capacity_remediation_working_config
 from .config import config_fingerprint
 from .contracts import PUBLICATION_SCHEMA_SHA256
 from .identities import normalize_identity
@@ -35,7 +37,7 @@ from .prepare import (
 )
 
 
-ARTIFACT_VERSION = 2
+ARTIFACT_VERSION = 3
 TASKS_FILENAME = "tasks.jsonl"
 DECISION_TEMPLATE_FILENAME = "decision_template.jsonl"
 QUEUE_MANIFEST_FILENAME = "queue_manifest.json"
@@ -64,6 +66,7 @@ _DECISION_FIELDS = frozenset(
         "benchmark_row",
         "provenance_row",
         "reviewed_by",
+        "independent_attestation",
         "notes",
     }
 )
@@ -143,13 +146,11 @@ def _read_stable_bytes(path: Path, label: str) -> bytes:
     return raw
 
 
-def _strict_json(path: str | Path, label: str) -> tuple[dict[str, Any], bytes]:
-    source = Path(path)
+def _strict_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
     try:
-        raw = _read_stable_bytes(source, label)
         text = raw.decode("utf-8")
     except UnicodeError as exc:
-        raise RemediationError(f"cannot read {label} {source}: {exc}") from exc
+        raise RemediationError(f"cannot decode strict {label}: {exc}") from exc
     try:
         value = json.loads(
             text,
@@ -162,13 +163,17 @@ def _strict_json(path: str | Path, label: str) -> tuple[dict[str, Any], bytes]:
         raise RemediationError(f"invalid strict JSON in {label}: {exc}") from exc
     if not isinstance(value, dict):
         raise RemediationError(f"{label} must contain a JSON object")
-    return value, raw
+    return value
 
 
-def _strict_jsonl(path: str | Path, label: str) -> tuple[list[dict[str, Any]], bytes]:
+def _strict_json(path: str | Path, label: str) -> tuple[dict[str, Any], bytes]:
     source = Path(path)
+    raw = _read_stable_bytes(source, label)
+    return _strict_json_bytes(raw, label), raw
+
+
+def _strict_jsonl_bytes(raw: bytes, label: str) -> list[dict[str, Any]]:
     try:
-        raw = _read_stable_bytes(source, label)
         text = raw.decode("utf-8-sig")
     except UnicodeError as exc:
         raise RemediationError(f"cannot read strict {label}: {exc}") from exc
@@ -191,7 +196,40 @@ def _strict_jsonl(path: str | Path, label: str) -> tuple[list[dict[str, Any]], b
         if not isinstance(value, dict):
             raise RemediationError(f"{label} line {line_number} must contain a JSON object")
         rows.append(value)
-    return rows, raw
+    return rows
+
+
+def _strict_jsonl(path: str | Path, label: str) -> tuple[list[dict[str, Any]], bytes]:
+    source = Path(path)
+    raw = _read_stable_bytes(source, label)
+    return _strict_jsonl_bytes(raw, label), raw
+
+
+def _credential_free_http_url(value: Any, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(not 0x21 <= ord(character) <= 0x7E for character in value)
+        or "\\" in value
+    ):
+        raise RemediationError(f"{label} must be a credential-free HTTP(S) URL")
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError as exc:
+        raise RemediationError(f"{label} must be a credential-free HTTP(S) URL") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not hostname
+        or "@" in parsed.netloc
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RemediationError(f"{label} must be a credential-free HTTP(S) URL")
+    return value
 
 
 def _json_bytes(value: Any, *, newline: bool = False) -> bytes:
@@ -259,12 +297,18 @@ def _policy_from_config(config: Mapping[str, Any]) -> dict[str, Any]:
     minimum = power.get("n_items")
     if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum <= 0:
         raise RemediationError("config power.n_items must be a positive integer")
-    return {
+    require_exact = power.get("require_exact_n_items", False)
+    if not isinstance(require_exact, bool):
+        raise RemediationError("config power.require_exact_n_items must be boolean")
+    policy = {
         "primary_strata": list(primary_strata),
         "require_gold": require_gold,
         "minimum_primary_papers": minimum,
         "warning_codes_must_be_zero": list(_FROZEN_WARNING_CODES),
     }
+    if require_exact:
+        policy["exact_primary_papers"] = minimum
+    return policy
 
 
 def _validate_prepare_manifest_shape(manifest: Mapping[str, Any]) -> None:
@@ -759,6 +803,7 @@ def _queue_material(
             "benchmark_row": None,
             "provenance_row": None,
             "reviewed_by": [],
+            "independent_attestation": False,
             "notes": "",
         }
         for task in tasks
@@ -791,6 +836,41 @@ def _queue_material(
     }
 
 
+def _prepare_input_protection(
+    material: Mapping[str, Any],
+) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+    source = material["source"]
+    resolved = source["resolved"]
+    protected_files = {Path(source["manifest_path"]).resolve(strict=True)}
+    protected_directories: set[Path] = set()
+    dataset_root = Path(resolved["dataset_root"]).resolve(strict=True)
+    protected_directories.add(dataset_root)
+    for field in (
+        "adapter_config",
+        "audit_json",
+        "audit_markdown",
+        "benchmark_file",
+        "frozen_benchmark",
+        "power_plan",
+        "provenance_file",
+        "training_lineage_manifest",
+    ):
+        value = resolved.get(field)
+        if value is None:
+            continue
+        path = Path(value).resolve(strict=True)
+        protected_files.add(path)
+        protected_directories.add(path.parent)
+    for record in resolved.get("training_files", []):
+        path = Path(record["path"]).resolve(strict=True)
+        protected_files.add(path)
+        protected_directories.add(path.parent)
+    return (
+        tuple(sorted(protected_directories, key=str)),
+        tuple(sorted(protected_files, key=str)),
+    )
+
+
 def _output_target(output_dir: str | Path) -> Path:
     raw = Path(output_dir)
     if raw.name in {"", ".", ".."}:
@@ -804,6 +884,46 @@ def _output_target(output_dir: str | Path) -> Path:
     if target.is_symlink() or (target.exists() and not target.is_dir()):
         raise RemediationError(f"output_dir is not a safe directory: {target}")
     return target
+
+
+def _manifest_workspace_roots(manifest_path: str | Path) -> tuple[Path, ...]:
+    path = Path(manifest_path)
+    try:
+        return tuple(
+            sorted(
+                {path.parent.resolve(strict=True), path.resolve(strict=True).parent},
+                key=str,
+            )
+        )
+    except (OSError, RuntimeError) as exc:
+        raise RemediationError(f"cannot resolve manifest workspace: {manifest_path}") from exc
+
+
+def _separate_output_target(
+    output_dir: str | Path,
+    *,
+    protected_directories: Sequence[str | Path] = (),
+    protected_files: Sequence[str | Path] = (),
+) -> Path:
+    try:
+        candidate = Path(output_dir).resolve(strict=False)
+        directories = [Path(path).resolve(strict=True) for path in protected_directories]
+        files = [Path(path).resolve(strict=True) for path in protected_files]
+    except (OSError, RuntimeError) as exc:
+        raise RemediationError("cannot resolve output or protected input paths") from exc
+    for root in directories:
+        if not root.is_dir():
+            raise RemediationError(f"protected workspace must be a directory: {root}")
+        if candidate == root or root in candidate.parents or candidate in root.parents:
+            raise RemediationError(
+                "output_dir must be separate from and must not contain immutable input workspaces"
+            )
+    for source in files:
+        if not source.is_file():
+            raise RemediationError(f"protected input must be a file: {source}")
+        if candidate == source or source in candidate.parents or candidate in source.parents:
+            raise RemediationError("output_dir must not contain or be nested under protected inputs")
+    return _output_target(output_dir)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -859,8 +979,7 @@ def _existing_queue_is_identical(target: Path, files: Mapping[str, bytes]) -> bo
         raise RemediationError(f"cannot inspect existing queue workspace: {exc}") from exc
 
 
-def _publish_queue(output_dir: str | Path, files: Mapping[str, bytes]) -> None:
-    target = _output_target(output_dir)
+def _publish_queue(target: Path, files: Mapping[str, bytes]) -> None:
     if target.exists():
         if _existing_queue_is_identical(target, files):
             return
@@ -898,7 +1017,13 @@ def generate_curator_queues(
         benchmark_schema,
         provenance_schema,
     )
-    _publish_queue(output_dir, material["files"])
+    protected_directories, protected_files = _prepare_input_protection(material)
+    target = _separate_output_target(
+        output_dir,
+        protected_directories=protected_directories,
+        protected_files=protected_files,
+    )
+    _publish_queue(target, material["files"])
     return dict(material["manifest"])
 
 
@@ -1016,6 +1141,10 @@ def _validate_decisions(
             raise _decision_error(f"decision {task_id} is still pending")
         if status != "complete":
             raise _decision_error(f"decision {task_id} status must be complete")
+        if decision.get("independent_attestation") is not True:
+            raise _decision_error(
+                f"decision {task_id} requires an affirmative independent_attestation"
+            )
         reviewers = _validate_reviewers(decision.get("reviewed_by"), task_id)
         all_reviewers.update(reviewers)
         notes = decision.get("notes")
@@ -1160,6 +1289,7 @@ def _validate_candidate_rows(
     curated_dataset_root: str | Path,
     *,
     require_gold: bool,
+    forbidden_legacy_image_sha256s: set[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, tuple[Path, str]]]:
     try:
         curated_root = Path(curated_dataset_root).resolve(strict=True)
@@ -1227,6 +1357,10 @@ def _validate_candidate_rows(
             zip(benchmark_images, provenance_images)
         ):
             normalized, parts = _safe_asset_reference(reference)
+            _credential_free_http_url(
+                provenance_image.get("source_url"),
+                f"sample {sample_id} image {image_index} source_url",
+            )
             _validate_distinct_identifiers(
                 provenance_image.get("verified_by"),
                 f"sample {sample_id} image {image_index} verified_by",
@@ -1235,6 +1369,10 @@ def _validate_candidate_rows(
             if not isinstance(declared, str) or not _SHA256_RE.fullmatch(declared):
                 raise _decision_error(
                     f"sample {sample_id} image {image_index} requires a lowercase SHA256"
+                )
+            if declared in forbidden_legacy_image_sha256s:
+                raise _decision_error(
+                    f"sample {sample_id} image {image_index} reuses quarantined legacy bytes"
                 )
             try:
                 source = resolve_dataset_file(curated_root, Path(*parts))
@@ -1304,9 +1442,15 @@ def _verify_staged_assets(staging: Path, assets: Mapping[str, tuple[Path, str]])
             raise RemediationError(f"staged asset hash changed unexpectedly: {relative}")
 
 
+def _raise_walk_error(error: OSError) -> None:
+    raise RemediationError(f"cannot inspect release tree: {error}") from error
+
+
 def _tree_files(root: Path) -> list[Path]:
     files: list[Path] = []
-    for directory, dirnames, filenames in os.walk(root, followlinks=False):
+    for directory, dirnames, filenames in os.walk(
+        root, followlinks=False, onerror=_raise_walk_error
+    ):
         directory_path = Path(directory)
         for dirname in dirnames:
             if (directory_path / dirname).is_symlink():
@@ -1317,6 +1461,13 @@ def _tree_files(root: Path) -> list[Path]:
                 raise RemediationError("release tree contains an unsafe file")
             files.append(path)
     return sorted(files, key=lambda path: path.relative_to(root).as_posix())
+
+
+def _tree_directories(root: Path) -> set[str]:
+    return {
+        Path(directory).relative_to(root).as_posix()
+        for directory, _, _ in os.walk(root, followlinks=False, onerror=_raise_walk_error)
+    }
 
 
 def _output_file_records(staging: Path) -> list[dict[str, Any]]:
@@ -1352,6 +1503,10 @@ def _files_equal(left: Path, right: Path) -> bool:
 def _trees_identical(left: Path, right: Path) -> bool:
     left_files = _tree_files(left)
     right_files = _tree_files(right)
+    left_directories = _tree_directories(left)
+    right_directories = _tree_directories(right)
+    if left_directories != right_directories:
+        return False
     left_by_name = {path.relative_to(left).as_posix(): path for path in left_files}
     right_by_name = {path.relative_to(right).as_posix(): path for path in right_files}
     if set(left_by_name) != set(right_by_name):
@@ -1388,6 +1543,8 @@ def assemble_corrected_release(
     *,
     benchmark_schema: str | Path,
     provenance_schema: str | Path,
+    capacity_enrichment_manifest: str | Path | None = None,
+    machine_enrichment_jsonl: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate curator decisions and stage a benchmark-only release candidate."""
 
@@ -1397,22 +1554,78 @@ def assemble_corrected_release(
         benchmark_schema,
         provenance_schema,
     )
-    _, verified_queue = _verify_queue_workspace(material, queue_manifest)
+    queue_root, verified_queue = _verify_queue_workspace(material, queue_manifest)
+    policy = verified_queue["policy"]
+    capacity_remediation = bool(
+        is_capacity_remediation_working_config(config)
+        or policy.get("exact_primary_papers") == 150
+    )
+    enrichment_inputs = (
+        capacity_enrichment_manifest is not None,
+        machine_enrichment_jsonl is not None,
+    )
+    if capacity_remediation and not all(enrichment_inputs):
+        raise RemediationError(
+            "capacity assembly requires both the enrichment manifest and source machine JSONL"
+        )
+    if not capacity_remediation and any(enrichment_inputs):
+        raise RemediationError(
+            "machine enrichment evidence is accepted only for a capacity remediation assembly"
+        )
+    verified_enrichment = None
+    if capacity_remediation:
+        from .capacity_enrichment import verify_capacity_enrichment_workspace
+
+        verified_enrichment = verify_capacity_enrichment_workspace(
+            config,
+            prepare_manifest,
+            queue_manifest,
+            capacity_enrichment_manifest,
+            machine_enrichment_jsonl,
+            benchmark_schema=benchmark_schema,
+            provenance_schema=provenance_schema,
+        )
     decisions, decisions_bytes = _strict_jsonl(decisions_jsonl, "curator decisions JSONL")
     retained, exclusions, reviewer_ids = _validate_decisions(
         decisions,
         material["tasks"],
         verified_queue["queue_fingerprint"],
     )
-    policy = verified_queue["policy"]
+    forbidden_legacy_image_sha256s = {
+        str(record["sha256"])
+        for task in material["tasks"]
+        if "cross_paper_image_reuse" in task["critical_codes"]
+        for record in task["audited_image_hashes"]
+    }
     benchmark_rows, provenance_rows, assets = _validate_candidate_rows(
         retained,
         material["schemas"],
         curated_dataset_root,
         require_gold=policy["require_gold"],
+        forbidden_legacy_image_sha256s=forbidden_legacy_image_sha256s,
     )
 
-    target = _output_target(output_dir)
+    prepare_directories, prepare_files = _prepare_input_protection(material)
+    enrichment_directories = (
+        (Path(capacity_enrichment_manifest).parent,)
+        if capacity_enrichment_manifest is not None
+        else ()
+    )
+    enrichment_files = tuple(
+        path
+        for path in (capacity_enrichment_manifest, machine_enrichment_jsonl)
+        if path is not None
+    )
+    target = _separate_output_target(
+        output_dir,
+        protected_directories=(
+            queue_root,
+            *prepare_directories,
+            Path(curated_dataset_root),
+            *enrichment_directories,
+        ),
+        protected_files=(*prepare_files, decisions_jsonl, *enrichment_files),
+    )
     staging = target.with_name(f".{target.name}.assembly.{os.getpid()}.tmp")
     if staging.exists() or staging.is_symlink():
         raise RemediationError(f"release staging path already exists: {staging}")
@@ -1447,6 +1660,7 @@ def assemble_corrected_release(
             require_provenance_order=True,
             require_citation=True,
             blocked_warning_codes=_FROZEN_WARNING_CODES,
+            exact_primary_papers=policy.get("exact_primary_papers"),
             primary_strata=policy["primary_strata"],
         )
         if report["critical_findings"]:
@@ -1466,7 +1680,19 @@ def assemble_corrected_release(
         }
         primary_papers.discard("")
         minimum = policy["minimum_primary_papers"]
-        if len(primary_papers) < minimum:
+        exact_primary_papers = policy.get("exact_primary_papers")
+        if exact_primary_papers is not None and len(benchmark_rows) != exact_primary_papers:
+            raise _decision_error(
+                "corrected benchmark has a different retained-row count than required: "
+                f"{len(benchmark_rows)} != {exact_primary_papers}"
+            )
+        if exact_primary_papers is not None and len(primary_papers) != exact_primary_papers:
+            raise _decision_error(
+                "corrected benchmark has a different number of unique primary paper IDs than "
+                "required: "
+                f"{len(primary_papers)} != {exact_primary_papers}"
+            )
+        if exact_primary_papers is None and len(primary_papers) < minimum:
             raise _decision_error(
                 "corrected benchmark has fewer unique primary paper IDs than required: "
                 f"{len(primary_papers)} < {minimum}"
@@ -1477,6 +1703,67 @@ def assemble_corrected_release(
         report["publication_ready"] = False
         report["publication_readiness_blockers"] = list(_REMAINING_REQUIREMENTS)
         _write_audit_atomic(staging, report)
+        review_archive_root = "audit/human_review"
+        queue_archive_root = f"{review_archive_root}/queue"
+        for name, data in sorted(material["files"].items()):
+            _atomic_write(staging / queue_archive_root / name, data)
+        archived_decisions_path = f"{review_archive_root}/completed_decisions.jsonl"
+        _atomic_write(staging / archived_decisions_path, decisions_bytes)
+        human_review_evidence = {
+            "artifact_version": ARTIFACT_VERSION,
+            "archive_root": review_archive_root,
+            "queue_manifest_path": f"{queue_archive_root}/{QUEUE_MANIFEST_FILENAME}",
+            "queue_manifest_sha256": _sha256_bytes(
+                material["files"][QUEUE_MANIFEST_FILENAME]
+            ),
+            "tasks_path": f"{queue_archive_root}/{TASKS_FILENAME}",
+            "tasks_sha256": _sha256_bytes(material["files"][TASKS_FILENAME]),
+            "decision_template_path": (
+                f"{queue_archive_root}/{DECISION_TEMPLATE_FILENAME}"
+            ),
+            "decision_template_sha256": _sha256_bytes(
+                material["files"][DECISION_TEMPLATE_FILENAME]
+            ),
+            "decisions_path": archived_decisions_path,
+            "decisions_sha256": _sha256_bytes(decisions_bytes),
+            "independent_attestation_required": True,
+        }
+        machine_enrichment_evidence = None
+        if verified_enrichment is not None:
+            archive_root = "audit/machine_enrichment"
+            source_relative = f"{archive_root}/source_machine_enrichment.jsonl"
+            package_root = f"{archive_root}/package"
+            _atomic_write(
+                staging / source_relative,
+                verified_enrichment["source_machine_enrichment_bytes"],
+            )
+            for name, data in sorted(verified_enrichment["files"].items()):
+                _atomic_write(staging / package_root / name, data)
+            enrichment_manifest = verified_enrichment["manifest"]
+            machine_enrichment_evidence = {
+                "artifact_version": enrichment_manifest["artifact_version"],
+                "archive_root": archive_root,
+                "source_machine_enrichment_path": source_relative,
+                "source_machine_enrichment_sha256": enrichment_manifest[
+                    "source_machine_enrichment_sha256"
+                ],
+                "package_manifest_path": (
+                    f"{package_root}/machine_enrichment_manifest.json"
+                ),
+                "package_manifest_sha256": verified_enrichment["manifest_sha256"],
+                "capacity_plan_manifest_sha256": enrichment_manifest[
+                    "capacity_plan_manifest_sha256"
+                ],
+                "capacity_assist_manifest_sha256": enrichment_manifest[
+                    "capacity_assist_manifest_sha256"
+                ],
+                "external_evidence_content_verified": enrichment_manifest["policy"][
+                    "external_evidence_content_verified"
+                ],
+                "human_verification_required": enrichment_manifest["policy"][
+                    "human_verification_required"
+                ],
+            }
         _verify_staged_assets(staging, assets)
 
         output_files = _output_file_records(staging)
@@ -1501,6 +1788,12 @@ def assemble_corrected_release(
             },
             "exclusions": exclusions,
             "reviewer_ids": reviewer_ids,
+            "human_review_evidence": human_review_evidence,
+            **(
+                {"machine_enrichment_evidence": machine_enrichment_evidence}
+                if machine_enrichment_evidence is not None
+                else {}
+            ),
             "training_lineage": {
                 "provided": lineage_provided,
                 "validated_in_candidate_audit": lineage_provided,

@@ -1,0 +1,3 @@
+# Torch, torchvision, and CUDA are intentionally supplied by the pinned Kaggle base image.
+-r requirements-kaggle.txt
+bitsandbytes==0.48.1

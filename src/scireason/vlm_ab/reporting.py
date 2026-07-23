@@ -278,8 +278,24 @@ def build_markdown_report(results: Mapping[str, Any], config: Mapping[str, Any])
             f"{_fmt_p(value.get('raw_p_value'))} | "
             f"{_fmt_p(value.get('holm_adjusted_p_value'))} |"
         )
+    position = human.get("position_bias") or {}
     lines.extend(
         [
+            "",
+            "## Human Review Diagnostics",
+            "",
+            (f"- Nominal inter-rater Krippendorff alpha: {_fmt(primary.get('inter_rater_alpha'))}"),
+            (
+                "- Left-side preference rate: "
+                f"{_fmt(position.get('left_preference_rate'))} "
+                f"(descriptive exact-binomial p={_fmt_p(position.get('p_value'))})"
+            ),
+            "- Side assignment counts: `"
+            + json.dumps(position.get("assignment_counts", {}), sort_keys=True)
+            + "`",
+            "- Displayed preference counts: `"
+            + json.dumps(position.get("selected_side_counts", {}), sort_keys=True)
+            + "`",
             "",
             "## Flow And Missingness",
             "",

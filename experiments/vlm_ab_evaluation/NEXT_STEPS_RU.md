@@ -9,6 +9,23 @@
 Текущую ревизию benchmark нельзя использовать для научного вывода: все 386 исходных строк имеют
 блокирующие нарушения. Ближайшая работа является ручной курацией, а не inference.
 
+Выбранный protocol с меньшей capacity описан в
+[`CAPACITY_150_PROTOCOL_RU.md`](CAPACITY_150_PROTOCOL_RU.md). Это отдельный capacity-limited
+confirmatory protocol с `N=150`, а не synthetic набор и не waiver для текущего архивного benchmark.
+
+После публикации исправленных immutable B/R/M отдельный запуск на Kaggle T4x2 описан в
+[`kaggle/README_RU.md`](kaggle/README_RU.md). Зафиксирован primary endpoint: unquantized FP16
+base/compute, native FP32 PEFT LoRA, `device_map=balanced`, Kaggle T4x2 и exact `N=150`. NF4 остается
+отдельным sensitivity protocol с собственными ID, output directory, plan и fresh strict prepare.
+Он получает только автоматические diagnostics без повторной оценки экспертами.
+
+Архивная immutable queue ниже привязана к `N=240`, а не к capacity protocol. Ее existing triage и
+assembly нельзя использовать для exact-150 candidate: при необходимости такого assembly сначала
+создают отдельные capacity-specific exploratory `prepare` и новую immutable queue в fresh output path.
+Кроме того, эта historical queue имеет remediation artifact v2. Текущий contract v3 требует отдельное
+поле `independent_attestation=true` в final decision JSONL, поэтому v2 queue/forms нельзя продолжать или
+перегенерировать текущим кодом как будто это тот же workspace.
+
 ## 1. Что уже зафиксировано
 
 Неизменяемая очередь находится в:
@@ -66,7 +83,8 @@ python -m pip install -e ".[vlm_ab,dev]"
 $Config = "experiments/vlm_ab_evaluation/configs/qwen3vl_scireason_remediation_audit_v2.yaml"
 $Run = "runs/vlm_ab/qwen3vl-scireason-remediation-audit-v2"
 $Queue = "$Run/curation_queue_v2_524cbc2d_hardened"
-$Forms = "$Run/curator_workspace_v2"
+$Forms = "$Run/curator_workspace_v4"
+$Triage = "$Run/assisted_triage_v3"
 $Decisions = "$Run/completed_decisions.jsonl"
 $Curated = "$Run/curated_dataset"
 $Candidate = "$Run/release_candidate"
@@ -144,7 +162,8 @@ owner свой draft envelope. Owner в одном master workspace послед
 **Export completed_decisions.jsonl** и помещает файл в `$Decisions`. Форма не импортирует final JSONL:
 такое обратное преобразование потеряло бы произвольные допустимые benchmark/provenance поля.
 Финальный export содержит строки в исходном порядке и все immutable bindings. Browser validation не
-заменяет серверную проверку последующим `curate-assemble`.
+заменяет серверную проверку последующим `curate-assemble`; export обязан содержать
+`independent_attestation=true` для каждой complete decision.
 
 В секции каждого изображения кнопка **Выбрать проверенный файл и вычислить SHA256** читает выбранный
 локальный файл через Web Crypto, заполняет lowercase SHA256 и показывает локальный preview. Bytes и
@@ -157,6 +176,45 @@ Assignments следует вести по `task_id` во внешнем жур�
 одновременно перезаписывать общий JSONL. Ручное копирование `decision_template.jsonl` и редактирование
 JSONL остается только аварийным fallback; при нем итог также должен содержать ровно 386 задач без
 дубликатов и пропусков, а queue directory не изменяется.
+
+### 5.1 Assisted-triage для выбранной policy training overlap
+
+После генерации `$Forms` release owner может отдельно создать offline-пакет машинной маршрутизации.
+Флаг ниже является явным подтверждением выбранной policy: предложить `exclude` для **всех** задач с
+критическим кодом `training_paper_overlap` либо непустым `training_overlap_paper_ids`.
+
+```powershell
+python experiments/vlm_ab_evaluation/run_pipeline.py `
+  --config $Config `
+  curate-triage `
+  --prepare-manifest "$Run/prepare_manifest.json" `
+  --queue-manifest "$Queue/queue_manifest.json" `
+  --output-dir $Triage `
+  --exclude-training-overlap
+```
+
+Команда заново проверяет prepare bundle и все три immutable queue-файла, затем атомарно создает вне
+queue ровно `assisted_review_draft.json`, `triage.jsonl`, `triage_summary.md` и
+`triage_manifest.json` и `external_review_log_template.csv`. Пакет не создает
+`completed_decisions.jsonl`, не заполняет reviewer ID или attestation и не выбирает `retain`.
+`triage.jsonl` не дублирует исходные row/citation payloads. CSV содержит все 386 `task_id` и пустые
+поля для двух reviewer ID, времени проверки и ссылки на внешний signed/dated review record.
+
+Для именно этой архивной baseline 74 задачи с overlap и 22 canonical paper ID следует считать
+подтвержденными только если свежий `$Triage/triage_manifest.json`, построенный для указанной immutable
+queue, содержит `training_overlap_task_count=74`, 22 значения в `overlap_paper_ids` и
+`training_overlap_missing_identifier_task_count=3`. Эти вычисленные значения manifest, а не
+захардкоженное ожидание, являются operational authority.
+
+В одном master `$Forms` owner выбирает **Merge draft** и импортирует
+`$Triage/assisted_review_draft.json`. Предзаполненные `exclude` -- это предложения, а не final
+decisions: два реальных независимых человека должны сверить overlap, указать свои reviewer ID и
+поставить independent attestation перед final export. Все задачи без training overlap остаются
+исключительно в ручной курации; автоматического `retain` нет.
+
+Форма и `curate-assemble` проверяют, что указаны минимум два normalized-distinct ID, но не могут
+криптографически доказать личность или независимость людей. Release owner должен хранить внешний
+подписанный или датированный журнал review, связывающий двух реальных проверяющих с каждым `task_id`.
 
 ## 6. Как читать задачу curator
 
@@ -578,8 +636,11 @@ processor:
   revision: <R>
 ```
 
-Скопируйте неизмененные base model, generation, conditions, statistics и power sections из
-publication config. Замените reviewer placeholders на заранее назначенные pseudonymous IDs.
+Скопируйте неизмененные base model, generation, conditions и statistics sections из corrected strict
+config. Укажите ровно два заранее назначенных pseudonymous reviewer ID; оба эксперта оценивают все
+единицы, поэтому `review.reviews_per_item=2` и `power.reviews_per_item=2`. Для выбранного
+capacity-limited protocol не редактируйте archived config и не копируйте его старый power section:
+после реальной публикации `B`, `R` и `M` создайте новый config генератором ниже.
 
 Если заявляются automatic semantic metrics, сначала задайте `benchmark.require_gold=true` и
 повторите assembly с обязательными gold/rubric. Нельзя включать automatic claim после просмотра
@@ -588,38 +649,93 @@ model outputs.
 Каждый новый protocol получает новые `experiment.id`, `public_id` и `output_dir`. Если config,
 source tree, power assumptions или inputs меняются после `plan`, создается еще один run ID.
 
+### 12.1 Capacity-limited N=150 config
+
+Это только final strict Phase 1. Сначала выполните Phase 0 из
+[`CAPACITY_150_PROTOCOL_RU.md`](CAPACITY_150_PROTOCOL_RU.md): новый remediation generator создает
+fresh exploratory cap150 queue и candidate без plan/inference. Команды ниже допустимы лишь после того,
+как corrected strict config содержит реальные immutable `B`, `R` и `M`, новый benchmark содержит ровно
+150 verified unique nonoverlap primary papers, а candidate опубликован как corrected `B`. Benchmark
+section должен фиксировать опубликованный Phase 0 `assembly_manifest.json` через
+`assembly_manifest_file` и его lowercase SHA256 через `assembly_manifest_sha256`. Генератор
+устанавливает `power.require_exact_n_items=true`, принимает только unquantized source и YAML output,
+требует fresh safe output path под `runs/`, не запускает `plan` или `prepare` и печатает только
+`preview_not_preregistered`.
+
+```powershell
+$CorrectedStrict = "experiments/vlm_ab_evaluation/configs/qwen3vl_corrected_strict.yaml"
+$CapacityConfig = "experiments/vlm_ab_evaluation/configs/qwen3vl-cap150-capacity-v1.yaml"
+$CapacityRun = "runs/vlm_ab/qwen3vl-cap150-capacity-v1"
+
+python experiments/vlm_ab_evaluation/make_capacity150_config.py `
+  --input $CorrectedStrict `
+  --output $CapacityConfig `
+  --experiment-id "qwen3vl-cap150-capacity-v1" `
+  --public-id "study-2026-cap150-capacity-v1" `
+  --output-dir $CapacityRun
+```
+
+Этот YAML фиксирует `n_items=150`, `require_exact_n_items=true`, `reviews_per_item=2`, evaluable
+fraction `0.90`, ICC `0.50`, alpha `0.05`, target power `0.80`, score SD `0.50` и target effect
+`0.121`. Strict `prepare` и capacity-specific assembly принимают ровно 150 valid canonical primary
+papers. Effect `0.10` при `N=150` недостаточно мощный. Полная причина и ограничения находятся в
+[`CAPACITY_150_PROTOCOL_RU.md`](CAPACITY_150_PROTOCOL_RU.md).
+Strict `prepare` отклоняет отсутствующий или измененный assembly manifest и любой release-файл, чьи
+bytes или size не совпадают с его inventory. Он проверяет архивированные queue/decisions и machine
+evidence, копирует полный declared inventory с исходными relative paths в relocatable run bundle и
+повторяет assembly validation уже по скопированным bytes.
+
 ## 13. Freeze кода и preregistration
 
-До strict run должны пройти tests, а Git tree должен быть clean:
+До strict run должны пройти tests; Git tree должен быть clean непосредственно перед `plan`:
 
 ```powershell
 python -m pytest `
+  tests/test_vlm_ab_triage.py `
   tests/test_vlm_ab_curator.py `
   tests/test_vlm_ab_audit.py `
   tests/test_vlm_ab_blind.py `
   tests/test_vlm_ab_inference.py `
   tests/test_vlm_ab_pipeline.py `
   tests/test_vlm_ab_remediation.py `
+  tests/test_vlm_ab_capacity150.py `
+  tests/test_vlm_ab_capacity150_remediation.py `
+  tests/test_vlm_ab_capacity_plan.py `
+  tests/test_vlm_ab_capacity_assist.py `
+  tests/test_vlm_ab_capacity_enrichment.py `
+  tests/test_vlm_ab_kaggle.py `
   tests/test_vlm_ab_stats.py -q
 
 python -m ruff check src/scireason/vlm_ab `
+  tests/test_vlm_ab_triage.py `
   tests/test_vlm_ab_curator.py `
   tests/test_vlm_ab_audit.py `
   tests/test_vlm_ab_blind.py `
   tests/test_vlm_ab_inference.py `
   tests/test_vlm_ab_pipeline.py `
   tests/test_vlm_ab_remediation.py `
+  tests/test_vlm_ab_capacity150.py `
+  tests/test_vlm_ab_capacity150_remediation.py `
+  tests/test_vlm_ab_capacity_plan.py `
+  tests/test_vlm_ab_capacity_assist.py `
+  tests/test_vlm_ab_capacity_enrichment.py `
+  tests/test_vlm_ab_kaggle.py `
   tests/test_vlm_ab_stats.py
 
 git status --short
 git rev-parse HEAD
 ```
 
-`git status --short` должен вернуть пустой output. Зафиксируйте code/config commit обычным reviewed
-commit. После этого запустите `plan`, используя новый strict config:
+После генерации `$CapacityConfig` добавьте его в обычный reviewed code/config commit. Только когда
+`git status --short` вернет пустой output, запускайте единственный immutable `plan`:
 
 ```powershell
-$StrictConfig = "experiments/vlm_ab_evaluation/configs/<NEW_STRICT_CONFIG>.yaml"
+$StrictConfig = $CapacityConfig
+
+git add $CapacityConfig
+git commit -m "Add capacity-limited N=150 protocol"
+git status --short
+git rev-parse HEAD
 
 python experiments/vlm_ab_evaluation/run_pipeline.py `
   --config $StrictConfig `
@@ -627,8 +743,8 @@ python experiments/vlm_ab_evaluation/run_pipeline.py `
 ```
 
 Сохраните `design/power_plan.json` во внешнем preregistration/archive до просмотра model outputs.
-Текущий design ожидает 240 independent primary papers, evaluable fraction 0.90 и achieved power
-около 0.836 для target effect 0.10.
+Capacity-limited design ожидает 150 independent primary papers, evaluable fraction 0.90 и achieved
+power около 0.803 для target effect 0.121.
 
 После `plan` нельзя редактировать evaluation source, config или plan. Любое изменение требует нового
 ID и нового plan.
@@ -660,7 +776,8 @@ Acceptance gate:
 - bundled `adapter_config.json` фиксирует configured base model ID и revision;
 - provenance image order и обязательные citations проходят проверку;
 - duplicate normalized prompts и within-row duplicate bytes отсутствуют;
-- primary papers не меньше preregistered minimum.
+- для capacity config ровно 150 valid canonical primary papers; для configs без exact-N guard не
+  меньше preregistered minimum.
 
 Если любой пункт не выполнен, inference не запускается. Исправление публикуется новой immutable
 revision и новым experiment ID; failed run artifacts не редактируются вручную.
@@ -704,7 +821,8 @@ python experiments/vlm_ab_evaluation/run_pipeline.py `
   blind
 ```
 
-Каждому reviewer передается только его директория:
+Каждому из двух reviewer передается только его директория и инструкция
+`experiments/vlm_ab_evaluation/EXPERT_REVIEW_RU.md`:
 
 ```text
 blind_review/public/<opaque-reviewer-id>/
@@ -766,6 +884,7 @@ analysis/deblinded_reviews.jsonl
 | `decision ... is still pending` | Не все human decisions завершены | Завершить указанную row, не обходить gate |
 | `tampered ... binding` | Изменено поле связи с immutable queue | Восстановить binding из template |
 | `requires two distinct ... identifiers` | Нет двух независимых normalized IDs | Провести вторую реальную проверку |
+| `requires an affirmative independent_attestation` | Checkbox/поле attestation отсутствует или false | Получить реальное независимое подтверждение и экспортировать literal `true` |
 | `declared image SHA256 does not match bytes` | Provenance не соответствует файлу | Проверить правильный файл/path и пересчитать SHA256 |
 | `corrected benchmark audit has critical findings` | Candidate все еще нарушает contract | Исправить curator record или исключить его |
 | `fewer unique primary paper IDs` | Design меньше preregistered N | Добавить проверенные независимые papers или пересоздать protocol до inference |
@@ -776,6 +895,25 @@ analysis/deblinded_reviews.jsonl
 
 ## 20. Фактический следующий шаг
 
-Сейчас нужно сгенерировать `curate-forms` workspace, открыть `curator.html`, распределить 386 задач
-между curators и экспортировать полный `completed_decisions.jsonl`. До завершения human curation,
-успешного `curate-assemble` и публикации `B`, `R`, `M` strict inference запускать нельзя.
+Для capacity-150 run созданы artifact-v3 `curation_queue_v3`, configured-strata
+`capacity_review_plan_v4` и `capacity_machine_assist_v4`; старые `curation_queue`, plan v1-v3 и
+`capacity_machine_assist_v1-v3` superseded. Plan фиксирует 148 clean groups и 2 blocked
+identity-remediation groups: exact remediation pool 150 при `capacity_exact_target_available=false`.
+Следующий фактический шаг -- получить для каждого
+template новые проверяемые article/image/license evidence и полные machine proposals, затем пропустить
+отдельный JSONL через `curate-capacity-enrichment`. Полученный `machine_assisted_draft.json` заполняет
+научные поля, после чего два человека выполняют короткую проверку и аттестацию. Machine package не
+создает retain decisions и не заменяет человеческое подтверждение. До завершения enrichment, human verification, успешного
+`curate-assemble` и публикации `B`, `R`, `M` strict inference запускать нельзя.
+
+Текущие integrity bindings capacity run:
+
+| Артефакт | SHA256 / значение |
+| --- | --- |
+| Queue fingerprint | `69a6041b48958c283c0ba58ab4192d9d8956656232d893f231a505e5f2ed41a8` |
+| `curation_queue_v3/queue_manifest.json` | `f0ca788b2046720752eb8194bb4a76751a0d40b8e7d623cb73262d758bdc2652` |
+| `capacity_review_plan_v4/capacity_plan_manifest.json` | `a1f06b8f527ad94cac32f7fc959a58db9be270dc933510d9d31a6e1df3cb7bcb` |
+| `capacity_machine_assist_v4/capacity_assist_manifest.json` | `ea02a2ae0db3de6f0f99358a51a4a679f3fad070b3c6d5c399d5f78cf7249770` |
+| `curator_workspace_v4/workspace_manifest.json` | `4c7005fe19a4966053763454404e02363c918755e4246e1039bf1e4b5479408a` |
+| `curator_workspace_v4/curator.html` | `5c92c1661e92375e90de8c376f2ff8e3e123433ae1668aa708c4173db1f66513` |
+| `assisted_triage_v2/triage_manifest.json` | `30ba4c7264e569adc967e6bb07231ee3c7424d8cd792cb26b0f8dd93ef3944c2` |

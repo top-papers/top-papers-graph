@@ -1,0 +1,95 @@
+schema_version: 1
+experiment:
+  id: qwen3vl-cap150-remediation-working-v1
+  public_id: study-2026-cap150-remediation-working-v1
+  seed: 20260716
+  require_clean_code: false
+  require_preregistered_plan: false
+  output_dir: runs/vlm_ab/qwen3vl-cap150-remediation-working-v1
+benchmark:
+  repo_id: top-papers/top-papers-graph-benchmark
+  revision: 33ccc5ed08e314c6457dcaa23e7f7508406cb4f8
+  data_file: data/task3_vlm_generation.jsonl
+  provenance_file: article_image_sources.jsonl
+  require_gold: false
+  require_complete_provenance: true
+  require_split_provenance: true
+training_audit:
+  require_lineage_manifest: true
+  sources:
+  - repo_id: top-papers/Qwen3-VL-8B-Instruct-scireason
+    repo_type: model
+    revision: 45936868f4b2acdbbc4245044137072411fd11cc
+    files:
+    - artifacts/data/sft_all.jsonl
+    - artifacts/data/grpo_all.jsonl
+models:
+  base:
+    base_model:
+      id: Qwen/Qwen3-VL-8B-Instruct
+      revision: 0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+    model_kwargs:
+      torch_dtype: bfloat16
+      device_map: auto
+      low_cpu_mem_usage: true
+      attn_implementation: sdpa
+      trust_remote_code: false
+  tuned:
+    base_model:
+      id: Qwen/Qwen3-VL-8B-Instruct
+      revision: 0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+    adapter:
+      id: top-papers/Qwen3-VL-8B-Instruct-scireason
+      revision: 45936868f4b2acdbbc4245044137072411fd11cc
+      adapter_name: default
+    model_kwargs:
+      torch_dtype: bfloat16
+      device_map: auto
+      low_cpu_mem_usage: true
+      attn_implementation: sdpa
+      trust_remote_code: false
+processor:
+  id: top-papers/Qwen3-VL-8B-Instruct-scireason
+  revision: 45936868f4b2acdbbc4245044137072411fd11cc
+  settings:
+    max_pixels: 1003520
+    trust_remote_code: false
+  call_settings:
+    padding: true
+  chat_template_settings:
+    add_vision_id: false
+generation:
+  do_sample: false
+  max_new_tokens: 768
+  use_cache: true
+conditions:
+- original
+- text_only
+- shuffled_images
+review:
+  reviewer_ids:
+  - expert-01
+  - expert-02
+  - expert-03
+  reviews_per_item: 2
+  primary_condition: original
+statistics:
+  primary_condition: original
+  primary_endpoint_only: true
+  primary_strata:
+  - multimodal_hard
+  - temporal_hard
+  confidence_level: 0.95
+  bootstrap_resamples: 10000
+  randomization_resamples: 100000
+  exact_max_clusters: 16
+power:
+  n_items: 150
+  require_exact_n_items: true
+  reviews_per_item: 2
+  evaluable_fraction: 0.9
+  intracluster_correlation: 0.5
+  alpha: 0.05
+  target_power: 0.8
+  score_sd: 0.5
+  target_effect: 0.121

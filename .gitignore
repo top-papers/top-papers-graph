@@ -2,6 +2,8 @@
 .env
 .venv/
 venv/
+.kaggle/
+kaggle.json
 
 # Python build and caches
 __pycache__/
@@ -30,6 +32,9 @@ runs/
 outputs/
 *.log
 tmp_*
+experiments/vlm_ab_evaluation/kaggle/build/
+experiments/vlm_ab_evaluation/kaggle/staging/
+experiments/vlm_ab_evaluation/kaggle/downloads/
 
 reports/*
 !reports/README.md

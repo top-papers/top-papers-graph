@@ -30,11 +30,13 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
+from .adapter_checkpoint import verify_plain_fp32_lora_safetensors
+from .config import validate_nf4_model_kwargs
 from .paths import resolve_dataset_file
 
 
 ARTIFACT_VERSION = 1
-ENGINE_VERSION = "3"
+ENGINE_VERSION = "5"
 DEFAULT_CONDITIONS = ("original", "text_only", "shuffled_images")
 SUPPORTED_CONDITIONS = frozenset(DEFAULT_CONDITIONS)
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"})
@@ -51,6 +53,18 @@ _IMAGE_REFERENCE_FIELDS = (
     "image_url",
     "url",
 )
+_KAGGLE_RUNTIME_VERSIONS = {
+    "transformers": "4.57.3",
+    "peft": "0.19.1",
+    "qwen_vl_utils": "0.0.14",
+    "numpy": "1.26.4",
+    "accelerate": "1.12.0",
+    "pillow": "11.3.0",
+    "safetensors": "0.6.2",
+    "huggingface_hub": "0.36.0",
+    "tokenizers": "0.22.1",
+}
+_T4_NAME_RE = re.compile(r"(?:NVIDIA )?(?:TESLA )?T4", re.IGNORECASE)
 _OUTPUT_FIELDS = frozenset(
     {
         "record_version",
@@ -353,6 +367,8 @@ def _prompt_messages(row: Mapping[str, Any]) -> list[dict[str, Any]]:
         if not role or "\x00" in role:
             raise InferenceInputError(f"messages[{index}].role is invalid")
         content = message.get("content", message.get("value", ""))
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
         message.pop("from", None)
         message.pop("value", None)
         message["role"] = role
@@ -787,6 +803,214 @@ def _resolve_torch_dtype(model_kwargs: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _normalize_nf4_quantization(
+    model_kwargs: dict[str, Any], transformers: Any
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    if "quantization_config" not in model_kwargs:
+        validate_nf4_model_kwargs(model_kwargs, error_type=InferenceConfigurationError)
+        return model_kwargs, None
+    config = validate_nf4_model_kwargs(model_kwargs, error_type=InferenceConfigurationError)
+    assert config is not None
+
+    _import_optional("bitsandbytes", "bitsandbytes for NF4 quantization")
+    torch = _import_optional("torch", "torch")
+    config_class = getattr(transformers, "BitsAndBytesConfig", None)
+    if config_class is None:
+        raise InferenceConfigurationError(
+            "transformers.BitsAndBytesConfig is unavailable; NF4 quantization is not supported"
+        )
+    requested = {
+        "load_in_4bit": True,
+        "load_in_8bit": False,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_compute_dtype": torch.float16,
+        "bnb_4bit_use_double_quant": config["bnb_4bit_use_double_quant"],
+    }
+    try:
+        quantization_config = config_class(**requested)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise InferenceConfigurationError(
+            f"cannot construct the requested bitsandbytes NF4 configuration: {exc}"
+        ) from exc
+    result = dict(model_kwargs)
+    result["quantization_config"] = quantization_config
+    return result, requested
+
+
+def _wrapped_models(model: Any) -> Iterable[Any]:
+    pending = [model]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        get_base_model = getattr(current, "get_base_model", None)
+        if callable(get_base_model):
+            try:
+                pending.append(get_base_model())
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+        for name in ("base_model", "model"):
+            child = getattr(current, name, None)
+            if child is not None and child is not current:
+                pending.append(child)
+
+
+def _runtime_quantization_value(config: Any, field: str) -> Any:
+    if isinstance(config, Mapping):
+        return config.get(field)
+    return getattr(config, field, None)
+
+
+def _verify_balanced_device_map(model: Any) -> None:
+    device_map = next(
+        (
+            value
+            for candidate in _wrapped_models(model)
+            if isinstance((value := getattr(candidate, "hf_device_map", None)), Mapping) and value
+        ),
+        None,
+    )
+    if device_map is None:
+        raise InferenceConfigurationError(
+            "loaded model does not expose hf_device_map for device_map='balanced'"
+        )
+    gpu_ids: set[int] = set()
+    invalid: set[str] = set()
+    for value in device_map.values():
+        if isinstance(value, int) and not isinstance(value, bool):
+            gpu_ids.add(value)
+            continue
+        text = str(value).strip().lower()
+        match = re.fullmatch(r"(?:cuda:)?(\d+)", text)
+        if match:
+            gpu_ids.add(int(match.group(1)))
+        else:
+            invalid.add(text or repr(value))
+    if gpu_ids != {0, 1} or invalid:
+        raise InferenceConfigurationError(
+            "loaded balanced device map must use exactly CUDA devices 0 and 1 "
+            f"without CPU/disk/meta placement; gpu_ids={sorted(gpu_ids)}, invalid={sorted(invalid)}"
+        )
+
+
+def _verify_unquantized_fp16_runtime(model: Any) -> None:
+    torch = _import_optional("torch", "torch")
+    for candidate in _wrapped_models(model):
+        runtime_config = getattr(candidate, "config", None)
+        quantization_config = (
+            runtime_config.get("quantization_config")
+            if isinstance(runtime_config, Mapping)
+            else getattr(runtime_config, "quantization_config", None)
+        )
+        if (
+            any(
+                getattr(candidate, field, False) is True
+                for field in ("is_loaded_in_4bit", "is_loaded_in_8bit", "is_quantized")
+            )
+            or getattr(candidate, "hf_quantizer", None) is not None
+            or getattr(candidate, "quantization_method", None) not in (None, "")
+            or quantization_config is not None
+        ):
+            raise InferenceConfigurationError(
+                "FP16 primary model unexpectedly exposes runtime quantization metadata"
+            )
+    named_parameters = getattr(model, "named_parameters", None)
+    if not callable(named_parameters):
+        raise InferenceConfigurationError("loaded FP16 model does not expose named_parameters()")
+    parameters = list(named_parameters())
+    nonfloating = sorted(
+        name
+        for name, parameter in parameters
+        if not callable(getattr(parameter, "is_floating_point", None))
+        or not parameter.is_floating_point()
+    )
+    if nonfloating:
+        raise InferenceConfigurationError(
+            "unquantized FP16 base contains non-floating parameters: " + ", ".join(nonfloating[:10])
+        )
+    floating = parameters
+    if not floating:
+        raise InferenceConfigurationError("loaded FP16 model exposes no floating-point parameters")
+    invalid = sorted(
+        {str(parameter.dtype) for _name, parameter in floating if parameter.dtype != torch.float16}
+    )
+    if invalid:
+        raise InferenceConfigurationError(
+            f"unquantized FP16 base contains non-FP16 floating parameter dtypes: {invalid}"
+        )
+
+
+def _verify_fp32_lora_runtime(model: Any, adapter_name: str) -> None:
+    torch = _import_optional("torch", "torch")
+    named_parameters = getattr(model, "named_parameters", None)
+    if not callable(named_parameters):
+        raise InferenceConfigurationError("loaded PEFT model does not expose named_parameters()")
+    adapter_parameters = [
+        (name, parameter)
+        for name, parameter in named_parameters()
+        if adapter_name in name.split(".")
+        and any(part.startswith("lora_") for part in name.split("."))
+    ]
+    if not adapter_parameters:
+        raise InferenceConfigurationError(
+            f"loaded PEFT model exposes no LoRA parameters for adapter {adapter_name!r}"
+        )
+    invalid = sorted(
+        {
+            str(parameter.dtype)
+            for _name, parameter in adapter_parameters
+            if parameter.dtype != torch.float32
+        }
+    )
+    if invalid:
+        raise InferenceConfigurationError(
+            f"PEFT adapter {adapter_name!r} contains non-FP32 LoRA parameter dtypes: {invalid}"
+        )
+
+
+def _verify_nf4_runtime(
+    model: Any,
+    requested: Mapping[str, Any] | None,
+) -> None:
+    if requested is None:
+        return
+    loaded_model = next(
+        (
+            candidate
+            for candidate in _wrapped_models(model)
+            if getattr(candidate, "is_loaded_in_4bit", False) is True
+        ),
+        None,
+    )
+    if loaded_model is None:
+        raise InferenceConfigurationError(
+            "loaded model does not report is_loaded_in_4bit=True for requested NF4 quantization"
+        )
+    runtime_config = getattr(loaded_model, "quantization_config", None)
+    if runtime_config is None:
+        runtime_config = getattr(getattr(loaded_model, "config", None), "quantization_config", None)
+    if runtime_config is None:
+        raise InferenceConfigurationError(
+            "loaded 4-bit model does not expose its runtime quantization_config"
+        )
+    mismatches: list[str] = []
+    for field, expected in requested.items():
+        actual = _runtime_quantization_value(runtime_config, field)
+        if field == "bnb_4bit_compute_dtype":
+            matches = actual == expected or str(actual) in {"float16", "torch.float16"}
+        else:
+            matches = actual == expected
+        if not matches:
+            mismatches.append(f"{field}={actual!r} (expected {expected!r})")
+    if mismatches:
+        raise InferenceConfigurationError(
+            "loaded model runtime NF4 configuration mismatch: " + "; ".join(mismatches)
+        )
+
+
 def _assert_no_reserved_kwargs(kwargs: Mapping[str, Any], reserved: set[str], label: str) -> None:
     conflict = sorted(reserved & set(kwargs))
     if conflict:
@@ -818,6 +1042,47 @@ def _active_adapter_names(model: Any) -> list[str]:
     if isinstance(value, Sequence):
         return [str(item) for item in value]
     return []
+
+
+def _reload_and_verify_peft_checkpoint(
+    model: Any,
+    adapter_id: str,
+    adapter_revision: str,
+    adapter_name: str,
+    adapter_kwargs: Mapping[str, Any],
+) -> None:
+    load_adapter = getattr(model, "load_adapter", None)
+    if not callable(load_adapter):
+        raise InferenceConfigurationError(
+            "PEFT model does not expose load_adapter() for checkpoint-key verification"
+        )
+    try:
+        load_result = load_adapter(
+            adapter_id,
+            adapter_name=adapter_name,
+            is_trainable=False,
+            revision=adapter_revision,
+            **adapter_kwargs,
+        )
+    except Exception as exc:
+        raise InferenceConfigurationError(
+            f"cannot reload the pinned PEFT checkpoint for key verification: {exc}"
+        ) from exc
+    incompatible: dict[str, list[str]] = {}
+    for field in ("missing_keys", "unexpected_keys"):
+        value = getattr(load_result, field, None)
+        if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+            raise InferenceConfigurationError(
+                f"PEFT checkpoint verification returned malformed {field}"
+            )
+        keys = [str(key) for key in value]
+        if keys:
+            incompatible[field] = keys
+    if incompatible:
+        raise InferenceConfigurationError(
+            "pinned PEFT checkpoint has incompatible adapter keys: "
+            + json.dumps(incompatible, ensure_ascii=True, sort_keys=True)
+        )
 
 
 def load_transformers_model(arm_name: str, arm_config: Mapping[str, Any]) -> Any:
@@ -854,19 +1119,41 @@ def load_transformers_model(arm_name: str, arm_config: Mapping[str, Any]) -> Any
         "arm_config",
     )
     _assert_no_reserved_kwargs(model_kwargs, {"revision"}, "model_kwargs")
+    requested_torch_dtype = model_kwargs.get("torch_dtype")
     model_kwargs = _resolve_torch_dtype(model_kwargs)
 
     transformers = _import_optional("transformers", "transformers")
+    model_kwargs, requested_quantization = _normalize_nf4_quantization(model_kwargs, transformers)
+    require_balanced = model_kwargs.get("device_map") == "balanced"
+    require_unquantized_fp16 = (
+        requested_quantization is None
+        and (
+            str(requested_torch_dtype).removeprefix("torch.") == "float16"
+            or str(model_kwargs.get("torch_dtype")).removeprefix("torch.") == "float16"
+        )
+    )
     model_class = getattr(transformers, "Qwen3VLForConditionalGeneration", None)
     if model_class is None:
         raise InferenceConfigurationError(
             "transformers.Qwen3VLForConditionalGeneration is unavailable"
         )
-    base_model = model_class.from_pretrained(
-        base_id,
-        revision=base_revision,
-        **model_kwargs,
-    )
+    try:
+        base_model = model_class.from_pretrained(
+            base_id,
+            revision=base_revision,
+            **model_kwargs,
+        )
+    except Exception as exc:
+        if requested_quantization is not None:
+            raise InferenceConfigurationError(
+                f"base model loading failed under the requested NF4 configuration: {exc}"
+            ) from exc
+        raise
+    _verify_nf4_runtime(base_model, requested_quantization)
+    if require_unquantized_fp16:
+        _verify_unquantized_fp16_runtime(base_model)
+    if require_balanced:
+        _verify_balanced_device_map(base_model)
 
     if arm == "base":
         if config.get("adapter_id") or config.get("adapter_model_id") or config.get("adapter"):
@@ -907,23 +1194,74 @@ def load_transformers_model(arm_name: str, arm_config: Mapping[str, Any]) -> Any
             {"revision", "adapter_name", "is_trainable"},
             "adapter_kwargs",
         )
+        if "autocast_adapter_dtype" in adapter_kwargs and not isinstance(
+            adapter_kwargs["autocast_adapter_dtype"], bool
+        ):
+            raise InferenceConfigurationError(
+                "adapter_kwargs.autocast_adapter_dtype must be boolean"
+            )
+        checkpoint_attestation = config.get("adapter_checkpoint_attestation")
+        if checkpoint_attestation is not None:
+            if not isinstance(checkpoint_attestation, Mapping):
+                raise InferenceConfigurationError(
+                    "adapter_checkpoint_attestation must be an object"
+                )
+            huggingface_hub = _import_optional("huggingface_hub", "huggingface_hub")
+            hf_hub_download = getattr(huggingface_hub, "hf_hub_download", None)
+            if not callable(hf_hub_download):
+                raise InferenceConfigurationError("huggingface_hub.hf_hub_download is unavailable")
+            try:
+                checkpoint_path = hf_hub_download(
+                    repo_id=adapter_id,
+                    repo_type="model",
+                    revision=adapter_revision,
+                    filename="adapter_model.safetensors",
+                )
+            except Exception as exc:
+                raise InferenceConfigurationError(
+                    f"cannot download the pinned adapter checkpoint for verification: {exc}"
+                ) from exc
+            verify_plain_fp32_lora_safetensors(
+                checkpoint_path,
+                checkpoint_attestation,
+                repo_id=adapter_id,
+                revision=adapter_revision,
+                error_type=InferenceConfigurationError,
+            )
         peft = _import_optional("peft", "peft")
         peft_class = getattr(peft, "PeftModel", None)
         if peft_class is None:
             raise InferenceConfigurationError("peft.PeftModel is unavailable")
-        model = peft_class.from_pretrained(
-            base_model,
-            adapter_id,
-            revision=adapter_revision,
-            adapter_name=adapter_name,
-            is_trainable=False,
-            **adapter_kwargs,
-        )
+        try:
+            model = peft_class.from_pretrained(
+                base_model,
+                adapter_id,
+                revision=adapter_revision,
+                adapter_name=adapter_name,
+                is_trainable=False,
+                **adapter_kwargs,
+            )
+        except Exception as exc:
+            if requested_quantization is not None:
+                raise InferenceConfigurationError(
+                    "PEFT adapter model loading failed under the requested NF4 "
+                    f"configuration: {exc}"
+                ) from exc
+            raise
         if not isinstance(model, peft_class):
             raise InferenceConfigurationError("adapter loader did not return a PeftModel")
+        _reload_and_verify_peft_checkpoint(
+            model,
+            adapter_id,
+            adapter_revision,
+            adapter_name,
+            adapter_kwargs,
+        )
         active_adapters = _active_adapter_names(model)
-        if adapter_name not in active_adapters:
-            raise InferenceConfigurationError("requested PEFT adapter is not active")
+        if active_adapters != [adapter_name]:
+            raise InferenceConfigurationError(
+                f"requested PEFT adapter must be the only active adapter; active={active_adapters}"
+            )
         peft_config = getattr(model, "peft_config", None)
         if not isinstance(peft_config, Mapping):
             raise InferenceConfigurationError("PEFT model has no adapter config mapping")
@@ -931,6 +1269,12 @@ def load_transformers_model(arm_name: str, arm_config: Mapping[str, Any]) -> Any
             raise InferenceConfigurationError("active PEFT adapter has no config")
         if peft_config[adapter_name] is None:
             raise InferenceConfigurationError("active PEFT adapter config is empty")
+        if adapter_kwargs.get("autocast_adapter_dtype") is True:
+            _verify_fp32_lora_runtime(model, adapter_name)
+
+    _verify_nf4_runtime(model, requested_quantization)
+    if require_balanced:
+        _verify_balanced_device_map(model)
 
     eval_method = getattr(model, "eval", None)
     if not callable(eval_method):
@@ -1113,7 +1457,11 @@ def _runtime_environment(backend: str) -> dict[str, Any]:
             ("numpy", "numpy"),
             ("torchvision", "torchvision"),
             ("accelerate", "accelerate"),
+            ("bitsandbytes", "bitsandbytes"),
             ("pillow", "Pillow"),
+            ("safetensors", "safetensors"),
+            ("huggingface_hub", "huggingface-hub"),
+            ("tokenizers", "tokenizers"),
         )
         if (version := _package_version(distribution)) is not None
     }
@@ -1132,9 +1480,52 @@ def _runtime_environment(backend: str) -> dict[str, Any]:
             if torch.cuda.is_available():
                 result["gpu"] = torch.cuda.get_device_name(torch.cuda.current_device())
                 result["gpu_count"] = torch.cuda.device_count()
+                result["gpu_names"] = [
+                    torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())
+                ]
         except (ImportError, RuntimeError):
             pass
     return result
+
+
+def _validate_kaggle_runtime_environment(
+    runtime: Mapping[str, Any], result_scope: str
+) -> None:
+    gpu_names = runtime.get("gpu_names")
+    if (
+        runtime.get("gpu_count") != 2
+        or not isinstance(gpu_names, list)
+        or len(gpu_names) != 2
+        or any(not isinstance(name, str) or _T4_NAME_RE.fullmatch(name.strip()) is None for name in gpu_names)
+    ):
+        raise InferenceConfigurationError(
+            f"{result_scope} requires exactly two NVIDIA T4 GPUs; got {gpu_names!r}"
+        )
+    if not isinstance(runtime.get("cuda_version"), str) or not runtime["cuda_version"]:
+        raise InferenceConfigurationError(f"{result_scope} requires a CUDA-enabled Torch runtime")
+    packages = runtime.get("packages")
+    if not isinstance(packages, Mapping):
+        raise InferenceConfigurationError("runtime package inventory is unavailable")
+    mismatches = [
+        f"{name}={packages.get(name)!r} (expected {expected!r})"
+        for name, expected in _KAGGLE_RUNTIME_VERSIONS.items()
+        if packages.get(name) != expected
+    ]
+    if result_scope == "automatic_sensitivity_only" and packages.get("bitsandbytes") != "0.48.1":
+        mismatches.append(
+            f"bitsandbytes={packages.get('bitsandbytes')!r} (expected '0.48.1')"
+        )
+    torch_version = packages.get("torch")
+    try:
+        torch_numeric = tuple(int(part) for part in str(torch_version).split("+", 1)[0].split(".")[:2])
+    except ValueError:
+        torch_numeric = ()
+    if len(torch_numeric) != 2 or torch_numeric < (2, 3):
+        mismatches.append(f"torch={torch_version!r} (expected >=2.3)")
+    if mismatches:
+        raise InferenceConfigurationError(
+            "Kaggle publication runtime package mismatch: " + "; ".join(mismatches)
+        )
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
@@ -1461,6 +1852,11 @@ def run_inference(
         raise InferenceConfigurationError("backend must be 'transformers' or 'mock'")
     backend_name = backend.strip().lower()
     runtime_environment = _runtime_environment(backend_name)
+    if backend_name == "transformers" and result_scope in {
+        "publication_candidate",
+        "automatic_sensitivity_only",
+    }:
+        _validate_kaggle_runtime_environment(runtime_environment, result_scope)
     if experiment_fingerprint is not None and not re.fullmatch(
         r"[0-9a-f]{64}", experiment_fingerprint
     ):
@@ -1468,6 +1864,7 @@ def run_inference(
     if result_scope not in {
         "unspecified",
         "publication_candidate",
+        "automatic_sensitivity_only",
         "exploratory_not_for_publication",
     }:
         raise InferenceConfigurationError("result_scope is invalid")

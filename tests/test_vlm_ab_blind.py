@@ -64,7 +64,11 @@ def _valid_export(public: dict, *, preference: str = "left") -> dict:
         "artifact_version": ARTIFACT_VERSION,
         "experiment_id": public["experiment_id"],
         "study_fingerprint": public["study_fingerprint"],
+        "rubric_version": public["rubric_version"],
+        "rubric_sha256": public["rubric_sha256"],
         "reviewer_id": public["reviewer_id"],
+        "package_nonce": public["package_nonce"],
+        "independent_review_attestation": True,
         "assignments": assignment_ids,
         "responses": [
             {
@@ -154,11 +158,50 @@ def test_packages_are_blind_deterministic_balanced_and_copy_images(tmp_path: Pat
         assert "Raw response one" in package_text
         assert "Raw response two" in package_text
         assert "validationErrors" in package_text
+        assert public["rubric_version"] == "vlm-ab-paired-v1.0"
+        assert re.fullmatch(r"[0-9a-f]{64}", public["rubric_sha256"])
+        assert "Краткое обоснование решения" in package_text
+        assert "independent_review_attestation" in package_text
         for copied in package.image_paths:
             assert copied.exists()
             assert re.fullmatch(r"img_[0-9a-f]{32}\.png", copied.name)
             assert copied.read_bytes().startswith(b"PNG")
             assert copied.parent == package.package_dir / "images"
+
+
+def test_two_expert_packages_mirror_sides_and_reverse_item_order(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    benchmark, base, tuned = _inputs(dataset_root, count=7)
+    result = build_blind_review_packages(
+        benchmark,
+        base,
+        tuned,
+        dataset_root,
+        tmp_path / "packages",
+        ["expert-02", "expert-01"],
+        reviews_per_item=2,
+        seed=20260716,
+        experiment_id="two-expert-study",
+    )
+    owner = json.loads(result.owner_mapping_path.read_text(encoding="utf-8"))
+    by_item = defaultdict(list)
+    by_reviewer = defaultdict(list)
+    for row in owner["assignments"]:
+        by_item[row["assignment_id"]].append(row)
+        by_reviewer[row["reviewer_id"]].append(row)
+
+    assert result.total_assignment_count == 14
+    assert set(by_reviewer) == {"expert-01", "expert-02"}
+    assert all(len(rows) == 2 for rows in by_item.values())
+    for rows in by_item.values():
+        assert {row["left_arm"] for row in rows} == {"base", "tuned"}
+        assert sum(row["display_position"] for row in rows) == 8
+    for rows in by_reviewer.values():
+        assert {row["display_position"] for row in rows} == set(range(1, 8))
+        assert len({row["package_nonce"] for row in rows}) == 1
+        tuned_left = sum(row["left_arm"] == "tuned" for row in rows)
+        assert abs(tuned_left - (len(rows) - tuned_left)) <= 1
+    assert {rows[0]["package_nonce"] for rows in by_reviewer.values()}.__len__() == 2
 
 
 def test_missing_paired_outputs_block_blind_packaging(tmp_path: Path) -> None:
@@ -180,6 +223,24 @@ def test_missing_paired_outputs_block_blind_packaging(tmp_path: Path) -> None:
             dataset_root,
             tmp_path / "packages",
             ["r1", "r2"],
+            2,
+            9,
+        )
+
+
+def test_missing_response_without_explicit_error_blocks_packaging(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    benchmark, base, tuned = _inputs(dataset_root, count=1)
+    tuned[("sample-00", "original")].pop("response")
+
+    with pytest.raises(BlindReviewError, match="no response or explicit generation error"):
+        build_blind_review_packages(
+            benchmark,
+            base,
+            tuned,
+            dataset_root,
+            tmp_path / "packages",
+            ["expert-01", "expert-02"],
             2,
             9,
         )
@@ -338,6 +399,16 @@ def test_review_exports_are_strict_and_incomplete_forms_are_rejected(tmp_path: P
     with pytest.raises(ReviewValidationError, match="fields do not match"):
         validate_review_export(malformed)
 
+    no_attestation = copy.deepcopy(valid)
+    no_attestation["independent_review_attestation"] = False
+    with pytest.raises(ReviewValidationError, match="independent_review_attestation"):
+        validate_review_export(no_attestation)
+
+    no_rationale = copy.deepcopy(valid)
+    no_rationale["responses"][0]["comments"] = "  "
+    with pytest.raises(ReviewValidationError, match="rationale"):
+        validate_review_export(no_rationale)
+
     wrong_assignment = copy.deepcopy(valid)
     wrong_assignment["responses"][0]["assignment_id"] = "item_unknown"
     with pytest.raises(ReviewValidationError, match="out of order"):
@@ -381,6 +452,8 @@ def test_deblinding_normalizes_preferences_and_preserves_displayed_side(tmp_path
         assert row["evidence_preference"] == entry["right_arm"]
         assert row["visual_preference"] == "tie"
         assert row["temporal_preference"] == "skip"
+        assert row["display_position"] in {1, 2}
+        assert row["independent_review_attestation"] is True
         expected_tuned_tags = (
             ["missed_visual"] if row["tuned_side"] == "left" else ["wrong_temporal"]
         )
@@ -400,4 +473,28 @@ def test_deblinding_normalizes_preferences_and_preserves_displayed_side(tmp_path
     )
     result.owner_mapping_path.write_text(json.dumps(tampered_owner), encoding="utf-8")
     with pytest.raises(ReviewValidationError, match="integrity HMAC"):
+        deblind_reviews(exported, result.owner_mapping_path, blinding_secret=8)
+
+
+def test_relabelled_export_from_another_reviewer_is_rejected(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    benchmark, base, tuned = _inputs(dataset_root, count=2)
+    result = build_blind_review_packages(
+        benchmark,
+        base,
+        tuned,
+        dataset_root,
+        tmp_path / "packages",
+        ["expert-01", "expert-02"],
+        2,
+        8,
+        experiment_id="nonce-study",
+    )
+    public = json.loads(
+        result.for_reviewer("expert-01").assignment_path.read_text(encoding="utf-8")
+    )
+    exported = _valid_export(public)
+    exported["reviewer_id"] = "expert-02"
+
+    with pytest.raises(ReviewValidationError, match="package nonce"):
         deblind_reviews(exported, result.owner_mapping_path, blinding_secret=8)

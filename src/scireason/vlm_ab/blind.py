@@ -21,7 +21,7 @@ from typing import Any
 from .identities import normalize_identity
 from .paths import resolve_dataset_file
 
-ARTIFACT_VERSION = 2
+ARTIFACT_VERSION = 3
 PUBLIC_ASSIGNMENT_FILENAME = "assignments.json"
 REVIEW_HTML_FILENAME = "review.html"
 OWNER_MAPPING_FILENAME = "owner_only.json"
@@ -39,6 +39,67 @@ ERROR_TAGS = (
     "invalid_format",
     "other",
 )
+RUBRIC_VERSION = "vlm-ab-paired-v1.0"
+RUBRIC = {
+    "version": RUBRIC_VERSION,
+    "instructions": [
+        "Оценивайте только показанные задание, изображения и два ответа. Не используйте внешний поиск.",
+        "Работайте независимо: не обсуждайте решения со вторым экспертом до сдачи обоих файлов.",
+        "Не пытайтесь определить модель по стилю ответа. Метки left/right не связаны с одной системой.",
+        "Фактическая корректность и опора на свидетельства важнее стиля и краткости.",
+        "Пустой, оборванный ответ или ошибка генерации являются недостатком ответа, а не причиной skip.",
+    ],
+    "criteria": {
+        "overall_preference": (
+            "Итоговое содержательное качество: корректность, полнота, релевантность и выполнение задачи."
+        ),
+        "evidence_preference": (
+            "Корректность использования научных свидетельств и отсутствие неподтвержденных выводов."
+        ),
+        "visual_preference": (
+            "Соответствие утверждений показанным графикам, таблицам и другим изображениям."
+        ),
+        "temporal_preference": (
+            "Корректность временного порядка, динамики, трендов и причинно-временных связей."
+        ),
+    },
+    "preferences": {
+        "left": "Левый ответ содержательно лучше по выбранному критерию.",
+        "right": "Правый ответ содержательно лучше по выбранному критерию.",
+        "tie": "Ответы эквивалентны, различие несущественно или критерий одинаково неприменим.",
+        "skip": (
+            "Оценка критерия невозможна из-за дефекта задания или пакета. Требуется объяснение."
+        ),
+    },
+    "confidence": {
+        "1": "очень низкая",
+        "2": "низкая",
+        "3": "средняя",
+        "4": "высокая",
+        "5": "очень высокая",
+    },
+    "error_tags": {
+        "hallucination": "выдуманный факт или объект",
+        "unsupported_claim": "утверждение не подтверждено данными",
+        "wrong_evidence": "неверно использовано свидетельство",
+        "missed_evidence": "пропущено существенное свидетельство",
+        "wrong_visual": "неверно прочитано изображение",
+        "missed_visual": "пропущена существенная визуальная деталь",
+        "wrong_temporal": "ошибка во времени, порядке или тренде",
+        "incomplete": "существенно неполный ответ",
+        "invalid_format": "нарушен обязательный формат ответа",
+        "other": "другая содержательная ошибка, поясненная в комментарии",
+    },
+}
+RUBRIC_SHA256 = hashlib.sha256(
+    json.dumps(
+        RUBRIC,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+).hexdigest()
 
 _RESPONSE_FIELDS = (
     "raw_response",
@@ -68,7 +129,11 @@ _REVIEW_TOP_LEVEL_FIELDS = frozenset(
         "artifact_version",
         "experiment_id",
         "study_fingerprint",
+        "rubric_version",
+        "rubric_sha256",
         "reviewer_id",
+        "package_nonce",
+        "independent_review_attestation",
         "assignments",
         "responses",
     }
@@ -103,6 +168,8 @@ _OWNER_ENTRY_FIELDS = frozenset(
         "condition",
         "left_arm",
         "right_arm",
+        "display_position",
+        "package_nonce",
     }
 )
 _MISSING = object()
@@ -215,6 +282,11 @@ def _payload_hmac(payload: Mapping[str, Any], seed: int | str) -> str:
     return hmac.new(
         _hmac_key(seed), _json_text(payload).encode("utf-8"), hashlib.sha256
     ).hexdigest()
+
+
+def _reviewer_package_nonce(seed: int | str, experiment_id: str, reviewer_id: str) -> str:
+    material = f"{experiment_id}\x00{reviewer_id}\x00review-package".encode("utf-8")
+    return hmac.new(_hmac_key(seed), material, hashlib.sha256).hexdigest()
 
 
 def _file_sha256(path: Path) -> str:
@@ -535,6 +607,9 @@ def _extract_response(row: Mapping[str, Any]) -> Any:
             "generation_status": "error",
             "error_type": str(error.get("type") or "GenerationError"),
         }
+    if not _is_successful_output(row):
+        status = str(row.get("status") or "GenerationError").strip() or "GenerationError"
+        return {"generation_status": "error", "error_type": status}
     return _MISSING
 
 
@@ -612,7 +687,7 @@ def _json_for_script(payload: Any) -> str:
 
 
 _HTML_TEMPLATE = r"""<!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -630,6 +705,10 @@ _HTML_TEMPLATE = r"""<!doctype html>
     main { max-width:1320px; margin:auto; padding:20px 18px 60px; }
     .notice, .card { background:var(--paper); border:1px solid var(--line); border-radius:8px; }
     .notice { padding:13px 16px; margin-bottom:16px; }
+    .rubric h2 { margin-top:14px; }
+    .rubric h2:first-child { margin-top:0; }
+    .rubric p { margin:6px 0; }
+    .rubric ul { margin:7px 0; padding-left:22px; }
     .card { padding:18px; margin:18px 0; box-shadow:0 2px 8px #23313d0d; }
     h2 { margin:0 0 12px; font-size:19px; }
     h3 { margin:12px 0 7px; font-size:15px; color:var(--accent); }
@@ -654,6 +733,8 @@ _HTML_TEMPLATE = r"""<!doctype html>
     .footer { display:flex; align-items:center; gap:12px; position:sticky; bottom:0; padding:12px;
       background:#edf1f3ee; border-top:1px solid var(--line); }
     button { cursor:pointer; color:#fff; background:var(--accent); font-weight:700; }
+    .attestation { display:flex; grid-auto-flow:unset; align-items:flex-start; gap:9px; font-weight:600; }
+    .attestation input { margin-top:4px; flex:0 0 auto; }
     #status.error { color:var(--danger); font-weight:700; }
     #status.ok { color:#166534; font-weight:700; }
     @media (max-width:850px) { .grid, .controls { grid-template-columns:1fr; }
@@ -662,16 +743,19 @@ _HTML_TEMPLATE = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>Blind paired VLM review</h1>
-    <p>Judge only the displayed evidence and responses. The identities are not in this package.</p>
+    <h1>Слепая парная оценка VL-моделей</h1>
+    <p>Оценивайте только показанные материалы. Идентификаторы моделей отсутствуют в пакете.</p>
   </header>
   <main>
-    <div class="notice"><b>Instructions.</b> Complete all four preferences and confidence for every
-      item. Use <i>skip</i> when the item cannot be judged. Error tags are optional and apply to the
-      displayed side only. The form works offline and saves a local draft in this browser.</div>
+    <div id="rubric" class="notice rubric"></div>
     <div id="items"></div>
+    <div class="notice">
+      <label class="attestation"><input id="independent-attestation" type="checkbox">
+        <span>Подтверждаю, что выполнил(а) оценку самостоятельно, не обсуждал(а) ответы со вторым
+        экспертом, не использовал(а) внешний поиск и не пытался(ась) раскрыть модели.</span></label>
+    </div>
     <div class="footer">
-      <button id="export" type="button">Export complete JSON</button>
+      <button id="export" type="button">Экспортировать итоговый JSON</button>
       <span id="status" class="muted"></span>
     </div>
   </main>
@@ -692,15 +776,35 @@ _HTML_TEMPLATE = r"""<!doctype html>
     visual_preference:"", temporal_preference:"", left_error_tags:[], right_error_tags:[],
     confidence:0, comments:"" });
   const state = Object.fromEntries(APP.assignments.map((item) => [item.assignment_id, blank(item.assignment_id)]));
+  let independentAttestation = false;
 
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (saved && typeof saved === "object") APP.assignments.forEach((item) => {
-      const row = saved[item.assignment_id];
+    if (saved && typeof saved === "object" && saved.responses) APP.assignments.forEach((item) => {
+      const row = saved.responses[item.assignment_id];
       if (row && typeof row === "object") state[item.assignment_id] = Object.assign(blank(item.assignment_id), row);
     });
+    independentAttestation = saved?.independent_review_attestation === true;
   } catch (_) { /* Local drafts are optional. */ }
-  const save = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {} };
+  const save = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    responses:state, independent_review_attestation:independentAttestation
+  })); } catch (_) {} };
+
+  function renderRubric() {
+    const host = document.getElementById("rubric");
+    host.append(text("h2", `Инструкция и критерии (${APP.rubric_version})`));
+    const instructions = document.createElement("ul");
+    APP.rubric.instructions.forEach((value) => {
+      const item = document.createElement("li"); item.textContent = value; instructions.append(item);
+    });
+    host.append(instructions, text("h3", "Критерии"));
+    Object.entries(APP.rubric.criteria).forEach(([key, value]) =>
+      host.append(text("p", `${key}: ${value}`)));
+    host.append(text("h3", "Значения выбора"));
+    Object.entries(APP.rubric.preferences).forEach(([key, value]) =>
+      host.append(text("p", `${key}: ${value}`)));
+    host.append(text("p", `Rubric SHA256: ${APP.rubric_sha256}`, "muted"));
+  }
 
   function preference(label, row, field) {
     const wrapper = document.createElement("label");
@@ -729,7 +833,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
         save();
       });
       input.dataset.tag = tag;
-      labelNode.append(input, document.createTextNode(tag));
+      labelNode.title = APP.rubric.error_tags[tag] || "";
+      labelNode.append(input, document.createTextNode(
+        `${tag}: ${APP.rubric.error_tags[tag] || ""}`));
       box.append(labelNode);
     });
     return box;
@@ -742,12 +848,12 @@ _HTML_TEMPLATE = r"""<!doctype html>
       const card = document.createElement("article");
       card.className = "card";
       card.dataset.assignmentId = item.assignment_id;
-      card.append(text("h2", `Item ${index + 1} of ${APP.assignments.length}`));
+      card.append(text("h2", `Пример ${index + 1} из ${APP.assignments.length}`));
       card.append(text("div", item.assignment_id, "muted"));
-      card.append(text("h3", "Task"), text("pre", format(item.task)));
-      card.append(text("h3", "Metadata"), text("pre", format(item.metadata)));
+      card.append(text("h3", "Задание"), text("pre", format(item.task)));
+      card.append(text("h3", "Метаданные"), text("pre", format(item.metadata)));
       if (item.images.length) {
-        card.append(text("h3", "Evidence images"));
+        card.append(text("h3", "Изображения-свидетельства"));
         const gallery = document.createElement("div");
         gallery.className = "images";
         item.images.forEach((src, imageIndex) => {
@@ -761,7 +867,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
       }
       const compared = document.createElement("div");
       compared.className = "grid";
-      [["Left response", item.left_response], ["Right response", item.right_response]].forEach(([label, value]) => {
+      [["Левый ответ", item.left_response], ["Правый ответ", item.right_response]].forEach(([label, value]) => {
         const panel = document.createElement("section");
         panel.className = "response";
         panel.append(text("h3", label), text("pre", format(value)));
@@ -771,26 +877,27 @@ _HTML_TEMPLATE = r"""<!doctype html>
       const controls = document.createElement("div");
       controls.className = "controls";
       controls.append(
-        preference("Overall preference", row, "overall_preference"),
-        preference("Evidence preference", row, "evidence_preference"),
-        preference("Visual preference", row, "visual_preference"),
-        preference("Temporal preference", row, "temporal_preference")
+        preference("Итоговое предпочтение", row, "overall_preference"),
+        preference("Работа со свидетельствами", row, "evidence_preference"),
+        preference("Визуальная корректность", row, "visual_preference"),
+        preference("Временная корректность", row, "temporal_preference")
       );
       const confidence = document.createElement("label");
-      confidence.append(text("span", "Confidence"));
+      confidence.append(text("span", "Уверенность"));
       const confidenceSelect = document.createElement("select");
-      confidenceSelect.append(new Option("Select...", "0"));
-      [1,2,3,4,5].forEach((value) => confidenceSelect.append(new Option(String(value), String(value))));
+      confidenceSelect.append(new Option("Выберите...", "0"));
+      [1,2,3,4,5].forEach((value) => confidenceSelect.append(
+        new Option(`${value} - ${APP.rubric.confidence[String(value)]}`, String(value))));
       confidenceSelect.value = String(row.confidence || 0);
       confidenceSelect.addEventListener("change", () => {
         row.confidence = Number(confidenceSelect.value); save(); updateStatus();
       });
       confidence.append(confidenceSelect);
-      controls.append(confidence, errorTags("Left error tags", row, "left_error_tags"),
-        errorTags("Right error tags", row, "right_error_tags"));
+      controls.append(confidence, errorTags("Ошибки левого ответа", row, "left_error_tags"),
+        errorTags("Ошибки правого ответа", row, "right_error_tags"));
       const comments = document.createElement("label");
       comments.className = "wide";
-      comments.append(text("span", "Comments (optional)"));
+      comments.append(text("span", "Краткое обоснование решения (обязательно)"));
       const area = document.createElement("textarea");
       area.value = typeof row.comments === "string" ? row.comments : "";
       area.addEventListener("input", () => { row.comments = area.value; save(); });
@@ -817,10 +924,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
           errors.push(`Item ${index + 1}: ${field} is malformed.`);
       });
       if (typeof row.comments !== "string") errors.push(`Item ${index + 1}: comments is malformed.`);
-      if (["overall_preference", "evidence_preference", "visual_preference", "temporal_preference"]
-          .some((field) => row[field] === "skip") && !row.comments.trim())
-        errors.push(`Item ${index + 1}: explain every skip in comments.`);
+      if (!row.comments.trim()) errors.push(`Item ${index + 1}: add a brief rationale.`);
     });
+    if (!independentAttestation) errors.push("Confirm the independent-review attestation.");
     return errors;
   }
 
@@ -845,7 +951,11 @@ _HTML_TEMPLATE = r"""<!doctype html>
       artifact_version: APP.artifact_version,
       experiment_id: APP.experiment_id,
       study_fingerprint: APP.study_fingerprint,
+      rubric_version: APP.rubric_version,
+      rubric_sha256: APP.rubric_sha256,
       reviewer_id: APP.reviewer_id,
+      package_nonce: APP.package_nonce,
+      independent_review_attestation: independentAttestation,
       assignments: APP.assignments.map((item) => item.assignment_id),
       responses: APP.assignments.map((item) => {
         const row = state[item.assignment_id];
@@ -873,7 +983,13 @@ _HTML_TEMPLATE = r"""<!doctype html>
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  const attestation = document.getElementById("independent-attestation");
+  attestation.checked = independentAttestation;
+  attestation.addEventListener("change", () => {
+    independentAttestation = attestation.checked; save(); updateStatus();
+  });
   document.getElementById("export").addEventListener("click", exportReview);
+  renderRubric();
   render();
   </script>
 </body>
@@ -917,9 +1033,8 @@ def build_blind_review_packages(
     """Build one offline blind-review package per reviewer.
 
     Output rows may be mappings keyed by ``(sample_id, condition)`` or iterables
-    carrying those two fields. Explicit failures and rows without a response are
-    omitted. A row with no status marker is treated as successful unless it has an
-    error marker.
+    carrying those two fields. Explicit generation failures remain reviewable.
+    Missing responses without an explicit failure marker stop package creation.
     """
 
     seed = _validate_seed(seed)
@@ -964,8 +1079,16 @@ def build_blind_review_packages(
         assert base_row is not None and tuned_row is not None
         base_response = _extract_response(base_row)
         tuned_response = _extract_response(tuned_row)
-        if base_response is _MISSING or tuned_response is _MISSING:
-            continue
+        missing_arms = [
+            arm
+            for arm, response in (("base", base_response), ("tuned", tuned_response))
+            if response is _MISSING
+        ]
+        if missing_arms:
+            raise BlindReviewError(
+                f"sample {sample_id!r} has no response or explicit generation error for "
+                + ", ".join(missing_arms)
+            )
         benchmark_row = benchmark[sample_id]
         task = _extract_task(benchmark_row, sample_id)
         metadata = _extract_metadata(benchmark_row)
@@ -1024,6 +1147,8 @@ def build_blind_review_packages(
                 "items": fingerprint_items,
                 "reviewer_ids": reviewers,
                 "reviews_per_item": reviews_per_item,
+                "rubric_version": RUBRIC_VERSION,
+                "rubric_sha256": RUBRIC_SHA256,
                 "seed_commitment": hashlib.sha256(
                     f"{type(seed).__name__}:{seed}".encode("utf-8")
                 ).hexdigest(),
@@ -1056,15 +1181,30 @@ def build_blind_review_packages(
 
     scheduled_items = list(items)
     _derived_rng(seed, f"{experiment_id}:reviewer-subset-items").shuffle(scheduled_items)
-    reviewer_cycle = list(reviewers)
-    _derived_rng(seed, f"{experiment_id}:reviewer-subset-reviewers").shuffle(reviewer_cycle)
     assigned: dict[str, list[_PairedItem]] = {reviewer: [] for reviewer in reviewers}
-    slot = 0
-    for item in scheduled_items:
-        for offset in range(reviews_per_item):
-            reviewer = reviewer_cycle[(slot + offset) % len(reviewer_cycle)]
-            assigned[reviewer].append(item)
-        slot += reviews_per_item
+    paired_two_expert_design = len(reviewers) == reviews_per_item == 2
+    paired_side_plan: dict[str, bool] = {}
+    if paired_two_expert_design:
+        assigned[reviewers[0]] = list(scheduled_items)
+        assigned[reviewers[1]] = list(reversed(scheduled_items))
+        side_rng = _derived_rng(seed, f"{experiment_id}:paired-side-balance")
+        tuned_left_count = len(scheduled_items) // 2
+        if len(scheduled_items) % 2 and side_rng.randrange(2):
+            tuned_left_count += 1
+        flags = [True] * tuned_left_count + [False] * (len(scheduled_items) - tuned_left_count)
+        side_rng.shuffle(flags)
+        paired_side_plan = {
+            item.assignment_id: tuned_left for item, tuned_left in zip(scheduled_items, flags)
+        }
+    else:
+        reviewer_cycle = list(reviewers)
+        _derived_rng(seed, f"{experiment_id}:reviewer-subset-reviewers").shuffle(reviewer_cycle)
+        slot = 0
+        for item in scheduled_items:
+            for offset in range(reviews_per_item):
+                reviewer = reviewer_cycle[(slot + offset) % len(reviewer_cycle)]
+                assigned[reviewer].append(item)
+            slot += reviews_per_item
 
     published_output = Path(output_dir)
     published_output.parent.mkdir(parents=True, exist_ok=True)
@@ -1083,20 +1223,29 @@ def build_blind_review_packages(
         image_dir = _prepare_child_dir(package_dir, "images")
 
         reviewer_items = list(assigned[reviewer_id])
-        _derived_rng(seed, f"{experiment_id}:{reviewer_id}:item-order").shuffle(reviewer_items)
-        side_rng = _derived_rng(seed, f"{experiment_id}:{reviewer_id}:side-balance")
-        tuned_left_count = len(reviewer_items) // 2
-        if len(reviewer_items) % 2 and side_rng.randrange(2):
-            tuned_left_count += 1
-        tuned_left_flags = [True] * tuned_left_count + [False] * (
-            len(reviewer_items) - tuned_left_count
-        )
-        side_rng.shuffle(tuned_left_flags)
+        if paired_two_expert_design:
+            invert = reviewer_id == reviewers[1]
+            tuned_left_flags = [
+                paired_side_plan[item.assignment_id] ^ invert for item in reviewer_items
+            ]
+        else:
+            _derived_rng(seed, f"{experiment_id}:{reviewer_id}:item-order").shuffle(reviewer_items)
+            side_rng = _derived_rng(seed, f"{experiment_id}:{reviewer_id}:side-balance")
+            tuned_left_count = len(reviewer_items) // 2
+            if len(reviewer_items) % 2 and side_rng.randrange(2):
+                tuned_left_count += 1
+            tuned_left_flags = [True] * tuned_left_count + [False] * (
+                len(reviewer_items) - tuned_left_count
+            )
+            side_rng.shuffle(tuned_left_flags)
+        package_nonce = _reviewer_package_nonce(seed, experiment_id, reviewer_id)
 
         public_assignments: list[dict[str, Any]] = []
         copied_images: list[Path] = []
         package_sensitive: set[str] = set()
-        for item, tuned_left in zip(reviewer_items, tuned_left_flags):
+        for display_position, (item, tuned_left) in enumerate(
+            zip(reviewer_items, tuned_left_flags), start=1
+        ):
             public_images: list[str] = []
             for image_index, source in enumerate(item.images):
                 image_name = (
@@ -1138,6 +1287,8 @@ def build_blind_review_packages(
                     "condition": item.condition,
                     "left_arm": left_arm,
                     "right_arm": right_arm,
+                    "display_position": display_position,
+                    "package_nonce": package_nonce,
                 }
             )
 
@@ -1145,7 +1296,11 @@ def build_blind_review_packages(
             "artifact_version": ARTIFACT_VERSION,
             "experiment_id": experiment_id,
             "study_fingerprint": study_fingerprint,
+            "rubric_version": RUBRIC_VERSION,
+            "rubric_sha256": RUBRIC_SHA256,
+            "rubric": RUBRIC,
             "reviewer_id": reviewer_id,
+            "package_nonce": package_nonce,
             "assignments": public_assignments,
         }
         _assert_public_payload_is_blind(public_payload, package_sensitive)
@@ -1276,7 +1431,14 @@ def validate_review_export(
         raise ReviewValidationError(f"artifact_version must be {ARTIFACT_VERSION}")
     experiment_id = _validated_string(payload["experiment_id"], "experiment_id")
     study_fingerprint = _validated_sha256(payload["study_fingerprint"], "study_fingerprint")
+    rubric_version = _validated_string(payload["rubric_version"], "rubric_version")
+    rubric_sha256 = _validated_sha256(payload["rubric_sha256"], "rubric_sha256")
     reviewer_id = _validated_string(payload["reviewer_id"], "reviewer_id")
+    package_nonce = _validated_sha256(payload["package_nonce"], "package_nonce")
+    if rubric_version != RUBRIC_VERSION or rubric_sha256 != RUBRIC_SHA256:
+        raise ReviewValidationError("review export uses an unknown rubric version or hash")
+    if payload["independent_review_attestation"] is not True:
+        raise ReviewValidationError("independent_review_attestation must be true")
     if expected_experiment_id is not None and experiment_id != expected_experiment_id:
         raise ReviewValidationError("experiment_id does not match the expected package")
     if expected_reviewer_id is not None and reviewer_id != expected_reviewer_id:
@@ -1321,19 +1483,8 @@ def validate_review_export(
         comments = raw["comments"]
         if not isinstance(comments, str):
             raise ReviewValidationError(f"responses[{index}].comments must be a string")
-        if (
-            any(
-                raw[field] == "skip"
-                for field in (
-                    "overall_preference",
-                    "evidence_preference",
-                    "visual_preference",
-                    "temporal_preference",
-                )
-            )
-            and not comments.strip()
-        ):
-            raise ReviewValidationError(f"responses[{index}].comments must explain every skip")
+        if not comments.strip():
+            raise ReviewValidationError(f"responses[{index}].comments must contain a rationale")
         responses.append(
             {
                 "assignment_id": assignment_id,
@@ -1367,7 +1518,11 @@ def validate_review_export(
         "artifact_version": ARTIFACT_VERSION,
         "experiment_id": experiment_id,
         "study_fingerprint": study_fingerprint,
+        "rubric_version": rubric_version,
+        "rubric_sha256": rubric_sha256,
         "reviewer_id": reviewer_id,
+        "package_nonce": package_nonce,
+        "independent_review_attestation": True,
         "assignments": assignments,
         "responses": responses,
     }
@@ -1446,16 +1601,30 @@ def _validate_owner_mapping(
     raw_entries = payload["assignments"]
     if not isinstance(raw_entries, list):
         raise ReviewValidationError("owner assignments must be an array")
-    entries: list[dict[str, str]] = []
+    entries: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for index, raw in enumerate(raw_entries):
         if not isinstance(raw, Mapping):
             raise ReviewValidationError(f"owner assignments[{index}] must be an object")
         _exact_fields(raw, _OWNER_ENTRY_FIELDS, f"owner assignments[{index}]")
-        entry = {
+        string_fields = _OWNER_ENTRY_FIELDS - {"display_position", "package_nonce"}
+        entry: dict[str, Any] = {
             field: _validated_string(raw[field], f"owner assignments[{index}].{field}")
-            for field in _OWNER_ENTRY_FIELDS
+            for field in string_fields
         }
+        entry["package_nonce"] = _validated_sha256(
+            raw["package_nonce"], f"owner assignments[{index}].package_nonce"
+        )
+        display_position = raw["display_position"]
+        if (
+            isinstance(display_position, bool)
+            or not isinstance(display_position, int)
+            or display_position < 1
+        ):
+            raise ReviewValidationError(
+                f"owner assignments[{index}].display_position must be a positive integer"
+            )
+        entry["display_position"] = display_position
         if {entry["left_arm"], entry["right_arm"]} != {"base", "tuned"}:
             raise ReviewValidationError("owner left_arm/right_arm must be opposite base/tuned arms")
         key = (entry["reviewer_id"], entry["assignment_id"])
@@ -1497,7 +1666,7 @@ def _review_sources(
     return list(exports)
 
 
-def _normalize_displayed_preference(displayed: str, owner_entry: Mapping[str, str]) -> str:
+def _normalize_displayed_preference(displayed: str, owner_entry: Mapping[str, Any]) -> str:
     if displayed in {"tie", "skip"}:
         return displayed
     return owner_entry[f"{displayed}_arm"]
@@ -1536,6 +1705,10 @@ def deblind_reviews(
             entry = owner_index.get(key)
             if entry is None:
                 raise ReviewValidationError("review assignment is absent from owner mapping")
+            if review["package_nonce"] != entry["package_nonce"]:
+                raise ReviewValidationError(
+                    "review package nonce does not match the reviewer package"
+                )
             tuned_side = "left" if entry["left_arm"] == "tuned" else "right"
             base_side = "right" if tuned_side == "left" else "left"
             displayed = response["overall_preference"]
@@ -1548,6 +1721,7 @@ def deblind_reviews(
                 "assignment_id": response["assignment_id"],
                 "sample_id": entry["sample_id"],
                 "condition": entry["condition"],
+                "display_position": entry["display_position"],
                 "tuned_side": tuned_side,
                 "base_side": base_side,
                 "displayed_preference": displayed,
@@ -1568,6 +1742,9 @@ def deblind_reviews(
                     "base_error_tags": list(response[f"{base_side}_error_tags"]),
                     "confidence": response["confidence"],
                     "comments": response["comments"],
+                    "rubric_version": review["rubric_version"],
+                    "rubric_sha256": review["rubric_sha256"],
+                    "independent_review_attestation": review["independent_review_attestation"],
                 }
             )
             rows.append(row)
@@ -1585,6 +1762,9 @@ __all__ = [
     "BlindReviewBuild",
     "BlindReviewError",
     "ERROR_TAGS",
+    "RUBRIC",
+    "RUBRIC_SHA256",
+    "RUBRIC_VERSION",
     "ReviewerPackage",
     "ReviewValidationError",
     "build_blind_review_package",

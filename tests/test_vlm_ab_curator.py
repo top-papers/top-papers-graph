@@ -99,7 +99,44 @@ def test_workspace_generation_integrity_deduplication_and_idempotency(tmp_path: 
     assert "Следующая" in html
     assert "Экспортировать черновик" in html
     assert "Объединить черновик" in html
+    assert "Сбросить неполные retain" in html
+    assert 'id="reset-invalid-retains"' in html
+    assert "function resetInvalidRetains()" in html
+    assert 'e.disposition==="retain"&&validateOne(item,e).length>0' in html
+    assert "if(!confirm(`Сбросить ${invalidRetains.length}" in html
+    assert "for(const image of e.images)discardImageRuntime(image)" in html
+    assert "state.edits[taskId]=blank()" in html
+    assert "Исключения не изменены." in html
+    reset_logic = html.split("function resetInvalidRetains()", 1)[1].split(
+        "function collectExportProblems()", 1
+    )[0]
+    assert 'e.disposition==="exclude"' not in reset_logic
+    assert "function collectExportProblems()" in html
+    assert "invalidRetainCount" in html
+    assert "invalidExcludeCount" in html
+    assert "все retain требуют полностью заполненных полей replacement" in html
+    assert "недействительные решения нельзя экспортировать" in html
+    assert "Ошибки по задачам:" in html
+    assert "report.taskErrors.slice(0,30)" in html
+    assert "Перейти к первой ошибке" in html
+    assert 'id="go-first-error"' in html
+    assert "function goToFirstError()" in html
+    assert "state.index=firstInvalidIndex;save();render()" in html
     assert "Выбрать проверенный файл и вычислить SHA256" in html
+    assert "Как заполнить эту запись" in html
+    assert "Что сделать с этой записью?" in html
+    assert "Проверенная новая запись" in html
+    assert "Идентификаторы двух экспертов" in html
+    assert "Почему запись нужно исключить?" in html
+    assert "Вопрос к модели" in html
+    assert "Путь изображения в датасете" in html
+    assert "Кто проверил это изображение" in html
+    assert "Последний шаг: подтверждение экспертов" in html
+    assert "Техническая привязка к очереди — обычно не требуется" in html
+    assert "textarea.value=image.verified_by" in html
+    assert 'textarea.addEventListener("input",()=>{image.verified_by=textarea.value;save()})' in html
+    assert "Не используйте reviewer-slot-1/2/3" in html
+    assert "Поля со знаком * обязательны" in html
     assert "проверка в браузере только предварительная" in html
     assert "connect-src 'none'" in html
     assert "default-src 'none'" in html
@@ -122,6 +159,8 @@ def test_workspace_generation_integrity_deduplication_and_idempotency(tmp_path: 
     assert "регулярно экспортируйте черновик" in html
     assert "два указанных эксперта независимо проверили это решение" in html
     assert "independent_attestation" in html
+    assert "independent_attestation:e.independent_attestation" in html
+    assert "не может доказать личность или независимость людей" in html
     assert "validAssetPath" in html
     assert 'fileInput.accept="image/*"' in html
     assert "file.arrayBuffer()" in html
@@ -247,6 +286,19 @@ def test_workspace_rejects_tampered_queue(tmp_path: Path) -> None:
     assert not (tmp_path / "forms").exists()
 
 
+def test_workspace_rejects_output_inside_prepare_inputs(tmp_path: Path) -> None:
+    bundle = _prepare_bundle(tmp_path / "bundle")
+    queue = tmp_path / "queue"
+    _generate_queue(bundle, queue)
+    dataset_root = Path(bundle["prepared"]["dataset_root"])
+    output = dataset_root / "nested" / "forms"
+
+    with pytest.raises(RemediationError, match="immutable input workspaces"):
+        _generate(bundle, queue, output)
+
+    assert not (dataset_root / "nested").exists()
+
+
 @pytest.mark.parametrize("artifact", ["html", "image"])
 def test_idempotent_regeneration_rejects_workspace_tampering(tmp_path: Path, artifact: str) -> None:
     bundle = _prepare_bundle(tmp_path / "bundle", row_count=1)
@@ -287,6 +339,7 @@ def test_browser_bindings_produce_server_valid_decision_rows(tmp_path: Path) -> 
                 "benchmark_row": copy.deepcopy(replacement[0]),
                 "provenance_row": copy.deepcopy(replacement[1]),
                 "reviewed_by": ["curator-1", "curator-2"],
+                "independent_attestation": True,
                 "notes": "Verified in the offline form.",
             }
         )
@@ -295,7 +348,7 @@ def test_browser_bindings_produce_server_valid_decision_rows(tmp_path: Path) -> 
         decisions, material["tasks"], verified["queue_fingerprint"]
     )
 
-    assert len(decisions[0]) == 16
+    assert len(decisions[0]) == 17
     assert len(retained) == 2
     assert exclusions == []
     assert reviewers == ["curator-1", "curator-2"]
@@ -342,6 +395,9 @@ def test_documented_full_suite_and_draft_workflow() -> None:
         encoding="utf-8"
     )
     readme = (root / "experiments/vlm_ab_evaluation/README.md").read_text(encoding="utf-8")
+    capacity_protocol = (
+        root / "experiments/vlm_ab_evaluation/CAPACITY_150_PROTOCOL_RU.md"
+    ).read_text(encoding="utf-8")
 
     assert "tests/test_vlm_ab_curator.py" in next_steps
     assert "Merge draft" in next_steps
@@ -352,7 +408,19 @@ def test_documented_full_suite_and_draft_workflow() -> None:
     assert "does not import completed decisions JSONL" in readme
     assert "without partial changes" in readme
     assert "browser validation does not replace it" in readme
+    assert "cannot\ncryptographically establish human identity or independence" in readme
     assert "вычислить SHA256" in next_steps
     assert "отдельно копирует ровно выбранные bytes" in next_steps
     assert "calculate lowercase SHA256 via" in readme
     assert "separately copy the exact selected bytes" in readme
+    for document in (readme, capacity_protocol):
+        assert '"curator_workspace_v4"' in document
+        assert "capacity_review_plan_v4" in document
+        assert "machine_assisted_draft.json" in document
+        assert "Merge draft" in document
+        assert "Сбросить неполные retain" in document
+        assert "review_assignment_plan.csv" in document
+        assert "150" in document
+        assert "74" in document
+        assert "file://" in document
+        assert "314 incomplete" not in document

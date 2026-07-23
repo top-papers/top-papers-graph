@@ -621,6 +621,37 @@ def test_strict_audit_promotes_frozen_warnings_and_requires_primary_n(tmp_path: 
     assert report["publication_ready"] is False
 
 
+def test_exact_primary_paper_count_uses_valid_canonical_ids(tmp_path: Path) -> None:
+    root = tmp_path / "dataset"
+    root.mkdir()
+    (root / "first.png").write_bytes(b"first-exact-image")
+    (root / "second.png").write_bytes(b"second-exact-image")
+    rows = [
+        _row("exact-a", "doi:10.5555/exact.a", "first.png", "Read the first plot."),
+        _row("exact-b", "", "second.png", "Read the second plot."),
+    ]
+
+    report = audit_benchmark(rows, root, exact_primary_papers=2)
+    mismatch = next(
+        finding
+        for finding in report["critical_findings"]
+        if finding["code"] == "primary_paper_count_mismatch"
+    )
+
+    assert mismatch["sample_ids"] == ["exact-a", "exact-b"]
+    assert mismatch["details"] == {"actual": 1, "required": 2}
+    matching = audit_benchmark(rows, root, exact_primary_papers=1)
+    assert "primary_paper_count_mismatch" not in _codes(matching, "critical_findings")
+
+
+@pytest.mark.parametrize("exact_primary_papers", [True, 0, -1, "2"])
+def test_exact_primary_paper_count_requires_positive_integer(
+    tmp_path: Path, exact_primary_papers: object
+) -> None:
+    with pytest.raises(BenchmarkAuditError, match="exact_primary_papers"):
+        audit_benchmark([], tmp_path, exact_primary_papers=exact_primary_papers)
+
+
 def test_strict_audit_requires_provenance_order_and_citation(tmp_path: Path) -> None:
     root = tmp_path / "dataset"
     root.mkdir()

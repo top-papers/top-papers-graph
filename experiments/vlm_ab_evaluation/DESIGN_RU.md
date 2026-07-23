@@ -100,8 +100,9 @@ JSONL; для каждого уникального `sample_id` требуетс
 - **Primary analysis cluster:** canonical paper ID.
 - **Primary subset:** `primary_endpoint=true`, condition `original`, заранее определенные
   `multimodal_hard` и `temporal_hard` cases.
-- **Reviewer design:** три независимых эксперта; каждая единица случайно назначается двум;
-  нагрузки, порядок и left/right position балансируются детерминированно от закрытого seed.
+- **Reviewer design:** ровно два независимых эксперта; оба оценивают каждую единицу.
+- **Counterbalancing:** для каждой единицы left/right у второго эксперта инвертирован, а общий
+  случайный порядок примеров показан второму эксперту в обратной последовательности.
 - **Easy controls:** анализируются отдельно и не входят в primary endpoint.
 
 Все доступные прошедшие gate единицы включаются без post-hoc отбора по ответам моделей.
@@ -159,7 +160,10 @@ primary endpoint. Семантическое падение на controls мож
 - один и тот же pinned base model в A и B;
 - один shared processor из adapter repository, включая `max_pixels=1003520`;
 - явная загрузка PEFT и runtime-проверка активного adapter;
-- BF16, SDPA, одинаковый `device_map`;
+- confirmatory primary: unquantized FP16 base/compute, native FP32 PEFT LoRA, SDPA и
+  `device_map=balanced` на двух T4; runtime отклоняет quantized base, не-FP16 base weights,
+  не-FP32 LoRA weights, несовместимые missing/unexpected checkpoint keys, auxiliary adapter state,
+  CPU/disk offload и использование не обеих GPU;
 - primary decoding: greedy, `do_sample=false`, `max_new_tokens=768`;
 - один и тот же prompt bytes и image SHA256;
 - arms запускаются последовательно в отдельных процессах;
@@ -171,15 +175,24 @@ benchmark, audit и evaluation source tree. Mock/limit overrides запреще�
 Sampled decoding допустим как sensitivity analysis в отдельных run IDs: минимум пять
 предопределенных seeds, одинаковых для A и B. Он не заменяет deterministic primary run.
 
+Отдельный NF4 sensitivity run использует тот же FP32 LoRA и только автоматические diagnostics
+(generation success, parse/schema validity и runtime). Он не выдается экспертам и не используется
+для семантических выводов. Переход на NF4 при OOM/timeout primary run запрещен: это protocol
+deviation и новый run, а не fallback. Его config содержит `precision_mode=nf4-sensitivity`, inference
+manifest получает `result_scope=automatic_sensitivity_only`, а CLI отклоняет `blind`, `aggregate` и
+`run`.
+
 ## 9. Blinding
 
 Reviewer package не содержит model/adapter IDs, arm truth, source output filenames, creator
 rationale, expected errors, sample IDs или owner key. Для каждого reviewer отдельно
-рандомизируются порядок и позиция. Reviewer видит исходную задачу, evidence images и два raw
-ответа. Экспорт невозможен до заполнения всех обязательных полей.
+контрбалансируются порядок и позиция. Reviewer видит исходную задачу, evidence images и два raw
+ответа. В HTML встроена версионированная rubric; экспорт невозможен без всех обязательных полей,
+краткого обоснования и подтверждения независимой работы.
 
 Owner mapping хранится отдельно и HMAC-подписан закрытым randomization secret. Assignment IDs и
-review exports связаны с fingerprint конкретных task/image/response bytes. Раскрытие проводится
+review exports связаны с fingerprint конкретных task/image/response bytes. Каждый пакет имеет
+персональный nonce, поэтому экспорт одного эксперта нельзя принять под ID другого. Раскрытие проводится
 только после получения всех запланированных review exports. При нарушении blinding затронутый
 reviewer/run исключается целиком по заранее описанному protocol deviation, а не по направлению
 результата.

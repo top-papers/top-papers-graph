@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from scireason.vlm_ab.audit import audit_benchmark
+from scireason.vlm_ab.capacity import CAPACITY_POWER
 from scireason.vlm_ab.config import validate_experiment_config
 from scireason.vlm_ab.prepare import prepare_experiment, verify_prepared_audit
 from scireason.vlm_ab.remediation import (
@@ -40,59 +41,62 @@ PROVENANCE_SCHEMA = (
 )
 
 
-def _config(*, n_items: int = 1, require_gold: bool = False) -> dict:
-    return validate_experiment_config(
-        {
-            "schema_version": 1,
-            "experiment": {
-                "id": "remediation-test",
-                "seed": 41,
-                "output_dir": "runs/remediation-test",
+def _config(
+    *, n_items: int = 1, require_gold: bool = False, require_exact_n_items: bool = False
+) -> dict:
+    config = {
+        "schema_version": 1,
+        "experiment": {
+            "id": "remediation-test",
+            "seed": 41,
+            "output_dir": "runs/remediation-test",
+        },
+        "benchmark": {
+            "repo_id": "example/benchmark",
+            "revision": REVISION_A,
+            "data_file": "data/benchmark.jsonl",
+            "provenance_file": "provenance.jsonl",
+            "require_gold": require_gold,
+        },
+        "training_audit": {"sources": []},
+        "models": {
+            "base": {
+                "base_model": {"id": "example/base", "revision": REVISION_A},
+                "model_kwargs": {"device_map": "cpu"},
             },
-            "benchmark": {
-                "repo_id": "example/benchmark",
-                "revision": REVISION_A,
-                "data_file": "data/benchmark.jsonl",
-                "provenance_file": "provenance.jsonl",
-                "require_gold": require_gold,
+            "tuned": {
+                "base_model": {"id": "example/base", "revision": REVISION_A},
+                "adapter": {"id": "example/adapter", "revision": REVISION_B},
+                "model_kwargs": {"device_map": "cpu"},
             },
-            "training_audit": {"sources": []},
-            "models": {
-                "base": {
-                    "base_model": {"id": "example/base", "revision": REVISION_A},
-                    "model_kwargs": {"device_map": "cpu"},
-                },
-                "tuned": {
-                    "base_model": {"id": "example/base", "revision": REVISION_A},
-                    "adapter": {"id": "example/adapter", "revision": REVISION_B},
-                    "model_kwargs": {"device_map": "cpu"},
-                },
-            },
-            "processor": {"id": "example/processor", "revision": REVISION_B},
-            "generation": {"do_sample": False, "max_new_tokens": 64},
-            "conditions": ["original"],
-            "review": {
-                "reviewer_ids": ["reviewer-1", "reviewer-2"],
-                "reviews_per_item": 2,
-                "primary_condition": "original",
-            },
-            "statistics": {
-                "primary_strata": ["multimodal_hard"],
-                "bootstrap_resamples": 100,
-                "randomization_resamples": 100,
-            },
-            "power": {
-                "n_items": n_items,
-                "reviews_per_item": 2,
-                "evaluable_fraction": 1.0,
-                "intracluster_correlation": 0.0,
-                "alpha": 0.05,
-                "target_power": 0.8,
-                "score_sd": 0.5,
-                "target_effect": 0.2,
-            },
-        }
-    )
+        },
+        "processor": {"id": "example/processor", "revision": REVISION_B},
+        "generation": {"do_sample": False, "max_new_tokens": 64},
+        "conditions": ["original"],
+        "review": {
+            "reviewer_ids": ["reviewer-1", "reviewer-2"],
+            "reviews_per_item": 2,
+            "primary_condition": "original",
+        },
+        "statistics": {
+            "primary_strata": ["multimodal_hard"],
+            "bootstrap_resamples": 100,
+            "randomization_resamples": 100,
+        },
+        "power": {
+            "n_items": n_items,
+            "reviews_per_item": 2,
+            "evaluable_fraction": 1.0,
+            "intracluster_correlation": 0.0,
+            "alpha": 0.05,
+            "target_power": 0.8,
+            "score_sd": 0.5,
+            "target_effect": 0.2,
+        },
+    }
+    if require_exact_n_items:
+        config["power"]["require_exact_n_items"] = True
+    return validate_experiment_config(config)
 
 
 def _source_row(index: int, images: list[str], *, prompt: str | None = None) -> dict:
@@ -174,9 +178,29 @@ def _prepare_bundle(
     contaminated_training: bool = False,
     require_gold: bool = False,
     shared_image_bytes: bool = False,
+    require_exact_n_items: bool = False,
+    capacity_remediation: bool = False,
+    duplicate_primary_paper: bool = False,
+    identity_conflict: bool = False,
 ) -> dict:
     root.mkdir(parents=True, exist_ok=True)
-    config = _config(n_items=n_items, require_gold=require_gold)
+    config = _config(
+        n_items=n_items,
+        require_gold=require_gold,
+        require_exact_n_items=require_exact_n_items,
+    )
+    if capacity_remediation:
+        config["experiment"].update(
+            {
+                "id": "cap150-remediation-test",
+                "public_id": "study-cap150-remediation-test",
+                "output_dir": "runs/cap150-remediation-test",
+                "require_clean_code": False,
+                "require_preregistered_plan": False,
+            }
+        )
+        config["power"] = copy.deepcopy(CAPACITY_POWER)
+        config = validate_experiment_config(config)
     dataset = root / "source-dataset"
     (dataset / "data").mkdir(parents=True)
     (dataset / "assets" / "images").mkdir(parents=True)
@@ -203,6 +227,10 @@ def _prepare_bundle(
                 prompt=shared_prompt if duplicate_prompts else None,
             )
         )
+    if duplicate_primary_paper and len(rows) >= 2:
+        rows[1]["paper_id"] = rows[0]["paper_id"]
+    if identity_conflict and len(rows) >= 3:
+        rows[2]["doi"] = "10.5555/conflicting-paper-id"
     if invalid_last_row:
         rows[-1]["messages"][1]["content"] = [
             {"type": "text", "text": rows[-1]["model_task_prompt"]}
@@ -282,6 +310,7 @@ def _completed_decisions(
     for index, decision in enumerate(decisions):
         decision["status"] = "complete"
         decision["reviewed_by"] = ["curator-1", "curator-2"]
+        decision["independent_attestation"] = True
         decision["notes"] = "Independently checked against the source article."
         if index in (excluded or set()):
             decision["disposition"] = "exclude"
@@ -340,6 +369,12 @@ def test_queue_generation_is_deterministic_and_idempotent(tmp_path: Path) -> Non
     assert all(template["status"] == "pending" for template in templates)
     assert all(template["disposition"] is None for template in templates)
     assert all(template["benchmark_row"] is None for template in templates)
+    assert all(template["independent_attestation"] is False for template in templates)
+
+    prepare_dataset = Path(bundle["prepared"]["dataset_root"])
+    with pytest.raises(RemediationError, match="immutable input workspaces"):
+        _generate_queue(bundle, prepare_dataset / "nested" / "queue")
+    assert not (prepare_dataset / "nested").exists()
 
     (first_dir / "tasks.jsonl").write_bytes(first_bytes["tasks.jsonl"] + b"\n")
     with pytest.raises(RemediationError, match="non-identical"):
@@ -414,7 +449,9 @@ def test_queue_and_nonfrozen_image_tampering_are_rejected(tmp_path: Path) -> Non
         _generate_queue(nonfrozen, tmp_path / "nonfrozen-queue")
 
 
-@pytest.mark.parametrize("case", ["pending", "missing", "one-reviewer", "invalid-status"])
+@pytest.mark.parametrize(
+    "case", ["pending", "missing", "one-reviewer", "no-attestation", "invalid-status"]
+)
 def test_pending_missing_and_one_reviewer_decisions_are_rejected(tmp_path: Path, case: str) -> None:
     bundle = _prepare_bundle(tmp_path / "bundle")
     queue_dir = tmp_path / "queue"
@@ -431,6 +468,9 @@ def test_pending_missing_and_one_reviewer_decisions_are_rejected(tmp_path: Path,
         elif case == "one-reviewer":
             decisions[0]["reviewed_by"] = ["only-curator"]
             expected = "two distinct"
+        elif case == "no-attestation":
+            decisions[0]["independent_attestation"] = False
+            expected = "affirmative independent_attestation"
         else:
             decisions[0]["status"] = "approved"
             expected = "status must be complete"
@@ -471,7 +511,7 @@ def test_full_corrected_release_is_relocatable_and_idempotent(tmp_path: Path) ->
     assert manifest["scope"] == "validated_benchmark_release_candidate"
     assert manifest["publication_ready"] is False
     assert manifest["technical_audit_passed"] is True
-    assert manifest["artifact_version"] == 2
+    assert manifest["artifact_version"] == 3
     assert manifest["queue_fingerprint"] == queue_manifest["queue_fingerprint"]
     assert manifest["counts"] == {
         "source_tasks": 2,
@@ -515,6 +555,13 @@ def test_full_corrected_release_is_relocatable_and_idempotent(tmp_path: Path) ->
     assert "TECHNICAL PASS / PUBLICATION BLOCKED" in candidate_markdown
     assert "**FAIL:" not in candidate_markdown
     assert manifest["decisions_sha256"] == hashlib.sha256(decisions_path.read_bytes()).hexdigest()
+    review_evidence = manifest["human_review_evidence"]
+    assert review_evidence["decisions_sha256"] == manifest["decisions_sha256"]
+    assert (output / review_evidence["decisions_path"]).read_bytes() == decisions_path.read_bytes()
+    assert (output / review_evidence["queue_manifest_path"]).read_bytes() == (
+        queue_dir / "queue_manifest.json"
+    ).read_bytes()
+    assert review_evidence["independent_attestation_required"] is True
     assert all(not Path(record["path"]).is_absolute() for record in manifest["output_files"])
     assert [
         row["sample_id"] for row in _read_jsonl(output / "data" / "task3_vlm_generation.jsonl")
@@ -523,6 +570,58 @@ def test_full_corrected_release_is_relocatable_and_idempotent(tmp_path: Path) ->
         payload = (output / record["path"]).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == record["sha256"]
         assert len(payload) == record["size_bytes"]
+
+    (output / "unexpected-empty-directory").mkdir()
+    with pytest.raises(RemediationError, match="different release candidate"):
+        _assemble(bundle, queue_dir, decisions_path, curated_root, output)
+
+
+def test_release_rejects_credential_bearing_or_malformed_source_urls(tmp_path: Path) -> None:
+    bundle = _prepare_bundle(tmp_path / "bundle", row_count=1)
+    queue_dir = tmp_path / "queue"
+    _generate_queue(bundle, queue_dir)
+    curated_root, replacements = _curated_replacements(bundle, tmp_path / "curated")
+    decisions_path = tmp_path / "decisions.jsonl"
+
+    for index, source_url in enumerate(
+        (
+            "https://user:pass@example.org/figure.png",
+            "https://example.org/figure.png?token=secret",
+            "https://example.org/figure.png#token",
+            "https://example.org/figure image.png",
+            "https://example.org:not-a-port/figure.png",
+            "https://example.org/figure\x7f.png",
+            "https://example.org/figure\ud800.png",
+        )
+    ):
+        decisions = _completed_decisions(queue_dir, replacements)
+        decisions[0]["provenance_row"]["images"][0]["source_url"] = source_url
+        _write_jsonl(decisions_path, decisions)
+
+        with pytest.raises(RemediationError, match=r"credential-free HTTP\(S\) URL"):
+            _assemble(
+                bundle,
+                queue_dir,
+                decisions_path,
+                curated_root,
+                tmp_path / f"unsafe-url-release-{index}",
+            )
+
+
+def test_release_rejects_output_inside_immutable_inputs(tmp_path: Path) -> None:
+    bundle = _prepare_bundle(tmp_path / "bundle", row_count=1)
+    queue_dir = tmp_path / "queue"
+    _generate_queue(bundle, queue_dir)
+    curated_root, replacements = _curated_replacements(bundle, tmp_path / "curated")
+    decisions_path = tmp_path / "decisions.jsonl"
+    _write_jsonl(decisions_path, _completed_decisions(queue_dir, replacements))
+    protected_roots = (queue_dir, Path(bundle["prepared"]["dataset_root"]), curated_root)
+
+    for root in protected_roots:
+        output = root / "nested" / "release"
+        with pytest.raises(RemediationError, match="immutable input workspaces"):
+            _assemble(bundle, queue_dir, decisions_path, curated_root, output)
+        assert not (root / "nested").exists()
 
 
 def test_exact_provenance_image_order_is_required(tmp_path: Path) -> None:
@@ -550,6 +649,20 @@ def test_declared_curated_image_hash_is_enforced(tmp_path: Path) -> None:
     _write_jsonl(decisions_path, decisions)
 
     with pytest.raises(DecisionValidationError, match="does not match bytes"):
+        _assemble(bundle, queue_dir, decisions_path, curated_root, tmp_path / "release")
+
+
+def test_cross_paper_legacy_image_bytes_cannot_be_reused_in_release(tmp_path: Path) -> None:
+    bundle = _prepare_bundle(tmp_path / "bundle", row_count=2, shared_image_bytes=True)
+    queue_dir = tmp_path / "queue"
+    _generate_queue(bundle, queue_dir)
+    tasks = _read_jsonl(queue_dir / "tasks.jsonl")
+    assert all("cross_paper_image_reuse" in task["critical_codes"] for task in tasks)
+    curated_root, replacements = _curated_replacements(bundle, tmp_path / "curated")
+    decisions_path = tmp_path / "decisions.jsonl"
+    _write_jsonl(decisions_path, _completed_decisions(queue_dir, replacements))
+
+    with pytest.raises(DecisionValidationError, match="reuses quarantined legacy bytes"):
         _assemble(bundle, queue_dir, decisions_path, curated_root, tmp_path / "release")
 
 
@@ -616,6 +729,71 @@ def test_minimum_primary_paper_gate_is_enforced(tmp_path: Path) -> None:
     _write_jsonl(decisions_path, decisions)
 
     with pytest.raises(DecisionValidationError, match="1 < 2"):
+        _assemble(bundle, queue_dir, decisions_path, curated_root, tmp_path / "release")
+
+
+@pytest.mark.parametrize(
+    ("n_items", "excluded"),
+    [(1, set()), (2, {1})],
+)
+def test_exact_primary_paper_gate_rejects_more_or_fewer_papers(
+    tmp_path: Path, n_items: int, excluded: set[int]
+) -> None:
+    bundle = _prepare_bundle(
+        tmp_path / "bundle",
+        n_items=n_items,
+        require_exact_n_items=True,
+    )
+    queue_dir = tmp_path / "queue"
+    queue_manifest = _generate_queue(bundle, queue_dir)
+    assert queue_manifest["policy"]["exact_primary_papers"] == n_items
+    curated_root, replacements = _curated_replacements(bundle, tmp_path / "curated")
+    decisions_path = tmp_path / "decisions.jsonl"
+    _write_jsonl(decisions_path, _completed_decisions(queue_dir, replacements, excluded=excluded))
+
+    with pytest.raises(DecisionValidationError, match="primary_paper_count_mismatch"):
+        _assemble(bundle, queue_dir, decisions_path, curated_root, tmp_path / "release")
+
+    assert not (tmp_path / "release").exists()
+
+
+def test_exploratory_prepare_defers_exact_primary_paper_gate_to_assembly(tmp_path: Path) -> None:
+    bundle = _prepare_bundle(
+        tmp_path / "bundle",
+        n_items=1,
+        require_exact_n_items=True,
+    )
+    report_path = Path(bundle["prepared"]["audit_json"])
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    queue_dir = tmp_path / "queue"
+    queue_manifest = _generate_queue(bundle, queue_dir)
+    curated_root, replacements = _curated_replacements(bundle, tmp_path / "curated")
+    decisions_path = tmp_path / "decisions.jsonl"
+    _write_jsonl(decisions_path, _completed_decisions(queue_dir, replacements))
+
+    assert all(
+        finding["code"] != "primary_paper_count_mismatch" for finding in report["critical_findings"]
+    )
+    assert queue_manifest["policy"]["exact_primary_papers"] == 1
+    with pytest.raises(DecisionValidationError, match="primary_paper_count_mismatch"):
+        _assemble(bundle, queue_dir, decisions_path, curated_root, tmp_path / "release")
+
+
+def test_exact_primary_protocol_also_requires_exact_retained_row_count(tmp_path: Path) -> None:
+    bundle = _prepare_bundle(
+        tmp_path / "bundle",
+        n_items=1,
+        require_exact_n_items=True,
+    )
+    queue_dir = tmp_path / "queue"
+    _generate_queue(bundle, queue_dir)
+    curated_root, replacements = _curated_replacements(bundle, tmp_path / "curated")
+    replacements[1][0]["stratum"] = "easy_control"
+    replacements[1][0]["primary_endpoint"] = False
+    decisions_path = tmp_path / "decisions.jsonl"
+    _write_jsonl(decisions_path, _completed_decisions(queue_dir, replacements))
+
+    with pytest.raises(DecisionValidationError, match="retained-row count"):
         _assemble(bundle, queue_dir, decisions_path, curated_root, tmp_path / "release")
 
 

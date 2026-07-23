@@ -20,8 +20,21 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .audit import canonical_paper_id, load_jsonl
-from .blind import build_blind_review_packages, deblind_reviews
-from .config import config_fingerprint, load_experiment_config
+from .blind import (
+    RUBRIC_SHA256,
+    RUBRIC_VERSION,
+    build_blind_review_packages,
+    deblind_reviews,
+)
+from .capacity import is_capacity_remediation_working_config
+from .capacity_assist import generate_capacity_assist_package
+from .capacity_enrichment import generate_capacity_enrichment_package
+from .capacity_plan import generate_capacity_plan
+from .config import (
+    config_fingerprint,
+    load_experiment_config,
+    validate_kaggle_precision_contract,
+)
 from .curator import generate_curator_workspace
 from .inference import manifest_path_for, run_inference
 from .prepare import (
@@ -42,6 +55,7 @@ from .reporting import (
     write_paper_scores,
 )
 from .stats import power_mde_plan, summarize_reviews
+from .triage import generate_triage_package
 
 
 def _repo_root(config_path: Path, explicit_root: Path | None = None) -> Path:
@@ -68,6 +82,48 @@ def _repo_root(config_path: Path, explicit_root: Path | None = None) -> Path:
 
 def _output_dir(config: dict[str, Any], repo_root: Path) -> Path:
     return (repo_root / config["experiment"]["output_dir"]).resolve()
+
+
+def _precision_mode(config: dict[str, Any]) -> str | None:
+    value = config.get("experiment", {}).get("precision_mode")
+    if isinstance(value, str):
+        validate_kaggle_precision_contract(config, value, error_type=RuntimeError)
+        return value
+    models = config.get("models", {})
+    if isinstance(models, dict) and any(
+        isinstance(models.get(arm), dict)
+        and "quantization_config" in models[arm].get("model_kwargs", {})
+        for arm in ("base", "tuned")
+    ):
+        raise RuntimeError(
+            "quantized evaluation requires the exact explicit nf4-sensitivity contract"
+        )
+    return None
+
+
+def _inference_result_scope(config: dict[str, Any], exploratory: bool) -> str:
+    if exploratory:
+        return "exploratory_not_for_publication"
+    mode = _precision_mode(config)
+    if mode == "nf4-sensitivity":
+        return "automatic_sensitivity_only"
+    if mode == "fp16-primary":
+        return "publication_candidate"
+    return "unspecified"
+
+
+def _require_human_review_mode(
+    config: dict[str, Any], command: str, *, exploratory: bool
+) -> None:
+    mode = _precision_mode(config)
+    if mode == "nf4-sensitivity":
+        raise RuntimeError(
+            f"{command} is forbidden for nf4-sensitivity; this mode permits automatic diagnostics only"
+        )
+    if not exploratory and mode != "fp16-primary":
+        raise RuntimeError(
+            f"{command} requires the exact explicit fp16-primary contract outside exploratory mode"
+        )
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -233,8 +289,15 @@ def _load_prepare(config: dict[str, Any], repo_root: Path, exploratory: bool) ->
     return prepared
 
 
-def _arm_config(config: dict[str, Any], arm: str) -> dict[str, Any]:
-    return dict(config["models"][arm])
+def _arm_config(
+    config: dict[str, Any], arm: str, prepared: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    result = dict(config["models"][arm])
+    if arm == "tuned" and prepared is not None:
+        attestation_path = prepared.get("adapter_checkpoint_attestation")
+        if isinstance(attestation_path, str):
+            result["adapter_checkpoint_attestation"] = _read_json(Path(attestation_path))
+    return result
 
 
 def _processor_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -269,16 +332,64 @@ def _release_gpu() -> None:
         pass
 
 
+def _require_capacity_remediation_command(
+    config: dict[str, Any], command: str, *, exploratory: bool | None = None
+) -> None:
+    if not is_capacity_remediation_working_config(config):
+        return
+    if command == "prepare" and exploratory is True:
+        return
+    if command in {
+        "curate-queue",
+        "curate-forms",
+        "curate-triage",
+        "curate-capacity-plan",
+        "curate-capacity-assist",
+        "curate-capacity-enrichment",
+        "curate-assemble",
+    }:
+        return
+    raise PublicationGateError(
+        "capacity remediation working configs may only run prepare --exploratory and curation "
+        "commands; publish corrected B/R/M and generate a strict capacity config before plan, "
+        "infer, blind, or aggregate"
+    )
+
+
+def _require_two_expert_review_design(config: dict[str, Any]) -> None:
+    reviewers = config["review"]["reviewer_ids"]
+    review_depth = config["review"]["reviews_per_item"]
+    power_depth = config["power"].get("reviews_per_item", review_depth)
+    if len(reviewers) != 2 or review_depth != 2 or power_depth != 2:
+        raise PublicationGateError(
+            "the confirmatory A/B protocol requires exactly two reviewer IDs and two reviews "
+            "per item in both review and power settings"
+        )
+
+
 def command_plan(args: argparse.Namespace, config: dict[str, Any], root: Path) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "plan")
+    _require_two_expert_review_design(config)
+    current_code = code_provenance(root)
+    if config["experiment"].get("require_clean_code", False) and not (
+        current_code.get("git_dirty") is False
+        and isinstance(current_code.get("git_head"), str)
+        and bool(re.fullmatch(r"[0-9a-f]{40}", current_code["git_head"]))
+    ):
+        raise PublicationGateError(
+            "power plan preregistration requires a clean evaluation source tree"
+        )
     power = dict(config["power"])
     n_items = int(power.pop("n_items"))
     reviews = float(power.pop("reviews_per_item", config["review"]["reviews_per_item"]))
+    require_exact_n_items = power.pop("require_exact_n_items", False)
     plan = {
         "artifact_version": 1,
         "created_at": None,
         "experiment_id": config["experiment"]["id"],
         "config_fingerprint": config_fingerprint(config),
-        "code_fingerprint": code_provenance(root)["source_fingerprint"],
+        "code_fingerprint": current_code["source_fingerprint"],
+        "require_exact_n_items": require_exact_n_items,
         **power_mde_plan(n_items, reviews, **power),
     }
     path = _output_dir(config, root) / "design" / "power_plan.json"
@@ -300,6 +411,7 @@ def command_plan(args: argparse.Namespace, config: dict[str, Any], root: Path) -
 
 
 def command_prepare(args: argparse.Namespace, config: dict[str, Any], root: Path) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "prepare", exploratory=args.exploratory)
     return prepare_experiment(
         config,
         root,
@@ -317,6 +429,7 @@ def _remediation_schema(root: Path, name: str) -> Path:
 def command_curate_queue(
     args: argparse.Namespace, config: dict[str, Any], root: Path
 ) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "curate-queue")
     return generate_curator_queues(
         config,
         args.prepare_manifest,
@@ -335,6 +448,7 @@ def command_curate_queue(
 def command_curate_forms(
     args: argparse.Namespace, config: dict[str, Any], root: Path
 ) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "curate-forms")
     return generate_curator_workspace(
         config,
         args.prepare_manifest,
@@ -345,9 +459,73 @@ def command_curate_forms(
     )
 
 
+def command_curate_triage(
+    args: argparse.Namespace, config: dict[str, Any], root: Path
+) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "curate-triage")
+    if args.exclude_training_overlap is not True:
+        raise RuntimeError("curate-triage requires --exclude-training-overlap")
+    return generate_triage_package(
+        config,
+        args.prepare_manifest,
+        args.queue_manifest,
+        args.output_dir,
+        benchmark_schema=_remediation_schema(root, "publication_benchmark_row.schema.json"),
+        provenance_schema=_remediation_schema(root, "publication_provenance_row.schema.json"),
+        exclude_training_overlap=args.exclude_training_overlap,
+    )
+
+
+def command_curate_capacity_plan(
+    args: argparse.Namespace, config: dict[str, Any], root: Path
+) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "curate-capacity-plan")
+    return generate_capacity_plan(
+        config,
+        args.prepare_manifest,
+        args.queue_manifest,
+        args.output_dir,
+        benchmark_schema=_remediation_schema(root, "publication_benchmark_row.schema.json"),
+        provenance_schema=_remediation_schema(root, "publication_provenance_row.schema.json"),
+    )
+
+
+def command_curate_capacity_assist(
+    args: argparse.Namespace, config: dict[str, Any], root: Path
+) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "curate-capacity-assist")
+    return generate_capacity_assist_package(
+        config,
+        args.prepare_manifest,
+        args.queue_manifest,
+        args.capacity_plan_manifest,
+        args.output_dir,
+        benchmark_schema=_remediation_schema(root, "publication_benchmark_row.schema.json"),
+        provenance_schema=_remediation_schema(root, "publication_provenance_row.schema.json"),
+    )
+
+
+def command_curate_capacity_enrichment(
+    args: argparse.Namespace, config: dict[str, Any], root: Path
+) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "curate-capacity-enrichment")
+    return generate_capacity_enrichment_package(
+        config,
+        args.prepare_manifest,
+        args.queue_manifest,
+        args.capacity_plan_manifest,
+        args.capacity_assist_manifest,
+        args.machine_enrichment_jsonl,
+        args.output_dir,
+        benchmark_schema=_remediation_schema(root, "publication_benchmark_row.schema.json"),
+        provenance_schema=_remediation_schema(root, "publication_provenance_row.schema.json"),
+    )
+
+
 def command_curate_assemble(
     args: argparse.Namespace, config: dict[str, Any], root: Path
 ) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "curate-assemble")
     return assemble_corrected_release(
         config,
         args.prepare_manifest,
@@ -363,10 +541,13 @@ def command_curate_assemble(
             root,
             "publication_provenance_row.schema.json",
         ),
+        capacity_enrichment_manifest=getattr(args, "capacity_enrichment_manifest", None),
+        machine_enrichment_jsonl=getattr(args, "machine_enrichment_jsonl", None),
     )
 
 
 def command_infer(args: argparse.Namespace, config: dict[str, Any], root: Path) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "infer", exploratory=args.exploratory)
     if not args.exploratory and args.arm == "all":
         raise RuntimeError(
             "strict inference requires one arm per process; pass --arm base or tuned"
@@ -379,12 +560,19 @@ def command_infer(args: argparse.Namespace, config: dict[str, Any], root: Path) 
     arms = ("base", "tuned") if args.arm == "all" else (args.arm,)
     summaries: dict[str, Any] = {}
     protocol_fingerprint = None
+    result_scope = _inference_result_scope(config, args.exploratory)
+    if (
+        not args.exploratory
+        and "tuned" in arms
+        and not isinstance(prepared.get("adapter_checkpoint_attestation"), str)
+    ):
+        raise RuntimeError("strict tuned inference requires the prepared adapter checkpoint attestation")
     for arm in arms:
         summaries[arm] = run_inference(
             benchmark=benchmark,
             dataset_root=prepared["dataset_root"],
             arm_name=arm,
-            arm_config=_arm_config(config, arm),
+            arm_config=_arm_config(config, arm, prepared),
             processor_config=_processor_config(config),
             generation_config=config["generation"],
             output_jsonl=_prediction_path(config, root, arm),
@@ -393,9 +581,7 @@ def command_infer(args: argparse.Namespace, config: dict[str, Any], root: Path) 
             limit=args.limit,
             backend=args.backend,
             experiment_fingerprint=run_fingerprint,
-            result_scope=(
-                "exploratory_not_for_publication" if args.exploratory else "publication_candidate"
-            ),
+            result_scope=result_scope,
         )
         current = summaries[arm]["protocol_fingerprint"]
         if protocol_fingerprint is not None and current != protocol_fingerprint:
@@ -408,9 +594,6 @@ def command_infer(args: argparse.Namespace, config: dict[str, Any], root: Path) 
         _release_gpu()
     summary_path = _output_dir(config, root) / "inference_summary.json"
     experiment_fingerprint = config_fingerprint(config)
-    result_scope = (
-        "exploratory_not_for_publication" if args.exploratory else "publication_candidate"
-    )
     merged_arms: dict[str, Any] = {}
     if summary_path.exists():
         previous = _read_json(summary_path)
@@ -435,10 +618,30 @@ def command_infer(args: argparse.Namespace, config: dict[str, Any], root: Path) 
         "experiment_config_fingerprint": experiment_fingerprint,
         "run_fingerprint": run_fingerprint,
         "exploratory": bool(args.exploratory),
+        "precision_mode": _precision_mode(config),
         "result_scope": result_scope,
         "protocol_fingerprint": next(iter(protocols)),
         "arms": merged_arms,
     }
+    if set(merged_arms) == {"base", "tuned"}:
+        base_predictions = load_jsonl(_prediction_path(config, root, "base"))
+        tuned_predictions = load_jsonl(_prediction_path(config, root, "tuned"))
+        manifests = _validate_prediction_manifests(
+            config,
+            root,
+            expected_samples=len(benchmark),
+            exploratory=args.exploratory,
+            run_fingerprint=run_fingerprint,
+            prepared=prepared,
+        )
+        _validate_paired_outputs(
+            base_predictions,
+            tuned_predictions,
+            {row["sample_id"] for row in benchmark},
+            config["conditions"],
+            manifests,
+        )
+        result["automatic_metrics"] = automatic_output_metrics(base_predictions + tuned_predictions)
     _write_json(summary_path, result)
     return result
 
@@ -492,6 +695,7 @@ def _validate_prediction_manifests(
     expected_samples: int,
     exploratory: bool,
     run_fingerprint: str,
+    prepared: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     protocols: set[str] = set()
     runtimes: list[dict[str, Any]] = []
@@ -511,9 +715,7 @@ def _validate_prediction_manifests(
             raise RuntimeError(f"{arm} inference manifest identifies another arm")
         if manifest.get("experiment_fingerprint") != run_fingerprint:
             raise RuntimeError(f"{arm} inference manifest belongs to another prepared run")
-        expected_scope = (
-            "exploratory_not_for_publication" if exploratory else "publication_candidate"
-        )
+        expected_scope = _inference_result_scope(config, exploratory)
         if manifest.get("result_scope") != expected_scope:
             raise RuntimeError(f"{arm} inference manifest has the wrong result scope")
         if manifest.get("conditions") != config["conditions"]:
@@ -526,7 +728,7 @@ def _validate_prediction_manifests(
             raise RuntimeError(f"{arm} inference is not a full transformers run")
         configuration = manifest.get("configuration")
         if not isinstance(configuration, dict) or (
-            configuration.get("arm") != _arm_config(config, arm)
+            configuration.get("arm") != _arm_config(config, arm, prepared)
             or configuration.get("processor") != _processor_config(config)
             or configuration.get("generation") != config["generation"]
         ):
@@ -568,8 +770,12 @@ def _blinding_secret(path: Path) -> str:
 
 
 def command_blind(args: argparse.Namespace, config: dict[str, Any], root: Path) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "blind", exploratory=args.exploratory)
+    _require_human_review_mode(config, "blind", exploratory=args.exploratory)
     if not args.exploratory and (args.reviewers or args.reviews_per_item is not None):
         raise RuntimeError("review design overrides are allowed only with --exploratory")
+    if not args.exploratory:
+        _require_two_expert_review_design(config)
     prepared = _load_prepare(config, root, args.exploratory)
     benchmark = load_jsonl(prepared["frozen_benchmark"])
     base = load_jsonl(_prediction_path(config, root, "base"))
@@ -581,6 +787,7 @@ def command_blind(args: argparse.Namespace, config: dict[str, Any], root: Path) 
         expected_samples=len(benchmark),
         exploratory=args.exploratory,
         run_fingerprint=run_fingerprint,
+        prepared=prepared,
     )
     _validate_paired_outputs(
         base,
@@ -639,6 +846,8 @@ def command_blind(args: argparse.Namespace, config: dict[str, Any], root: Path) 
         "study_fingerprint": build.study_fingerprint,
         "experiment_config_fingerprint": config_fingerprint(config),
         "run_fingerprint": run_fingerprint,
+        "rubric_version": RUBRIC_VERSION,
+        "rubric_sha256": RUBRIC_SHA256,
         "result_scope": (
             "exploratory_not_for_publication" if args.exploratory else "publication_candidate"
         ),
@@ -711,6 +920,11 @@ def _verify_blind_manifest(
         raise RuntimeError("blind manifest belongs to another experiment config")
     if manifest.get("run_fingerprint") != run_fingerprint:
         raise RuntimeError("blind manifest belongs to another prepared run")
+    if (
+        manifest.get("rubric_version") != RUBRIC_VERSION
+        or manifest.get("rubric_sha256") != RUBRIC_SHA256
+    ):
+        raise RuntimeError("blind manifest uses another review rubric")
     current_prediction_hashes = {
         arm: _read_json(manifest_path_for(output_dir / "predictions" / f"{arm}.jsonl")).get(
             "output_sha256"
@@ -834,6 +1048,15 @@ def _validate_realized_review_design(
     expected_reviewers = set(config["review"]["reviewer_ids"])
     primary_condition = config["review"].get("primary_condition", "original")
     per_sample: dict[str, set[str]] = {sample_id: set() for sample_id in expected_samples}
+    sample_entries: dict[str, list[dict[str, Any]]] = {
+        sample_id: [] for sample_id in expected_samples
+    }
+    reviewer_positions: dict[str, set[int]] = {
+        reviewer_id: set() for reviewer_id in expected_reviewers
+    }
+    reviewer_nonces: dict[str, set[str]] = {
+        reviewer_id: set() for reviewer_id in expected_reviewers
+    }
     observed_reviewers: set[str] = set()
     for entry in assignments:
         if not isinstance(entry, dict):
@@ -846,13 +1069,40 @@ def _validate_realized_review_design(
             raise RuntimeError("owner mapping contains a non-primary review condition")
         if reviewer_id in per_sample[sample_id]:
             raise RuntimeError("a reviewer is assigned to the same sample more than once")
+        display_position = entry.get("display_position")
+        package_nonce = entry.get("package_nonce")
+        if (
+            isinstance(display_position, bool)
+            or not isinstance(display_position, int)
+            or display_position < 1
+        ):
+            raise RuntimeError("owner mapping contains an invalid display position")
+        if display_position in reviewer_positions[reviewer_id]:
+            raise RuntimeError("owner mapping repeats a display position for one reviewer")
+        if not isinstance(package_nonce, str) or not re.fullmatch(r"[0-9a-f]{64}", package_nonce):
+            raise RuntimeError("owner mapping contains an invalid reviewer package nonce")
         per_sample[sample_id].add(reviewer_id)
+        sample_entries[sample_id].append(entry)
+        reviewer_positions[reviewer_id].add(display_position)
+        reviewer_nonces[reviewer_id].add(package_nonce)
         observed_reviewers.add(reviewer_id)
     expected_depth = config["review"]["reviews_per_item"]
     if any(len(reviewers) != expected_depth for reviewers in per_sample.values()):
         raise RuntimeError("realized reviewer assignment depth differs from the configuration")
     if observed_reviewers != expected_reviewers:
         raise RuntimeError("realized reviewer roster differs from the configuration")
+    expected_positions = set(range(1, len(expected_samples) + 1))
+    if any(positions != expected_positions for positions in reviewer_positions.values()):
+        raise RuntimeError("reviewer item order is incomplete or non-contiguous")
+    if any(len(nonces) != 1 for nonces in reviewer_nonces.values()):
+        raise RuntimeError("reviewer package nonce is inconsistent across assignments")
+    for rows in sample_entries.values():
+        if len(rows) != 2:
+            raise RuntimeError("two-expert design requires two assignments for every sample")
+        if rows[0].get("left_arm") == rows[1].get("left_arm"):
+            raise RuntimeError("two-expert side assignments are not mirrored")
+        if rows[0]["display_position"] + rows[1]["display_position"] != len(expected_samples) + 1:
+            raise RuntimeError("two-expert item orders are not reverse-counterbalanced")
 
 
 def _stratum_summaries(rows: list[dict[str, Any]], statistics: dict[str, Any]) -> dict[str, Any]:
@@ -888,6 +1138,10 @@ def _evidence_summaries(rows: list[dict[str, Any]], statistics: dict[str, Any]) 
 def command_aggregate(
     args: argparse.Namespace, config: dict[str, Any], root: Path
 ) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "aggregate", exploratory=args.exploratory)
+    _require_human_review_mode(config, "aggregate", exploratory=args.exploratory)
+    if not args.exploratory:
+        _require_two_expert_review_design(config)
     if not args.exploratory and args.allow_incomplete:
         raise RuntimeError("--allow-incomplete is allowed only with --exploratory")
     prepared = _load_prepare(config, root, args.exploratory)
@@ -901,6 +1155,7 @@ def command_aggregate(
         expected_samples=len(benchmark),
         exploratory=args.exploratory,
         run_fingerprint=_run_fingerprint(config, prepared),
+        prepared=prepared,
     )
     _validate_paired_outputs(
         base_predictions,
@@ -939,7 +1194,11 @@ def command_aggregate(
     planned_reviews = float(
         power_config.pop("reviews_per_item", config["review"]["reviews_per_item"])
     )
-    power = power_mde_plan(planned_papers, planned_reviews, **power_config)
+    require_exact_n_items = power_config.pop("require_exact_n_items", False)
+    power = {
+        "require_exact_n_items": require_exact_n_items,
+        **power_mde_plan(planned_papers, planned_reviews, **power_config),
+    }
     review_evaluable_rate = (
         human["primary"]["n_evaluable_reviews"] / human["primary"]["n_reviews"]
         if human["primary"]["n_reviews"]
@@ -954,7 +1213,11 @@ def command_aggregate(
         prepared.get("publication_ready")
         and not args.exploratory
         and not missing_reviews
-        and human.get("n_assigned_papers", 0) >= planned_papers
+        and (
+            human.get("n_assigned_papers", 0) == planned_papers
+            if require_exact_n_items
+            else human.get("n_assigned_papers", 0) >= planned_papers
+        )
         and human.get("n_reviewers", 0) == len(config["review"]["reviewer_ids"])
         and paper_evaluable_rate >= float(config["power"].get("evaluable_fraction", 1.0))
         and float(power.get("achieved_power") or 0.0)
@@ -985,6 +1248,8 @@ def command_aggregate(
         "artifact_version": 1,
         "experiment_id": config["experiment"]["id"],
         "blind_study_fingerprint": blind_manifest["study_fingerprint"],
+        "rubric_version": rows[0]["rubric_version"] if rows else None,
+        "rubric_sha256": rows[0]["rubric_sha256"] if rows else None,
         "publication_artifacts_ready": artifact_ready,
         "superiority_claim_supported": superiority_supported,
         "publication_claim_allowed": superiority_supported,
@@ -1022,6 +1287,7 @@ def command_aggregate(
             "prepare_manifest": prepared.get("prepare_manifest")
             or str(output_dir / "prepare_manifest.json"),
             "review_exports": [str(path) for path in review_paths],
+            "review_export_sha256s": {str(path): _sha256(path) for path in review_paths},
             "owner_mapping": str(owner),
         },
     }
@@ -1043,6 +1309,8 @@ def command_aggregate(
 
 
 def command_run(args: argparse.Namespace, config: dict[str, Any], root: Path) -> dict[str, Any]:
+    _require_capacity_remediation_command(config, "run", exploratory=args.exploratory)
+    _require_human_review_mode(config, "run", exploratory=args.exploratory)
     if not args.exploratory:
         raise RuntimeError(
             "strict runs require separate base and tuned processes; use plan/prepare/infer/blind"
@@ -1085,6 +1353,48 @@ def _parser() -> argparse.ArgumentParser:
     curate_forms.add_argument("--queue-manifest", type=Path, required=True)
     curate_forms.add_argument("--output-dir", type=Path, required=True)
 
+    curate_triage = subparsers.add_parser(
+        "curate-triage",
+        help="Build queue-bound assisted triage proposals that require human attestation.",
+    )
+    curate_triage.add_argument("--prepare-manifest", type=Path, required=True)
+    curate_triage.add_argument("--queue-manifest", type=Path, required=True)
+    curate_triage.add_argument("--output-dir", type=Path, required=True)
+    curate_triage.add_argument(
+        "--exclude-training-overlap",
+        action="store_true",
+        required=True,
+        help="Explicitly propose exclusion for training_paper_overlap tasks, including missing-ID cases.",
+    )
+
+    curate_capacity_plan = subparsers.add_parser(
+        "curate-capacity-plan",
+        help="Build a queue-bound Phase 0 capacity review plan without curation decisions.",
+    )
+    curate_capacity_plan.add_argument("--prepare-manifest", type=Path, required=True)
+    curate_capacity_plan.add_argument("--queue-manifest", type=Path, required=True)
+    curate_capacity_plan.add_argument("--output-dir", type=Path, required=True)
+
+    curate_capacity_assist = subparsers.add_parser(
+        "curate-capacity-assist",
+        help="Build exact-N machine-assistance dossiers without curation decisions.",
+    )
+    curate_capacity_assist.add_argument("--prepare-manifest", type=Path, required=True)
+    curate_capacity_assist.add_argument("--queue-manifest", type=Path, required=True)
+    curate_capacity_assist.add_argument("--capacity-plan-manifest", type=Path, required=True)
+    curate_capacity_assist.add_argument("--output-dir", type=Path, required=True)
+
+    curate_capacity_enrichment = subparsers.add_parser(
+        "curate-capacity-enrichment",
+        help="Validate machine-enriched candidates and build a human-review draft.",
+    )
+    curate_capacity_enrichment.add_argument("--prepare-manifest", type=Path, required=True)
+    curate_capacity_enrichment.add_argument("--queue-manifest", type=Path, required=True)
+    curate_capacity_enrichment.add_argument("--capacity-plan-manifest", type=Path, required=True)
+    curate_capacity_enrichment.add_argument("--capacity-assist-manifest", type=Path, required=True)
+    curate_capacity_enrichment.add_argument("--machine-enrichment-jsonl", type=Path, required=True)
+    curate_capacity_enrichment.add_argument("--output-dir", type=Path, required=True)
+
     curate_assemble = subparsers.add_parser(
         "curate-assemble",
         help="Validate complete curator decisions and stage a corrected release candidate.",
@@ -1093,6 +1403,8 @@ def _parser() -> argparse.ArgumentParser:
     curate_assemble.add_argument("--queue-manifest", type=Path, required=True)
     curate_assemble.add_argument("--decisions-jsonl", type=Path, required=True)
     curate_assemble.add_argument("--curated-dataset-root", type=Path, required=True)
+    curate_assemble.add_argument("--capacity-enrichment-manifest", type=Path)
+    curate_assemble.add_argument("--machine-enrichment-jsonl", type=Path)
     curate_assemble.add_argument("--output-dir", type=Path, required=True)
 
     infer = subparsers.add_parser("infer", help="Run or resume model inference.")
@@ -1138,6 +1450,10 @@ def main(argv: list[str] | None = None) -> int:
             "prepare": command_prepare,
             "curate-queue": command_curate_queue,
             "curate-forms": command_curate_forms,
+            "curate-triage": command_curate_triage,
+            "curate-capacity-plan": command_curate_capacity_plan,
+            "curate-capacity-assist": command_curate_capacity_assist,
+            "curate-capacity-enrichment": command_curate_capacity_enrichment,
             "curate-assemble": command_curate_assemble,
             "infer": command_infer,
             "blind": command_blind,
