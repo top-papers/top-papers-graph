@@ -41,18 +41,38 @@ jobs:
         run: |
           # The validator must FAIL when the course is inconsistent; a check
           # that cannot fail is not a check.
+          #
+          # The copy includes EVERY path the validator reads, otherwise it
+          # would fail for an unrelated reason and the step would pass while
+          # proving nothing. It also asserts the healthy copy first, so a
+          # broken validator cannot masquerade as a working one.
           set -e
           tmp="$(mktemp -d)"
-          cp -r course docs "$tmp/"
-          cp scripts/ci/validate_course_docs.py "$tmp/"
-          mkdir -p "$tmp/scripts/ci"
-          mv "$tmp/validate_course_docs.py" "$tmp/scripts/ci/"
-          rm "$tmp/course/weeks/week07.md"
-          if python3 "$tmp/scripts/ci/validate_course_docs.py" >/dev/null 2>&1; then
-            echo "validator passed on a broken course - it cannot detect problems"
+          cp -r course docs notebooks scripts "$tmp/"
+          # Top-level files the course docs link to.
+          cp CONTRIBUTING.md LICENSE LICENSE_SCOPE.md README.md AGENTS.md "$tmp/" 2>/dev/null || true
+          cd "$tmp"
+
+          if ! python3 scripts/ci/validate_course_docs.py >/dev/null; then
+            echo "validator rejects the intact copy - it is broken"
             exit 1
           fi
-          echo "validator correctly rejected the broken course"
+
+          rm course/weeks/week07.md
+          if python3 scripts/ci/validate_course_docs.py >/dev/null 2>&1; then
+            echo "validator passed after a week module was deleted"
+            exit 1
+          fi
+
+          # A broken relative link must also be caught.
+          git checkout -- course/weeks/week07.md 2>/dev/null || true
+          printf '\n[битая](no-such-file.md)\n' >> course/weeks/week07.md
+          if python3 scripts/ci/validate_course_docs.py >/dev/null 2>&1; then
+            echo "validator passed with a broken link"
+            exit 1
+          fi
+
+          echo "validator catches both a missing module and a broken link"
 
   tests:
     name: Course artifact tests
@@ -64,11 +84,22 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install the package
+      - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e . --no-deps || pip install pytest
+          pip install pytest
+          pip install -e . --no-deps || true
 
-      - name: Run the test suite
-        run: python -m pytest tests/ -q --maxfail=5 -p no:cacheprovider
-        continue-on-error: false
+      - name: Run the course artifact tests
+        # Only the fast, dependency-light tests that cover course artifacts
+        # and their contracts. The full suite needs torch, model weights and
+        # GPU, so it cannot run on every push to a documentation file -- and
+        # a CI that takes an hour is a CI nobody reads.
+        run: |
+          python -m pytest -q -p no:cacheprovider \
+            tests/test_templates_exist.py \
+            tests/test_task2_topology_and_filters.py \
+            tests/test_graph_candidate_agent_hardening.py \
+            tests/test_assertion_scorer.py \
+            tests/test_chunk_contracts.py \
+            tests/test_llm_json_repair.py
