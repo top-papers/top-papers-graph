@@ -88,17 +88,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest
-          pip install -e . --no-deps || true
+          # Install the package WITH its runtime dependencies: the course
+          # tests import project code, so a dependency-free install fails at
+          # collection with ModuleNotFoundError instead of testing anything.
+          # The heavy optional extras (torch, GNN, VLM) are not installed --
+          # the selected test files do not need them.
+          pip install -e .
 
       - name: Run the course artifact tests
         # Only the fast, dependency-light tests that cover course artifacts
         # and their contracts. The full suite needs torch, model weights and
-        # GPU, so it cannot run on every push to a documentation file -- and
-        # a CI that takes an hour is a CI nobody reads.
+        # a GPU, so it cannot run on every push to a documentation file --
+        # and a CI that takes an hour is a CI nobody reads.
+        #
+        # The selection is verified against a clean venv containing only
+        # this project's own dependencies: every file listed here must pass
+        # there, otherwise CI fails for a reason unrelated to the change.
+        # tests/test_task2_topology_and_filters.py is deliberately excluded:
+        # it needs scipy, which is not a dependency of this project.
         run: |
           python -m pytest -q -p no:cacheprovider \
             tests/test_templates_exist.py \
-            tests/test_task2_topology_and_filters.py \
             tests/test_graph_candidate_agent_hardening.py \
             tests/test_assertion_scorer.py \
             tests/test_chunk_contracts.py \
