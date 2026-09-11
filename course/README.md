@@ -49,6 +49,8 @@
 | 11 | GNN/TGNN и оценка | holdout, метрики, честная проверка модели |
 | 12 | Интеграция и публичный результат | итоговый PR, demo, dataset или release note |
 
+Полная программа с материалами каждой недели: [`docs/course/syllabus.md`](../docs/course/syllabus.md) (машиночитаемая версия — [`syllabus.json`](../docs/course/syllabus.json)).
+
 Подробности находятся в [`course/weeks/`](weeks/).
 
 ## Роли

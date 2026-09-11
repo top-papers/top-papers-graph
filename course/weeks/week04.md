@@ -30,3 +30,18 @@ top-papers-graph demo-run --edge-mode llm_triplets --llm-provider mock
 ## Готово, когда
 
 Каждое решение можно проследить до фрагмента источника, а улучшение не основано только на размере графа.
+
+## Материалы недели
+
+- [Программа курса](../../docs/course/syllabus.md)
+- [Повестка недели 4](../../docs/course/experts/agendas/week04_agenda.md)
+- [Task 2: проверка графа](../../docs/course/tasks/task2_validation.md)
+
+## Проверьте себя
+
+1. Какие связи вы отфильтровали и по какому правилу?
+2. Может ли кто-то повторить ваш фильтр на своём наборе?
+
+## Источники
+
+- [Task 2: проверка графа](../../docs/course/tasks/task2_validation.md)

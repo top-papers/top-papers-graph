@@ -28,3 +28,19 @@
 ## Готово, когда
 
 Сравнение воспроизводимо и включает случаи, где новый метод проигрывает.
+
+## Материалы недели
+
+- [Программа курса](../../docs/course/syllabus.md)
+- [Повестка недели 8](../../docs/course/experts/agendas/week08_agenda.md)
+- [Task 3: dual-local blind A/B](../../docs/course/tasks/task3_dual_local_blind_ab.md)
+- [Ноутбук: blind A/B](../../notebooks/task3_dual_local_models_blind_ab_colab.ipynb)
+
+## Проверьте себя
+
+1. Какой baseline вы взяли и почему он честный?
+2. Что показала абляция — какая часть вносит вклад?
+
+## Источники
+
+- [Task 3: dual-local blind A/B](../../docs/course/tasks/task3_dual_local_blind_ab.md)

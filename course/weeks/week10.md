@@ -28,3 +28,19 @@
 ## Готово, когда
 
 Файл валиден, источник указан, review не содержит персональных данных, а downstream-использование описано.
+
+## Материалы недели
+
+- [Программа курса](../../docs/course/syllabus.md)
+- [Повестка недели 10](../../docs/course/experts/agendas/week10_agenda.md)
+- [Task 3: обзор case-based A/B](../../docs/course/tasks/task3_ab_case_based_overview.md)
+- [Рубрики контроля качества](../../docs/course/experts/docs_experts/qc_rubrics_leaderboards.md)
+
+## Проверьте себя
+
+1. Как вы убедились, что разметка согласована между экспертами?
+2. Какие случаи вы исключили и почему?
+
+## Источники
+
+- [Рубрики контроля качества](../../docs/course/experts/docs_experts/qc_rubrics_leaderboards.md)

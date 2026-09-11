@@ -28,3 +28,19 @@
 ## Готово, когда
 
 Исправление имеет evidence, granularity и явную неопределённость, если точная дата неизвестна.
+
+## Материалы недели
+
+- [Программа курса](../../docs/course/syllabus.md)
+- [Повестка недели 5](../../docs/course/experts/agendas/week05_agenda.md)
+- [Task 2: проверка темпорального графа](../../docs/course/tasks/task2_validation.md)
+- [Экспертный разбор Task 2](../../docs/course/experts/docs_experts/task2_graph_verification_temporal_mm.md)
+
+## Проверьте себя
+
+1. Какое утверждение потребовало временной коррекции и почему?
+2. Есть ли regression case, который поймает повторение ошибки?
+
+## Источники
+
+- [Task 2: проверка темпорального графа](../../docs/course/tasks/task2_validation.md)

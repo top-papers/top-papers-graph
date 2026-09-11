@@ -48,3 +48,16 @@
 - Hypothesis reviews → RLHF/чек-листы Скептика
 - Figure cards → улучшение multimodal grounding
 - Time/conditions sanity → меньше темпоральных галлюцинаций
+
+## Цели программы
+
+Программа готовит экспертов, способных проверять научные утверждения и размечать данные так, чтобы результат был воспроизводим.
+
+## Источники
+
+- [Программа курса](../syllabus.md)
+- [План-график на 12 недель](00_master_plan_12weeks.md)
+- [Рубрики контроля качества](docs_experts/qc_rubrics_leaderboards.md)
+- [Task 1: траектории рассуждений](docs_experts/task1_reasoning_trajectories.md)
+- [Task 2: верификация графа](docs_experts/task2_graph_verification_temporal_mm.md)
+- [Task 3: red teaming](docs_experts/task3_hypothesis_redteaming.md)

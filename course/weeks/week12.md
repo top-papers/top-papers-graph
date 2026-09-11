@@ -29,3 +29,19 @@
 ## Готово, когда
 
 Незнакомый участник может понять цель, повторить основной результат, увидеть ограничения и выбрать следующую задачу.
+
+## Материалы недели
+
+- [Программа курса](../../docs/course/syllabus.md)
+- [Повестка недели 12](../../docs/course/experts/agendas/week12_agenda.md)
+- [Task 3: benchmark на Hugging Face](../../docs/course/tasks/task3_hf_benchmark.md)
+- [Индекс заданий](../../docs/course/tasks/README.md)
+
+## Проверьте себя
+
+1. Может ли следующий поток начать с вашего результата?
+2. Что осталось незакрытым и где это зафиксировано?
+
+## Источники
+
+- [Task 3: benchmark на Hugging Face](../../docs/course/tasks/task3_hf_benchmark.md)

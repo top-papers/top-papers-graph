@@ -140,3 +140,9 @@
 - **Graph reviews:** 10–15 (по 30–80 assertions)
 - **Hypothesis reviews:** 15–25
 - **Figure cards:** 10–20
+
+## Источники
+
+- [Программа курса](../syllabus.md) — связывает недели, задания и материалы
+- [Экспертная программа](01_expert_program.md)
+- [Рубрики контроля качества](docs_experts/qc_rubrics_leaderboards.md)

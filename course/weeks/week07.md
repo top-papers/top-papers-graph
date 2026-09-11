@@ -28,3 +28,19 @@
 ## Готово, когда
 
 Кандидат связан с evidence, указаны риски и есть способ получить отрицательный результат.
+
+## Материалы недели
+
+- [Программа курса](../../docs/course/syllabus.md)
+- [Повестка недели 7](../../docs/course/experts/agendas/week07_agenda.md)
+- [Task 3: генерация гипотез](../../docs/course/tasks/task3_hypotheses.md)
+- [Task 3: red teaming](../../docs/course/experts/docs_experts/task3_hypothesis_redteaming.md)
+
+## Проверьте себя
+
+1. Может ли ваша гипотеза оказаться ложной — и как вы это узнаете?
+2. Чем кандидат отличается от тривиальной связи?
+
+## Источники
+
+- [Task 3: генерация гипотез](../../docs/course/tasks/task3_hypotheses.md)

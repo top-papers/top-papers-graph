@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: 2026 top-papers-graph contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Course docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'course/**'
+      - 'docs/course/**'
+      - 'notebooks/**'
+      - 'scripts/ci/validate_course_docs.py'
+      - '.github/workflows/course-docs.yml'
+  pull_request:
+    paths:
+      - 'course/**'
+      - 'docs/course/**'
+      - 'notebooks/**'
+      - 'scripts/ci/validate_course_docs.py'
+      - '.github/workflows/course-docs.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate course documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Check the course stays coherent
+        run: python3 scripts/ci/validate_course_docs.py
+
+      - name: Check the machine-readable syllabus parses
+        run: python3 -c "import json; json.load(open('docs/course/syllabus.json'))"
+
+      - name: Self-test the validator on a deliberately broken copy
+        run: |
+          # The validator must FAIL when the course is inconsistent; a check
+          # that cannot fail is not a check.
+          set -e
+          tmp="$(mktemp -d)"
+          cp -r course docs "$tmp/"
+          cp scripts/ci/validate_course_docs.py "$tmp/"
+          mkdir -p "$tmp/scripts/ci"
+          mv "$tmp/validate_course_docs.py" "$tmp/scripts/ci/"
+          rm "$tmp/course/weeks/week07.md"
+          if python3 "$tmp/scripts/ci/validate_course_docs.py" >/dev/null 2>&1; then
+            echo "validator passed on a broken course - it cannot detect problems"
+            exit 1
+          fi
+          echo "validator correctly rejected the broken course"
+
+  tests:
+    name: Course artifact tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install the package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . --no-deps || pip install pytest
+
+      - name: Run the test suite
+        run: python -m pytest tests/ -q --maxfail=5 -p no:cacheprovider
+        continue-on-error: false

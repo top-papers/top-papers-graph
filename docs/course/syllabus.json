@@ -1,0 +1,175 @@
+{
+  "$schema": "https://raw.githubusercontent.com/visualcomments/OCA/main/docs/syllabus-schema.json",
+  "title": "Анализ данных в научной литературе",
+  "subtitle": "open-source курс и общий исследовательский инструмент",
+  "language": "ru",
+  "format": "project-based",
+  "duration_weeks": 12,
+  "sync_meeting_minutes": 60,
+  "workflow": "asynchronous via issues and pull requests",
+  "repository": "https://github.com/top-papers/top-papers-graph",
+  "human_readable": "docs/course/syllabus.md",
+  "license": {
+    "code": "GPL-3.0-or-later",
+    "content": "GPL-3.0-or-later",
+    "scope_file": "LICENSE_SCOPE.md"
+  },
+  "prerequisites": {
+    "required": ["базовый Python", "понимание векторных представлений и метрик качества"],
+    "helpful": ["опыт машинного обучения", "навыки работы с git"],
+    "not_required": ["программирование для ролей Исследователь и Координатор"]
+  },
+  "learning_outcomes": [
+    "Запустить воспроизводимое офлайн-демо и провести изменение через цикл issue → PR",
+    "Оценить качество извлечения текста из PDF и зафиксировать дефект",
+    "Построить темпоральный граф знаний и проверить его утверждения",
+    "Сформулировать проверяемую научную гипотезу с планом фальсификации",
+    "Провести честную оценку модели на holdout с описанием ограничений",
+    "Оставить публичный артефакт: PR, dataset, benchmark или release note"
+  ],
+  "roles": [
+    {
+      "id": "researcher",
+      "name": "Исследователь",
+      "responsibility": "формулирует научный вопрос и собирает evidence",
+      "requires_programming": false
+    },
+    {
+      "id": "expert",
+      "name": "Эксперт",
+      "responsibility": "проверяет смысл и ограничения утверждений",
+      "requires_programming": false
+    },
+    {
+      "id": "developer",
+      "name": "Разработчик",
+      "responsibility": "реализует и тестирует систему",
+      "requires_programming": true
+    },
+    {
+      "id": "coordinator",
+      "name": "Координатор",
+      "responsibility": "делает процесс понятным и доступным другим",
+      "requires_programming": false
+    }
+  ],
+  "assessment": {
+    "criteria": [
+      {"id": "usefulness", "name": "Полезность", "weight": 0.25,
+       "description": "изменение решает понятную задачу проекта"},
+      {"id": "verifiability", "name": "Проверяемость", "weight": 0.25,
+       "description": "есть источник, тест, пример или процедура проверки"},
+      {"id": "reproducibility", "name": "Воспроизводимость", "weight": 0.20,
+       "description": "другой участник может повторить результат"},
+      {"id": "communication", "name": "Качество коммуникации", "weight": 0.15,
+       "description": "контекст и ограничения описаны ясно"},
+      {"id": "collaboration", "name": "Совместность", "weight": 0.15,
+       "description": "вклад облегчает следующий шаг другим людям"}
+    ],
+    "note": "Объём кода сам по себе не является критерием"
+  },
+  "weeks": [
+    {
+      "week": 1,
+      "topic": "Вход в проект и воспроизводимое демо",
+      "outcome": "Запущенное офлайн-демо, первый цикл issue → изменение → проверка → PR",
+      "practice": ["./scripts/bootstrap.sh", "top-papers-graph demo-run --llm-provider mock", "top-papers-graph smoke-all"],
+      "module": "course/weeks/week01.md",
+      "agenda": "docs/course/experts/agendas/week01_agenda.md",
+      "materials": ["course/CONTRIBUTOR_GUIDE.md"]
+    },
+    {
+      "week": 2,
+      "topic": "PDF → текст → чанки",
+      "outcome": "Проверяемый пример качества ingestion с зафиксированным дефектом",
+      "practice": ["изучить src/scireason/ingest/", "сравнить meta.json, chunks.jsonl и страницы"],
+      "module": "course/weeks/week02.md",
+      "agenda": "docs/course/experts/agendas/week02_agenda.md"
+    },
+    {
+      "week": 3,
+      "topic": "Термины и доменные словари",
+      "outcome": "Словарь, нормализация и сравнение извлекателей",
+      "module": "course/weeks/week03.md",
+      "agenda": "docs/course/experts/agendas/week03_agenda.md"
+    },
+    {
+      "week": 4,
+      "topic": "Связи: co-occurrence и LLM-triplets",
+      "outcome": "Проверенные связи и фильтр шума",
+      "module": "course/weeks/week04.md",
+      "agenda": "docs/course/experts/agendas/week04_agenda.md"
+    },
+    {
+      "week": 5,
+      "topic": "Время в графе знаний",
+      "outcome": "Временная коррекция, метрика тренда, regression case",
+      "module": "course/weeks/week05.md",
+      "agenda": "docs/course/experts/agendas/week05_agenda.md",
+      "materials": ["docs/course/tasks/task2_validation.md"]
+    },
+    {
+      "week": 6,
+      "topic": "Графовые алгоритмы и объяснение",
+      "outcome": "Анализ сообществ, путей и объяснимый пример",
+      "module": "course/weeks/week06.md",
+      "agenda": "docs/course/experts/agendas/week06_agenda.md"
+    },
+    {
+      "week": 7,
+      "topic": "Link prediction как источник гипотез",
+      "outcome": "3–5 кандидатов с falsification plan",
+      "module": "course/weeks/week07.md",
+      "agenda": "docs/course/experts/agendas/week07_agenda.md",
+      "materials": ["docs/course/tasks/task3_hypotheses.md"]
+    },
+    {
+      "week": 8,
+      "topic": "Векторные baseline и абляции",
+      "outcome": "Baseline, абляция и сравнение ранжирования",
+      "module": "course/weeks/week08.md",
+      "agenda": "docs/course/experts/agendas/week08_agenda.md",
+      "materials": ["docs/course/tasks/task3_dual_local_blind_ab.md"]
+    },
+    {
+      "week": 9,
+      "topic": "Code agents и безопасные инструменты",
+      "outcome": "Новый tool, sandbox rule, воспроизводимое сравнение",
+      "module": "course/weeks/week09.md",
+      "agenda": "docs/course/experts/agendas/week09_agenda.md"
+    },
+    {
+      "week": 10,
+      "topic": "Human-in-the-loop и data flywheel",
+      "outcome": "Gold-набор или data pipeline",
+      "module": "course/weeks/week10.md",
+      "agenda": "docs/course/experts/agendas/week10_agenda.md",
+      "materials": ["docs/course/tasks/task3_ab_case_based_overview.md"]
+    },
+    {
+      "week": 11,
+      "topic": "GNN/TGNN и честная оценка",
+      "outcome": "Holdout, метрики и честная проверка модели",
+      "module": "course/weeks/week11.md",
+      "agenda": "docs/course/experts/agendas/week11_agenda.md",
+      "materials": ["docs/course/tasks/task3_hypotheses.md"]
+    },
+    {
+      "week": 12,
+      "topic": "Интеграция и публичный результат",
+      "outcome": "Итоговый PR, demo, dataset или release note",
+      "module": "course/weeks/week12.md",
+      "agenda": "docs/course/experts/agendas/week12_agenda.md",
+      "materials": ["docs/course/tasks/task3_hf_benchmark.md"]
+    }
+  ],
+  "artifacts": {
+    "week_modules": "course/weeks/",
+    "tasks_index": "docs/course/tasks/README.md",
+    "experts_index": "docs/course/experts/index.md",
+    "notebooks_index": "notebooks/README.md",
+    "instructor_guide": "course/INSTRUCTOR_GUIDE.md",
+    "contributor_guide": "course/CONTRIBUTOR_GUIDE.md",
+    "master_plan": "docs/course/experts/00_master_plan_12weeks.md"
+  }
+}
